@@ -19,6 +19,8 @@ import {
   Pencil,
   RefreshCcw,
   Square,
+  ThumbsDown,
+  ThumbsUp,
   UserRound,
   Volume2,
   X,
@@ -49,6 +51,8 @@ import {
 } from "@/lib/quiz-types";
 import { extractVisualizeResult } from "@/lib/visualize-types";
 import type { StreamEvent } from "@/lib/unified-ws";
+import { setMessageFeedback, type MessageFeedback } from "@/lib/session-api";
+import { notify } from "@/lib/notifications";
 import { hasVisibleMarkdownContent } from "@/lib/markdown-display";
 import type { SelectedBookReference } from "@/lib/book-references";
 import { buildVisiblePath, type SiblingInfo } from "@/lib/message-branches";
@@ -93,6 +97,7 @@ interface ChatMessageItem {
   attachments?: MessageAttachment[];
   requestSnapshot?: MessageRequestSnapshot;
   parentMessageId?: number | null;
+  feedback?: MessageFeedback | null;
 }
 
 interface NotebookReferenceGroup {
@@ -634,6 +639,111 @@ function CopyActionButton({
         )}
       </button>
     </Tooltip>
+  );
+}
+
+// Thumbs up/down on an assistant response, with an optional short comment on
+// down-vote — needed to compare LLMs/RAG configs against real reactions
+// rather than just guessing at quality. Persisted per-message; re-clicking
+// the active rating clears it.
+function FeedbackButtons({
+  sessionId,
+  messageId,
+  feedback,
+}: {
+  sessionId: string;
+  messageId: number;
+  feedback?: MessageFeedback | null;
+}) {
+  const { t } = useTranslation();
+  const [current, setCurrent] = useState<MessageFeedback | null>(feedback ?? null);
+  const [showComment, setShowComment] = useState(false);
+  const [comment, setComment] = useState(feedback?.comment ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setCurrent(feedback ?? null);
+    setComment(feedback?.comment ?? "");
+  }, [feedback]);
+
+  const submit = useCallback(
+    async (rating: "up" | "down" | null, nextComment: string) => {
+      setSaving(true);
+      try {
+        const result = await setMessageFeedback(
+          sessionId,
+          messageId,
+          rating,
+          nextComment,
+        );
+        setCurrent(result);
+      } catch (error) {
+        notify(
+          error instanceof Error ? error.message : t("Failed to save feedback"),
+          { tone: "error" },
+        );
+      } finally {
+        setSaving(false);
+      }
+    },
+    [sessionId, messageId, t],
+  );
+
+  function handleRate(rating: "up" | "down") {
+    const next = current?.rating === rating ? null : rating;
+    if (next === "down") setShowComment(true);
+    void submit(next, comment);
+  }
+
+  return (
+    <div className="flex items-center gap-0.5">
+      <Tooltip label={t("Good response")} side="top">
+        <button
+          type="button"
+          onClick={() => handleRate("up")}
+          disabled={saving}
+          aria-label={t("Good response")}
+          aria-pressed={current?.rating === "up"}
+          className={`inline-flex items-center justify-center rounded-md p-1 transition-colors ${
+            current?.rating === "up"
+              ? "text-[var(--primary)]"
+              : "text-[var(--muted-foreground)] hover:bg-[var(--muted)]/50 hover:text-[var(--foreground)]"
+          }`}
+        >
+          <ThumbsUp size={15} strokeWidth={1.5} />
+        </button>
+      </Tooltip>
+      <Tooltip label={t("Bad response")} side="top">
+        <button
+          type="button"
+          onClick={() => handleRate("down")}
+          disabled={saving}
+          aria-label={t("Bad response")}
+          aria-pressed={current?.rating === "down"}
+          className={`inline-flex items-center justify-center rounded-md p-1 transition-colors ${
+            current?.rating === "down"
+              ? "text-[var(--destructive)]"
+              : "text-[var(--muted-foreground)] hover:bg-[var(--muted)]/50 hover:text-[var(--foreground)]"
+          }`}
+        >
+          <ThumbsDown size={15} strokeWidth={1.5} />
+        </button>
+      </Tooltip>
+      {(showComment || current?.comment) && current?.rating && (
+        <input
+          type="text"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          onBlur={() => {
+            if (current && comment !== (current.comment ?? "")) {
+              void submit(current.rating, comment);
+            }
+          }}
+          placeholder={t("What went wrong? (optional)")}
+          className="ml-1 w-48 rounded-md border border-[var(--border)] bg-transparent px-2 py-0.5 text-[12px] text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+        />
+      )}
+    </div>
   );
 }
 
@@ -1473,6 +1583,13 @@ export const ChatMessageList = memo(function ChatMessageList({
                       <CopyActionButton
                         content={msg.content}
                         onCopy={onCopyAssistantMessage}
+                      />
+                    )}
+                    {showActions && sessionId && typeof msg.id === "number" && (
+                      <FeedbackButtons
+                        sessionId={sessionId}
+                        messageId={msg.id}
+                        feedback={msg.feedback}
                       />
                     )}
                     {showActions && (

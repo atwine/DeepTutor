@@ -25,6 +25,7 @@ import {
   deleteMessage,
   updateBranchSelection,
   updateSessionTitle,
+  type MessageFeedback,
   type SessionMessage,
 } from "@/lib/session-api";
 import { normalizeMarkdownForDisplay } from "@/lib/markdown-display";
@@ -155,6 +156,8 @@ export interface MessageItem {
   requestSnapshot?: MessageRequestSnapshot;
   /** Edit-branching: id of the message this row continues. */
   parentMessageId?: number | null;
+  /** Thumbs up/down (+ optional comment) — assistant messages only. */
+  feedback?: MessageFeedback | null;
 }
 
 interface SessionEntry extends ChatState {
@@ -1055,6 +1058,7 @@ export function UnifiedChatProvider({
               message.parent_message_id === undefined
                 ? null
                 : message.parent_message_id,
+            feedback: message.feedback ?? null,
             ...(requestSnapshot ? { requestSnapshot } : {}),
           };
         });

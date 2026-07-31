@@ -212,12 +212,20 @@ export default function AdminUsersPage() {
               <ArrowLeft size={16} />
               {t("Back")}
             </Link>
-            <Link
-              href="/admin/course-units"
-              className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
-            >
-              {t("Course Units")} →
-            </Link>
+            <div className="flex items-center gap-4">
+              <Link
+                href="/admin/feedback"
+                className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+              >
+                {t("Feedback")} →
+              </Link>
+              <Link
+                href="/admin/course-units"
+                className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+              >
+                {t("Course Units")} →
+              </Link>
+            </div>
           </div>
           <div className="flex items-start justify-between gap-4">
             <div>

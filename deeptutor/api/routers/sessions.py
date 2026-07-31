@@ -7,9 +7,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
+from deeptutor.api.routers.auth import require_admin
 from deeptutor.services.session import get_session_store, get_sqlite_session_store
 from deeptutor.services.storage.attachment_store import get_attachment_store
 
@@ -128,6 +129,47 @@ def _truncate_oversized_events(
                     truncated = _cap(tool_metadata, field) or truncated
             if truncated:
                 event["_truncated"] = True
+
+
+class MessageFeedbackRequest(BaseModel):
+    rating: str | None = None
+    comment: str = ""
+
+    @field_validator("rating")
+    @classmethod
+    def _validate_rating(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("up", "down"):
+            raise ValueError("rating must be 'up', 'down', or null")
+        return v
+
+
+@router.get("/admin/feedback")
+async def list_message_feedback(
+    limit: int = Query(default=200, ge=1, le=500),
+    _: object = Depends(require_admin),
+):
+    """Rated messages in the caller's own chat history — an admin's own
+    testing conversations, since chat history is per-workspace and there is
+    no cross-user aggregate here (see the curated-notes feature for what
+    that would take: a system-level index plus a temporary read as each
+    student's own workspace)."""
+    store = get_sqlite_session_store()
+    return {"feedback": await store.list_feedback(limit=limit)}
+
+
+@router.put("/{session_id}/messages/{message_id}/feedback")
+async def set_message_feedback(
+    session_id: str, message_id: int, payload: MessageFeedbackRequest
+):
+    store = get_sqlite_session_store()
+    result = await store.set_message_feedback(
+        session_id, message_id, payload.rating, payload.comment
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=404, detail="Message not found (or is not an assistant message)"
+        )
+    return {"feedback": result}
 
 
 @router.get("/{session_id}")

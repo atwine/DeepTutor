@@ -2,6 +2,12 @@ import { apiFetch, apiUrl } from "@/lib/api";
 import { invalidateClientCache, withClientCache } from "@/lib/client-cache";
 import type { LLMSelection, StreamEvent } from "@/lib/unified-ws";
 
+export interface MessageFeedback {
+  rating: "up" | "down" | null;
+  comment: string;
+  updated_at: number;
+}
+
 export interface SessionMessage {
   id: number;
   session_id: string;
@@ -21,6 +27,8 @@ export interface SessionMessage {
     size_bytes?: number;
   }>;
   metadata?: Record<string, unknown>;
+  /** Thumbs up/down (+ optional comment) — assistant messages only. */
+  feedback?: MessageFeedback | null;
   created_at: number;
   /** Edit-branching: id of the message this row continues. `null` for the
    *  first message in a session. Siblings share the same parent. */
@@ -191,6 +199,44 @@ export async function deleteSession(sessionId: string): Promise<void> {
   });
   await expectJson<{ deleted: boolean }>(response);
   invalidateClientCache("sessions:");
+}
+
+export async function setMessageFeedback(
+  sessionId: string,
+  messageId: number,
+  rating: "up" | "down" | null,
+  comment: string = "",
+): Promise<MessageFeedback> {
+  const response = await apiFetch(
+    apiUrl(`/api/v1/sessions/${sessionId}/messages/${messageId}/feedback`),
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rating, comment }),
+    },
+  );
+  const data = await expectJson<{ feedback: MessageFeedback }>(response);
+  return data.feedback;
+}
+
+export interface FeedbackEntry {
+  message_id: number;
+  session_id: string;
+  session_title: string;
+  content: string;
+  capability: string;
+  rating: "up" | "down" | null;
+  comment: string;
+  updated_at: number;
+  created_at: number;
+}
+
+export async function listMessageFeedback(limit = 200): Promise<FeedbackEntry[]> {
+  const response = await apiFetch(
+    apiUrl(`/api/v1/sessions/admin/feedback?limit=${limit}`),
+  );
+  const data = await expectJson<{ feedback: FeedbackEntry[] }>(response);
+  return data.feedback;
 }
 
 export async function recordQuizResults(

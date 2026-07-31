@@ -247,6 +247,8 @@ class SQLiteSessionStore:
             }
             if "metadata_json" not in message_columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN metadata_json TEXT DEFAULT '{}'")
+            if "feedback_json" not in message_columns:
+                conn.execute("ALTER TABLE messages ADD COLUMN feedback_json TEXT DEFAULT ''")
             if "parent_message_id" not in message_columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN parent_message_id INTEGER")
                 # Backfill: for every existing session, treat the message stream
@@ -1054,6 +1056,75 @@ class SQLiteSessionStore:
     async def delete_message(self, message_id: int | str) -> bool:
         return await self._run(self._delete_message_sync, message_id)
 
+    def _set_message_feedback_sync(
+        self, session_id: str, message_id: int, rating: str | None, comment: str
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM messages WHERE id = ? AND session_id = ? AND role = 'assistant'",
+                (message_id, session_id),
+            ).fetchone()
+            if row is None:
+                return None
+            payload = {"rating": rating, "comment": comment, "updated_at": time.time()}
+            conn.execute(
+                "UPDATE messages SET feedback_json = ? WHERE id = ?",
+                (_json_dumps(payload), message_id),
+            )
+            conn.commit()
+        return payload
+
+    async def set_message_feedback(
+        self, session_id: str, message_id: int, rating: str | None, comment: str = ""
+    ) -> dict[str, Any] | None:
+        """Persist a thumbs up/down (+ optional comment) on an assistant
+        message. Returns None if the message doesn't exist or isn't an
+        assistant message — feedback only makes sense on a model response."""
+        return await self._run(
+            self._set_message_feedback_sync, session_id, message_id, rating, comment
+        )
+
+    def _list_feedback_sync(self, limit: int = 200) -> list[dict[str, Any]]:
+        """All rated messages in this workspace's own chat history, most
+        recent first — backs the admin feedback review page. Scoped to this
+        one SQLite file (one per workspace, per ``get_chat_history_db()``),
+        not a cross-user aggregate."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT m.id, m.session_id, m.content, m.capability, m.feedback_json,
+                       m.created_at, s.title AS session_title
+                FROM messages m
+                JOIN sessions s ON s.id = m.session_id
+                WHERE m.feedback_json != ''
+                ORDER BY m.created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        results = []
+        for row in rows:
+            feedback = _json_loads(row["feedback_json"], None)
+            if not feedback:
+                continue
+            results.append(
+                {
+                    "message_id": row["id"],
+                    "session_id": row["session_id"],
+                    "session_title": row["session_title"],
+                    "content": row["content"],
+                    "capability": row["capability"] or "",
+                    "rating": feedback.get("rating"),
+                    "comment": feedback.get("comment") or "",
+                    "updated_at": feedback.get("updated_at"),
+                    "created_at": row["created_at"],
+                }
+            )
+        return results
+
+    async def list_feedback(self, limit: int = 200) -> list[dict[str, Any]]:
+        return await self._run(self._list_feedback_sync, limit)
+
     def _delete_turn_by_message_sync(self, session_id: str, message_id: int) -> dict[str, Any]:
         with self._connect() as conn:
             msg = conn.execute(
@@ -1181,7 +1252,7 @@ class SQLiteSessionStore:
                 row = conn.execute(
                     """
                     SELECT id, session_id, role, content, capability, events_json,
-                           attachments_json, metadata_json, created_at, parent_message_id
+                           attachments_json, metadata_json, feedback_json, created_at, parent_message_id
                     FROM messages
                     WHERE session_id = ?
                     ORDER BY id DESC
@@ -1193,7 +1264,7 @@ class SQLiteSessionStore:
                 row = conn.execute(
                     """
                     SELECT id, session_id, role, content, capability, events_json,
-                           attachments_json, metadata_json, created_at, parent_message_id
+                           attachments_json, metadata_json, feedback_json, created_at, parent_message_id
                     FROM messages
                     WHERE session_id = ? AND role = ?
                     ORDER BY id DESC
@@ -1213,6 +1284,9 @@ class SQLiteSessionStore:
     def _serialize_message(self, row: sqlite3.Row) -> dict[str, Any]:
         row_keys = row.keys()
         parent_id = row["parent_message_id"] if "parent_message_id" in row_keys else None
+        feedback = (
+            _json_loads(row["feedback_json"], None) if "feedback_json" in row_keys else None
+        )
         return {
             "id": row["id"],
             "session_id": row["session_id"],
@@ -1222,6 +1296,7 @@ class SQLiteSessionStore:
             "events": _json_loads(row["events_json"], []),
             "attachments": _json_loads(row["attachments_json"], []),
             "metadata": _json_loads(row["metadata_json"], {}),
+            "feedback": feedback or None,
             "created_at": row["created_at"],
             "parent_message_id": int(parent_id) if parent_id is not None else None,
         }
@@ -1231,7 +1306,7 @@ class SQLiteSessionStore:
             rows = conn.execute(
                 """
                 SELECT id, session_id, role, content, capability, events_json,
-                       attachments_json, metadata_json, created_at, parent_message_id
+                       attachments_json, metadata_json, feedback_json, created_at, parent_message_id
                 FROM messages
                 WHERE session_id = ?
                 ORDER BY id ASC
@@ -1257,7 +1332,7 @@ class SQLiteSessionStore:
                 row = conn.execute(
                     """
                     SELECT id, session_id, role, content, capability, events_json,
-                           attachments_json, metadata_json, created_at, parent_message_id
+                           attachments_json, metadata_json, feedback_json, created_at, parent_message_id
                     FROM messages
                     WHERE id = ? AND session_id = ?
                     """,
