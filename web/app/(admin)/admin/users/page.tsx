@@ -10,6 +10,7 @@ import {
   setUserRole,
   createUser,
   type UserRecord,
+  type UserRole,
 } from "@/lib/admin-api";
 import { GrantEditor } from "@/features/multi-user/components/GrantEditor";
 import { UserAvatar } from "@/components/UserAvatar";
@@ -17,9 +18,8 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { filterUsersByQuery } from "@/lib/admin-users";
 import {
   Search,
-  Shield,
   ShieldCheck,
-  ShieldOff,
+  GraduationCap,
   Trash2,
   RefreshCw,
   ArrowLeft,
@@ -43,6 +43,18 @@ function formatDate(iso: string, lang: Language): string {
   }
 }
 
+function roleLabel(role: UserRole, t: (key: string) => string): string {
+  if (role === "admin") return t("Admin");
+  if (role === "instructor") return t("Instructor");
+  return t("User");
+}
+
+function roleBadgeClass(role: UserRole): string {
+  if (role === "admin") return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
+  if (role === "instructor") return "bg-sky-500/15 text-sky-600 dark:text-sky-400";
+  return "bg-[var(--muted)]/50 text-[var(--muted-foreground)]";
+}
+
 export default function AdminUsersPage() {
   const router = useRouter();
   const { t, i18n } = useTranslation();
@@ -56,8 +68,9 @@ export default function AdminUsersPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [query, setQuery] = useState("");
   const [confirmTarget, setConfirmTarget] = useState<{
-    kind: "delete" | "promote" | "demote";
+    kind: "delete" | "role_change";
     user: UserRecord;
+    newRole?: UserRole;
   } | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [createUsername, setCreateUsername] = useState("");
@@ -142,7 +155,7 @@ export default function AdminUsersPage() {
         await deleteUser(user.username);
         setUsers((prev) => prev.filter((u) => u.username !== user.username));
       } else {
-        const newRole = kind === "promote" ? "admin" : "user";
+        const newRole = confirmTarget.newRole ?? "user";
         await setUserRole(user.username, newRole);
         setUsers((prev) =>
           prev.map((u) =>
@@ -170,6 +183,11 @@ export default function AdminUsersPage() {
     }
   }
 
+  function requestRoleChange(user: UserRecord, newRole: UserRole) {
+    if (newRole === user.role) return;
+    setConfirmTarget({ kind: "role_change", user, newRole });
+  }
+
   useEffect(() => {
     if (!expandedUserId) return;
     const expanded = users.find((user) => user.id === expandedUserId);
@@ -186,13 +204,21 @@ export default function AdminUsersPage() {
       <div className="mx-auto max-w-3xl">
         {/* Header */}
         <div className="mb-8">
-          <Link
-            href="/"
-            className="mb-4 inline-flex items-center gap-1.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
-          >
-            <ArrowLeft size={16} />
-            {t("Back")}
-          </Link>
+          <div className="mb-4 flex items-center justify-between">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-1.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+            >
+              <ArrowLeft size={16} />
+              {t("Back")}
+            </Link>
+            <Link
+              href="/admin/course-units"
+              className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+            >
+              {t("Course Units")} →
+            </Link>
+          </div>
           <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="font-serif text-xl font-semibold text-[var(--foreground)]">
@@ -371,17 +397,15 @@ export default function AdminUsersPage() {
                         </td>
                         <td className="px-5 py-3">
                           <span
-                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium
-                            ${
-                              isAdmin
-                                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                                : "bg-[var(--muted)]/50 text-[var(--muted-foreground)]"
-                            }`}
+                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${roleBadgeClass(user.role)}`}
                           >
                             {isAdmin && (
                               <ShieldCheck size={11} strokeWidth={2} />
                             )}
-                            {isAdmin ? t("Admin") : t("User")}
+                            {user.role === "instructor" && (
+                              <GraduationCap size={11} strokeWidth={2} />
+                            )}
+                            {roleLabel(user.role, t)}
                           </span>
                         </td>
                         <td className="px-5 py-3.5 text-[var(--muted-foreground)]">
@@ -404,31 +428,30 @@ export default function AdminUsersPage() {
                                 <SlidersHorizontal size={15} />
                               </button>
                             )}
-                            <button
-                              onClick={() =>
-                                setConfirmTarget({
-                                  kind: isAdmin ? "demote" : "promote",
+                            <select
+                              value={user.role}
+                              onChange={(e) =>
+                                requestRoleChange(
                                   user,
-                                })
+                                  e.target.value as UserRole,
+                                )
                               }
                               disabled={isSelf}
                               title={
                                 isSelf
                                   ? t("Cannot change your own role")
-                                  : user.role === "admin"
-                                    ? t("Demote to user")
-                                    : t("Promote to admin")
+                                  : t("Change role")
                               }
-                              className="rounded-lg p-1.5 text-[var(--muted-foreground)]
-                                       hover:bg-[var(--background)] hover:text-[var(--foreground)]
+                              className="rounded-lg border border-[var(--border)] bg-transparent px-2 py-1 text-xs
+                                       text-[var(--foreground)] outline-none focus:border-[var(--ring)]
                                        disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                             >
-                              {user.role === "admin" ? (
-                                <ShieldOff size={15} />
-                              ) : (
-                                <Shield size={15} />
-                              )}
-                            </button>
+                              <option value="user">{t("User")}</option>
+                              <option value="instructor">
+                                {t("Instructor")}
+                              </option>
+                              <option value="admin">{t("Admin")}</option>
+                            </select>
                             <button
                               onClick={() =>
                                 setConfirmTarget({ kind: "delete", user })
@@ -473,26 +496,14 @@ export default function AdminUsersPage() {
       <ConfirmDialog
         open={confirmTarget !== null}
         title={
-          confirmTarget?.kind === "delete"
-            ? t("Delete user")
-            : confirmTarget?.kind === "promote"
-              ? t("Promote to admin")
-              : t("Demote to user")
+          confirmTarget?.kind === "delete" ? t("Delete user") : t("Change role")
         }
         tone={confirmTarget?.kind === "delete" ? "danger" : "default"}
         confirmLabel={
-          confirmTarget?.kind === "delete"
-            ? t("Delete user")
-            : confirmTarget?.kind === "promote"
-              ? t("Promote")
-              : t("Demote")
+          confirmTarget?.kind === "delete" ? t("Delete user") : t("Change role")
         }
         busyLabel={
-          confirmTarget?.kind === "delete"
-            ? t("Deleting…")
-            : confirmTarget?.kind === "promote"
-              ? t("Promoting…")
-              : t("Demoting…")
+          confirmTarget?.kind === "delete" ? t("Deleting…") : t("Changing…")
         }
         busy={confirmBusy}
         onConfirm={handleConfirmAction}
@@ -514,10 +525,7 @@ export default function AdminUsersPage() {
                 </p>
                 <p className="text-xs text-[var(--muted-foreground)]">
                   {t("{{role}} · joined {{date}}", {
-                    role:
-                      confirmTarget.user.role === "admin"
-                        ? t("Admin")
-                        : t("User"),
+                    role: roleLabel(confirmTarget.user.role, t),
                     date: formatDate(confirmTarget.user.created_at, lang),
                   })}
                 </p>
@@ -528,13 +536,17 @@ export default function AdminUsersPage() {
                 ? t(
                     "This permanently removes the account and its assignments. This cannot be undone.",
                   )
-                : confirmTarget.kind === "promote"
+                : confirmTarget.newRole === "admin"
                   ? t(
                       "Admins can manage users and assignments, and work in the shared main workspace.",
                     )
-                  : t(
-                      "They will lose access to the admin area and switch to their own assigned workspace.",
-                    )}
+                  : confirmTarget.newRole === "instructor"
+                    ? t(
+                        "Instructors can manage their own course units — enrolling students, publishing materials, and viewing grades — without seeing other instructors' students or materials.",
+                      )
+                    : t(
+                        "They will lose any admin or instructor management access and switch to their own assigned workspace.",
+                      )}
             </p>
           </>
         )}

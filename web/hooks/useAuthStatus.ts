@@ -10,6 +10,10 @@ export interface AuthStatusState {
   authenticated: boolean;
   /** Whether the authenticated user is an admin. */
   isAdmin: boolean;
+  /** Whether the authenticated user is an instructor (course-unit-scoped, not full admin). */
+  isInstructor: boolean;
+  /** Raw role string, when available ("admin" / "instructor" / "user"). */
+  role: string | null;
   /** True until the first status fetch resolves. */
   loading: boolean;
 }
@@ -18,6 +22,8 @@ const INITIAL: AuthStatusState = {
   enabled: false,
   authenticated: false,
   isAdmin: false,
+  isInstructor: false,
+  role: null,
   loading: true,
 };
 
@@ -44,6 +50,8 @@ function loadAuthStatus(): Promise<AuthStatusState> {
         enabled: Boolean(status?.enabled),
         authenticated: Boolean(status?.authenticated),
         isAdmin: status?.role === "admin",
+        isInstructor: status?.role === "instructor",
+        role: status?.role ?? null,
         loading: false,
       }))
       .finally(() => {

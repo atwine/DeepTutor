@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-Role = Literal["admin", "user"]
+Role = Literal["admin", "instructor", "user"]
 ScopeKind = Literal["admin", "user"]
 
 

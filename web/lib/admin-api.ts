@@ -1,9 +1,11 @@
 import { apiFetch, apiUrl } from "@/lib/api";
 
+export type UserRole = "admin" | "instructor" | "user";
+
 export interface UserRecord {
   id: string;
   username: string;
-  role: "admin" | "user";
+  role: UserRole;
   created_at: string;
   disabled?: boolean;
   /** Avatar marker: "", "icon:<name>:<color>", or "img:<version>". */
@@ -31,7 +33,7 @@ export async function deleteUser(username: string): Promise<void> {
 
 export async function setUserRole(
   username: string,
-  role: "admin" | "user",
+  role: UserRole,
 ): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/auth/users/${encodeURIComponent(username)}/role`),
@@ -50,7 +52,7 @@ export async function setUserRole(
 export interface CreatedUser {
   user_id: string;
   username: string;
-  role: "admin" | "user";
+  role: UserRole;
   is_admin: boolean;
 }
 

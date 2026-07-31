@@ -8,12 +8,30 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from deeptutor.api.routers.auth import require_admin
+from deeptutor.api.routers.auth import (
+    TokenPayload,
+    require_admin,
+    require_auth,
+    require_instructor_or_admin,
+)
 from deeptutor.knowledge.manager import KnowledgeBaseManager
 from deeptutor.services.config.model_catalog import ModelCatalogService
 from deeptutor.services.skill.service import SkillService
 
 from .audit import log_admin_action
+from .course_units import (
+    create_course_unit,
+    delete_course_unit,
+    enroll_student,
+    get_course_unit,
+    is_instructor_of,
+    list_course_units,
+    list_course_units_for_instructor,
+    list_course_units_for_student,
+    list_enrollments_for_course,
+    unenroll_student,
+    update_course_unit,
+)
 from .grants import load_grant, save_grant
 from .identity import get_user_by_id, list_user_info
 from .knowledge_access import admin_kb_base_dir
@@ -226,3 +244,183 @@ async def admin_install_skill(
 @router.get("/users")
 async def multi_user_list_users(_: object = Depends(require_admin)) -> dict[str, Any]:
     return {"users": list_user_info()}
+
+
+# ---------------------------------------------------------------------------
+# Course units — instructors manage only the units they're attached to;
+# admins manage all of them. Creating a unit and (re)assigning its
+# instructor(s) is an admin-only action, mirroring how grants are assigned.
+# ---------------------------------------------------------------------------
+
+
+class CourseUnitCreate(BaseModel):
+    name: str
+    term: str = ""
+    instructor_ids: list[str] = []
+
+
+class CourseUnitUpdate(BaseModel):
+    name: str | None = None
+    term: str | None = None
+    instructor_ids: list[str] | None = None
+
+
+class EnrollmentPayload(BaseModel):
+    user_id: str
+
+
+def _require_course_unit_access(payload: TokenPayload, course_unit_id: str) -> dict[str, Any]:
+    unit = get_course_unit(course_unit_id)
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Course unit not found")
+    if payload.role == "admin":
+        return unit
+    if payload.role == "instructor" and is_instructor_of(payload.user_id, course_unit_id):
+        return unit
+    raise HTTPException(status_code=403, detail="You do not manage this course unit")
+
+
+def _with_instructor_names(unit: dict[str, Any]) -> dict[str, Any]:
+    """Attach resolved usernames for ``instructor_ids``.
+
+    ``GET /users`` (the only place that lists every account) is admin-only, so
+    an instructor viewing their own course unit has no other way to learn a
+    co-instructor's username — without this, they'd see a bare user id.
+    """
+    names = []
+    for uid in unit.get("instructor_ids", []):
+        user_record = get_user_by_id(uid)
+        names.append(user_record[0] if user_record is not None else uid)
+    return {**unit, "instructor_usernames": names}
+
+
+@router.post("/course-units")
+async def create_course_unit_endpoint(
+    payload: CourseUnitCreate,
+    _: TokenPayload = Depends(require_admin),
+) -> dict[str, Any]:
+    record = create_course_unit(payload.name, payload.term, payload.instructor_ids)
+    log_admin_action(
+        "course_unit_create",
+        summary={"course_unit_id": record["id"], "name": record["name"]},
+    )
+    return {"course_unit": _with_instructor_names(record)}
+
+
+@router.get("/course-units")
+async def list_course_units_endpoint(
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """Management view: admins see every course unit, instructors see only
+    the ones they're attached to."""
+    if current.role == "admin":
+        units = list_course_units()
+    else:
+        units = list_course_units_for_instructor(current.user_id)
+    return {"course_units": [_with_instructor_names(u) for u in units]}
+
+
+@router.get("/my/course-units")
+async def my_course_units_endpoint(
+    current: TokenPayload | None = Depends(require_auth),
+) -> dict[str, Any]:
+    """Any authenticated account's own view: admins see everything,
+    instructors see the units they teach, students see the units they're
+    enrolled in."""
+    if current is None or current.role == "admin":
+        units = list_course_units()
+    elif current.role == "instructor":
+        units = list_course_units_for_instructor(current.user_id)
+    else:
+        units = list_course_units_for_student(current.user_id)
+    return {"course_units": [_with_instructor_names(u) for u in units]}
+
+
+@router.get("/course-units/{course_unit_id}")
+async def get_course_unit_endpoint(
+    course_unit_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    unit = _require_course_unit_access(current, course_unit_id)
+    return {"course_unit": _with_instructor_names(unit)}
+
+
+@router.put("/course-units/{course_unit_id}")
+async def update_course_unit_endpoint(
+    course_unit_id: str,
+    payload: CourseUnitUpdate,
+    _: TokenPayload = Depends(require_admin),
+) -> dict[str, Any]:
+    record = update_course_unit(
+        course_unit_id,
+        name=payload.name,
+        term=payload.term,
+        instructor_ids=payload.instructor_ids,
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Course unit not found")
+    log_admin_action("course_unit_update", summary={"course_unit_id": course_unit_id})
+    return {"course_unit": _with_instructor_names(record)}
+
+
+@router.delete("/course-units/{course_unit_id}")
+async def delete_course_unit_endpoint(
+    course_unit_id: str,
+    _: TokenPayload = Depends(require_admin),
+) -> dict[str, Any]:
+    removed = delete_course_unit(course_unit_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Course unit not found")
+    log_admin_action("course_unit_delete", summary={"course_unit_id": course_unit_id})
+    return {"ok": True}
+
+
+@router.post("/course-units/{course_unit_id}/enrollments")
+async def enroll_student_endpoint(
+    course_unit_id: str,
+    payload: EnrollmentPayload,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    _require_course_unit_access(current, course_unit_id)
+    if get_user_by_id(payload.user_id) is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    record = enroll_student(course_unit_id, payload.user_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Course unit not found")
+    return {"enrollment": record}
+
+
+@router.delete("/course-units/{course_unit_id}/enrollments/{user_id}")
+async def unenroll_student_endpoint(
+    course_unit_id: str,
+    user_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    _require_course_unit_access(current, course_unit_id)
+    removed = unenroll_student(course_unit_id, user_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Enrollment not found")
+    return {"ok": True}
+
+
+@router.get("/course-units/{course_unit_id}/roster")
+async def course_unit_roster_endpoint(
+    course_unit_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    _require_course_unit_access(current, course_unit_id)
+    roster: list[dict[str, Any]] = []
+    for enrollment in list_enrollments_for_course(course_unit_id):
+        user_record = get_user_by_id(enrollment["user_id"])
+        if user_record is None:
+            continue
+        username, record = user_record
+        roster.append(
+            {
+                "user_id": enrollment["user_id"],
+                "username": username,
+                "role": record.get("role", "user"),
+                "enrolled_at": enrollment.get("created_at", ""),
+            }
+        )
+    return {"roster": roster}

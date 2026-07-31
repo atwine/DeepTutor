@@ -128,8 +128,8 @@ class SetRoleRequest(BaseModel):
     @field_validator("role")
     @classmethod
     def role_valid(cls, v: str) -> str:
-        if v not in ("admin", "user"):
-            raise ValueError("Role must be 'admin' or 'user'")
+        if v not in ("admin", "instructor", "user"):
+            raise ValueError("Role must be 'admin', 'instructor', or 'user'")
         return v
 
 
@@ -344,6 +344,28 @@ async def require_admin(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
+        )
+    return payload
+
+
+async def require_instructor_or_admin(
+    payload: TokenPayload | None = Depends(require_auth),
+) -> TokenPayload:
+    """
+    FastAPI dependency that requires the caller to be an admin or an instructor.
+
+    Used by course-unit endpoints where an instructor may manage only the
+    course units they're attached to (checked separately, per-endpoint, against
+    ``instructor_ids``) while an admin may manage any of them.
+    When AUTH_ENABLED=false, all requests are treated as admin.
+    """
+    if not AUTH_ENABLED:
+        return _local_admin_token_payload()
+
+    if payload is None or payload.role not in ("admin", "instructor"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or instructor access required",
         )
     return payload
 
