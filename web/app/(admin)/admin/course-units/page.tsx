@@ -16,6 +16,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { RosterEditor } from "./RosterEditor";
 import {
   BookOpen,
+  ClipboardList,
   RefreshCw,
   ArrowLeft,
   Plus,
@@ -343,6 +344,14 @@ export default function CourseUnitsPage() {
                           >
                             <Users size={15} />
                           </button>
+                          <Link
+                            href={`/admin/course-units/${unit.id}/assignments`}
+                            title={t("Assignments")}
+                            className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                                     hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
+                          >
+                            <ClipboardList size={15} />
+                          </Link>
                           {isAdmin && (
                             <>
                               <button

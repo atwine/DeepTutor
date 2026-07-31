@@ -151,12 +151,20 @@ export default function CourseCatalogPage() {
                       </p>
                     )}
                   </div>
-                  <div className="shrink-0">
+                  <div className="flex shrink-0 flex-col items-end gap-2">
                     {unit.my_status === "approved" ? (
-                      <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                        <Check size={12} strokeWidth={2} />
-                        {t("Enrolled")}
-                      </span>
+                      <>
+                        <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                          <Check size={12} strokeWidth={2} />
+                          {t("Enrolled")}
+                        </span>
+                        <Link
+                          href={`/courses/${unit.id}/assignments`}
+                          className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+                        >
+                          {t("Assignments")} →
+                        </Link>
+                      </>
                     ) : unit.my_status === "pending" ? (
                       <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-400">
                         <Clock size={12} strokeWidth={2} />

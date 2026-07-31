@@ -151,6 +151,16 @@ def is_instructor_of(user_id: str, course_unit_id: str) -> bool:
     return str(user_id) in [str(uid) for uid in record.get("instructor_ids", [])]
 
 
+def is_approved_student_of(user_id: str, course_unit_id: str) -> bool:
+    """Whether ``user_id`` has an *approved* enrollment in this course unit —
+    a pending request doesn't grant access to assignments any more than it
+    grants access to the course units list."""
+    return any(
+        str(rec.get("user_id")) == str(user_id) and rec.get("status", "approved") == "approved"
+        for rec in list_enrollments_for_course(course_unit_id)
+    )
+
+
 def list_course_units_for_instructor(user_id: str) -> list[dict[str, Any]]:
     return [
         record

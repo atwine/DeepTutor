@@ -350,6 +350,9 @@ from deeptutor.api.routers import (
     tools as tools_router,
 )
 from deeptutor.multi_user.router import router as multi_user_router  # noqa: E402
+from deeptutor.multi_user.assignments_router import (  # noqa: E402
+    router as assignments_router,
+)
 
 # Auth router is public — login/logout/register/status require no token
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
@@ -368,6 +371,12 @@ app.include_router(
     multi_user_router,
     prefix="/api/v1/multi-user",
     tags=["multi-user"],
+    dependencies=_auth,
+)
+app.include_router(
+    assignments_router,
+    prefix="/api/v1/multi-user",
+    tags=["multi-user", "assignments"],
     dependencies=_auth,
 )
 
