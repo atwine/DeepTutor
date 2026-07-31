@@ -20,6 +20,7 @@ from deeptutor.services.skill.service import SkillService
 
 from .audit import log_admin_action
 from .course_units import (
+    approve_enrollment,
     create_course_unit,
     delete_course_unit,
     enroll_student,
@@ -29,6 +30,8 @@ from .course_units import (
     list_course_units_for_instructor,
     list_course_units_for_student,
     list_enrollments_for_course,
+    list_enrollments_for_student,
+    request_enrollment,
     unenroll_student,
     update_course_unit,
 )
@@ -256,12 +259,14 @@ async def multi_user_list_users(_: object = Depends(require_admin)) -> dict[str,
 class CourseUnitCreate(BaseModel):
     name: str
     term: str = ""
+    description: str = ""
     instructor_ids: list[str] = []
 
 
 class CourseUnitUpdate(BaseModel):
     name: str | None = None
     term: str | None = None
+    description: str | None = None
     instructor_ids: list[str] | None = None
 
 
@@ -299,7 +304,9 @@ async def create_course_unit_endpoint(
     payload: CourseUnitCreate,
     _: TokenPayload = Depends(require_admin),
 ) -> dict[str, Any]:
-    record = create_course_unit(payload.name, payload.term, payload.instructor_ids)
+    record = create_course_unit(
+        payload.name, payload.term, payload.instructor_ids, payload.description
+    )
     log_admin_action(
         "course_unit_create",
         summary={"course_unit_id": record["id"], "name": record["name"]},
@@ -318,6 +325,33 @@ async def list_course_units_endpoint(
     else:
         units = list_course_units_for_instructor(current.user_id)
     return {"course_units": [_with_instructor_names(u) for u in units]}
+
+
+@router.get("/course-units/catalog")
+async def course_unit_catalog_endpoint(
+    current: TokenPayload | None = Depends(require_auth),
+) -> dict[str, Any]:
+    """Every course unit, open to any signed-in account, annotated with the
+    caller's own enrollment status (None/"pending"/"approved") — the
+    student-facing "what can I join" browse view. Distinct from
+    ``/course-units`` (the admin/instructor management view) and
+    ``/my/course-units`` (units already approved/taught/administered).
+
+    Registered before ``/course-units/{course_unit_id}`` deliberately: routes
+    are matched in registration order, and without this ordering a request
+    for "catalog" would be swallowed by the dynamic route as if "catalog"
+    were a course_unit_id.
+    """
+    user_id = current.user_id if current else ""
+    status_by_unit = {
+        rec["course_unit_id"]: rec.get("status", "approved")
+        for rec in list_enrollments_for_student(user_id)
+    }
+    catalog = [
+        {**_with_instructor_names(unit), "my_status": status_by_unit.get(unit["id"])}
+        for unit in list_course_units()
+    ]
+    return {"course_units": catalog}
 
 
 @router.get("/my/course-units")
@@ -355,6 +389,7 @@ async def update_course_unit_endpoint(
         course_unit_id,
         name=payload.name,
         term=payload.term,
+        description=payload.description,
         instructor_ids=payload.instructor_ids,
     )
     if record is None:
@@ -403,29 +438,95 @@ async def unenroll_student_endpoint(
     return {"ok": True}
 
 
+def _enrollment_with_student_info(enrollment: dict[str, Any]) -> dict[str, Any] | None:
+    user_record = get_user_by_id(enrollment["user_id"])
+    if user_record is None:
+        return None
+    username, record = user_record
+    return {
+        "user_id": enrollment["user_id"],
+        "username": username,
+        "role": record.get("role", "user"),
+        "full_name": str(record.get("full_name") or ""),
+        "registration_number": str(record.get("registration_number") or ""),
+        "requested_at": enrollment.get("created_at", ""),
+        "approved_at": enrollment.get("approved_at", ""),
+    }
+
+
 @router.get("/course-units/{course_unit_id}/roster")
 async def course_unit_roster_endpoint(
     course_unit_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
+    """Approved enrollments only — a pending request belongs on the
+    /requests endpoint until an instructor decides on it."""
     _require_course_unit_access(current, course_unit_id)
-    roster: list[dict[str, Any]] = []
-    for enrollment in list_enrollments_for_course(course_unit_id):
-        user_record = get_user_by_id(enrollment["user_id"])
-        if user_record is None:
-            continue
-        username, record = user_record
-        roster.append(
-            {
-                "user_id": enrollment["user_id"],
-                "username": username,
-                "role": record.get("role", "user"),
-                "full_name": str(record.get("full_name") or ""),
-                "registration_number": str(record.get("registration_number") or ""),
-                "enrolled_at": enrollment.get("created_at", ""),
-            }
-        )
+    roster = [
+        info
+        for enrollment in list_enrollments_for_course(course_unit_id)
+        if enrollment.get("status", "approved") == "approved"
+        and (info := _enrollment_with_student_info(enrollment)) is not None
+    ]
     return {"roster": roster}
+
+
+@router.get("/course-units/{course_unit_id}/requests")
+async def course_unit_requests_endpoint(
+    course_unit_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """Pending enrollment requests awaiting this course unit's instructor(s)."""
+    _require_course_unit_access(current, course_unit_id)
+    requests = [
+        info
+        for enrollment in list_enrollments_for_course(course_unit_id)
+        if enrollment.get("status", "approved") == "pending"
+        and (info := _enrollment_with_student_info(enrollment)) is not None
+    ]
+    return {"requests": requests}
+
+
+@router.post("/course-units/{course_unit_id}/requests/{user_id}/approve")
+async def approve_enrollment_request_endpoint(
+    course_unit_id: str,
+    user_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    _require_course_unit_access(current, course_unit_id)
+    record = approve_enrollment(course_unit_id, user_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No pending request for this student")
+    return {"enrollment": record}
+
+
+@router.post("/course-units/{course_unit_id}/requests/{user_id}/reject")
+async def reject_enrollment_request_endpoint(
+    course_unit_id: str,
+    user_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    _require_course_unit_access(current, course_unit_id)
+    removed = unenroll_student(course_unit_id, user_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="No request found for this student")
+    return {"ok": True}
+
+
+@router.post("/course-units/{course_unit_id}/enrollment-requests")
+async def request_enrollment_endpoint(
+    course_unit_id: str,
+    current: TokenPayload | None = Depends(require_auth),
+) -> dict[str, Any]:
+    """Student-initiated: request enrollment in a course unit found via the
+    catalog. Creates a pending request for the instructor to approve."""
+    from deeptutor.multi_user.models import LOCAL_ADMIN_ID
+
+    user_id = current.user_id if current else LOCAL_ADMIN_ID
+    record = request_enrollment(course_unit_id, user_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Course unit not found")
+    return {"enrollment": record}
 
 
 @router.get("/students/search")

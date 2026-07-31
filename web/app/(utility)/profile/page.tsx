@@ -238,6 +238,7 @@ export default function ProfilePage() {
         ? null
         : fallback.color;
   const isAdmin = profile?.role === "admin";
+  const isInstructor = profile?.role === "instructor";
   const lang: Language = i18n.language?.startsWith("zh") ? "zh" : "en";
   const joinedDate = profile?.created_at ? new Date(profile.created_at) : null;
   const joined =
@@ -298,11 +299,17 @@ export default function ProfilePage() {
                       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
                         isAdmin
                           ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                          : "bg-[var(--muted)]/70 text-[var(--muted-foreground)]"
+                          : isInstructor
+                            ? "bg-sky-500/15 text-sky-600 dark:text-sky-400"
+                            : "bg-[var(--muted)]/70 text-[var(--muted-foreground)]"
                       }`}
                     >
                       {isAdmin && <ShieldCheck size={11} strokeWidth={2} />}
-                      {isAdmin ? t("Administrator") : t("User")}
+                      {isAdmin
+                        ? t("Administrator")
+                        : isInstructor
+                          ? t("Instructor")
+                          : t("User")}
                     </span>
                   </div>
                   {joined && (

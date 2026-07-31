@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, UserMinus, UserPlus } from "lucide-react";
+import { Check, Search, UserMinus, UserPlus, X as XIcon } from "lucide-react";
 import {
+  approveEnrollmentRequest,
   enrollStudent,
+  getCourseUnitRequests,
   getCourseUnitRoster,
+  rejectEnrollmentRequest,
   searchStudents,
   unenrollStudent,
   type RosterEntry,
@@ -15,6 +18,7 @@ import {
 export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
   const { t } = useTranslation();
   const [roster, setRoster] = useState<RosterEntry[]>([]);
+  const [requests, setRequests] = useState<RosterEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -22,11 +26,16 @@ export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
   const [searching, setSearching] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
-  const loadRoster = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      setRoster(await getCourseUnitRoster(courseUnitId));
+      const [rosterList, requestList] = await Promise.all([
+        getCourseUnitRoster(courseUnitId),
+        getCourseUnitRequests(courseUnitId),
+      ]);
+      setRoster(rosterList);
+      setRequests(requestList);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("Failed to load roster"));
     } finally {
@@ -35,8 +44,8 @@ export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
   }, [courseUnitId, t]);
 
   useEffect(() => {
-    void loadRoster();
-  }, [loadRoster]);
+    void loadAll();
+  }, [loadAll]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -65,13 +74,14 @@ export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
   }, [query]);
 
   const enrolledIds = new Set(roster.map((r) => r.user_id));
+  const pendingIds = new Set(requests.map((r) => r.user_id));
 
   async function handleEnroll(student: StudentSearchResult) {
     setBusyUserId(student.id);
     setError("");
     try {
       await enrollStudent(courseUnitId, student.id);
-      await loadRoster();
+      await loadAll();
       setQuery("");
       setResults([]);
     } catch (e) {
@@ -89,6 +99,33 @@ export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
       setRoster((prev) => prev.filter((r) => r.user_id !== entry.user_id));
     } catch (e) {
       setError(e instanceof Error ? e.message : t("Failed to unenroll student"));
+    } finally {
+      setBusyUserId(null);
+    }
+  }
+
+  async function handleApprove(entry: RosterEntry) {
+    setBusyUserId(entry.user_id);
+    setError("");
+    try {
+      await approveEnrollmentRequest(courseUnitId, entry.user_id);
+      setRequests((prev) => prev.filter((r) => r.user_id !== entry.user_id));
+      setRoster((prev) => [...prev, entry]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("Failed to approve request"));
+    } finally {
+      setBusyUserId(null);
+    }
+  }
+
+  async function handleReject(entry: RosterEntry) {
+    setBusyUserId(entry.user_id);
+    setError("");
+    try {
+      await rejectEnrollmentRequest(courseUnitId, entry.user_id);
+      setRequests((prev) => prev.filter((r) => r.user_id !== entry.user_id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("Failed to reject request"));
     } finally {
       setBusyUserId(null);
     }
@@ -134,6 +171,7 @@ export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
             ) : (
               results.map((student) => {
                 const already = enrolledIds.has(student.id);
+                const pending = pendingIds.has(student.id);
                 return (
                   <div
                     key={student.id}
@@ -153,12 +191,17 @@ export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
                     <button
                       onClick={() => void handleEnroll(student)}
                       disabled={already || busyUserId === student.id}
+                      title={
+                        pending
+                          ? t("Already requested — approves it")
+                          : undefined
+                      }
                       className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs
                                  border border-[var(--border)] text-[var(--foreground)]
                                  hover:bg-[var(--background)] disabled:opacity-40 transition-colors"
                     >
                       <UserPlus size={12} />
-                      {already ? t("Enrolled") : t("Enroll")}
+                      {already ? t("Enrolled") : pending ? t("Approve") : t("Enroll")}
                     </button>
                   </div>
                 );
@@ -167,6 +210,60 @@ export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
           </div>
         )}
       </div>
+
+      {(loading || requests.length > 0) && (
+        <div className="mb-3">
+          <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+            {t("Pending requests")} {!loading && `(${requests.length})`}
+          </p>
+          {loading ? (
+            <p className="text-xs text-[var(--muted-foreground)]">{t("Loading…")}</p>
+          ) : (
+            <div className="divide-y divide-[var(--border)] rounded-lg border border-amber-500/30 bg-amber-500/5">
+              {requests.map((entry) => (
+                <div
+                  key={entry.user_id}
+                  className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-[var(--foreground)]">
+                      {entry.full_name || entry.username}
+                    </p>
+                    <p className="truncate text-xs text-[var(--muted-foreground)]">
+                      {entry.username}
+                      {entry.registration_number ? ` · ${entry.registration_number}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      onClick={() => void handleApprove(entry)}
+                      disabled={busyUserId === entry.user_id}
+                      title={t("Approve")}
+                      className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs
+                                 border border-[var(--border)] text-[var(--foreground)]
+                                 hover:bg-[var(--background)] disabled:opacity-40 transition-colors"
+                    >
+                      <Check size={12} />
+                      {t("Approve")}
+                    </button>
+                    <button
+                      onClick={() => void handleReject(entry)}
+                      disabled={busyUserId === entry.user_id}
+                      title={t("Reject")}
+                      className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs
+                                 text-[var(--muted-foreground)] hover:bg-red-500/10 hover:text-red-500
+                                 disabled:opacity-40 transition-colors"
+                    >
+                      <XIcon size={12} />
+                      {t("Reject")}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div>
         <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]">

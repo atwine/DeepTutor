@@ -40,10 +40,17 @@ interface FormState {
   id: string | null;
   name: string;
   term: string;
+  description: string;
   instructorIds: string[];
 }
 
-const EMPTY_FORM: FormState = { id: null, name: "", term: "", instructorIds: [] };
+const EMPTY_FORM: FormState = {
+  id: null,
+  name: "",
+  term: "",
+  description: "",
+  instructorIds: [],
+};
 
 export default function CourseUnitsPage() {
   const router = useRouter();
@@ -116,6 +123,7 @@ export default function CourseUnitsPage() {
       id: unit.id,
       name: unit.name,
       term: unit.term,
+      description: unit.description,
       instructorIds: [...unit.instructor_ids],
     });
     setFormError("");
@@ -154,10 +162,16 @@ export default function CourseUnitsPage() {
         await updateCourseUnit(form.id, {
           name,
           term: form.term.trim(),
+          description: form.description.trim(),
           instructor_ids: form.instructorIds,
         });
       } else {
-        await createCourseUnit(name, form.term.trim(), form.instructorIds);
+        await createCourseUnit(
+          name,
+          form.term.trim(),
+          form.instructorIds,
+          form.description.trim(),
+        );
       }
       setForm(null);
       await load(isAdmin);
@@ -439,6 +453,18 @@ export default function CourseUnitsPage() {
                 disabled={formSubmitting}
                 placeholder={t("e.g. 2026 Semester 1")}
                 className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+              />
+            </label>
+
+            <label className="mb-3 block text-xs text-[var(--muted-foreground)]">
+              {t("Description")}
+              <textarea
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                disabled={formSubmitting}
+                rows={3}
+                placeholder={t("What this course unit covers — shown to students browsing the catalog.")}
+                className="mt-1 w-full resize-none rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
               />
             </label>
 

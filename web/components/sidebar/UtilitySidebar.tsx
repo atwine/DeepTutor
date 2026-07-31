@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { SidebarShell } from "@/components/sidebar/SidebarShell";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import { AdminLink } from "@/components/auth/AdminLink";
+import { CoursesLink } from "@/components/auth/CoursesLink";
 import { ProfileLink } from "@/components/auth/ProfileLink";
 import { useAppShell } from "@/context/AppShellContext";
 import {
@@ -94,6 +95,7 @@ export default function UtilitySidebar() {
       footerSlot={(collapsed) => (
         <>
           <ProfileLink collapsed={collapsed} />
+          <CoursesLink collapsed={collapsed} />
           <AdminLink collapsed={collapsed} />
           <LogoutButton collapsed={collapsed} />
         </>

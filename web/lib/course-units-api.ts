@@ -4,6 +4,7 @@ export interface CourseUnit {
   id: string;
   name: string;
   term: string;
+  description: string;
   instructor_ids: string[];
   /** Server-resolved usernames for `instructor_ids`, same order — lets a
    * non-admin instructor see a co-instructor's name without needing the
@@ -12,13 +13,20 @@ export interface CourseUnit {
   created_at: string;
 }
 
+/** A course unit as shown in the student-facing catalog: `my_status` is the
+ * caller's own enrollment status for it (null/"pending"/"approved"). */
+export interface CatalogCourseUnit extends CourseUnit {
+  my_status: "pending" | "approved" | null;
+}
+
 export interface RosterEntry {
   user_id: string;
   username: string;
   role: string;
   full_name: string;
   registration_number: string;
-  enrolled_at: string;
+  requested_at: string;
+  approved_at: string;
 }
 
 export interface StudentSearchResult {
@@ -60,11 +68,17 @@ export async function createCourseUnit(
   name: string,
   term: string,
   instructorIds: string[],
+  description: string = "",
 ): Promise<CourseUnit> {
   const res = await apiFetch(apiUrl("/api/v1/multi-user/course-units"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, term, instructor_ids: instructorIds }),
+    body: JSON.stringify({
+      name,
+      term,
+      description,
+      instructor_ids: instructorIds,
+    }),
   });
   const data = await unwrap<{ course_unit: CourseUnit }>(
     res,
@@ -75,7 +89,9 @@ export async function createCourseUnit(
 
 export async function updateCourseUnit(
   courseUnitId: string,
-  updates: Partial<Pick<CourseUnit, "name" | "term" | "instructor_ids">>,
+  updates: Partial<
+    Pick<CourseUnit, "name" | "term" | "description" | "instructor_ids">
+  >,
 ): Promise<CourseUnit> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}`),
@@ -154,4 +170,66 @@ export async function searchStudents(
     "Failed to search students",
   );
   return data.students;
+}
+
+/** Pending enrollment requests awaiting a decision for this course unit. */
+export async function getCourseUnitRequests(
+  courseUnitId: string,
+): Promise<RosterEntry[]> {
+  const res = await apiFetch(
+    apiUrl(`/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/requests`),
+  );
+  const data = await unwrap<{ requests: RosterEntry[] }>(
+    res,
+    "Failed to fetch requests",
+  );
+  return data.requests;
+}
+
+export async function approveEnrollmentRequest(
+  courseUnitId: string,
+  userId: string,
+): Promise<void> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/requests/${encodeURIComponent(userId)}/approve`,
+    ),
+    { method: "POST" },
+  );
+  await unwrap<{ enrollment: unknown }>(res, "Failed to approve request");
+}
+
+export async function rejectEnrollmentRequest(
+  courseUnitId: string,
+  userId: string,
+): Promise<void> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/requests/${encodeURIComponent(userId)}/reject`,
+    ),
+    { method: "POST" },
+  );
+  await unwrap<{ ok: boolean }>(res, "Failed to reject request");
+}
+
+/** Every course unit, annotated with the caller's own enrollment status —
+ * the student-facing "what can I join" browse view. */
+export async function getCourseCatalog(): Promise<CatalogCourseUnit[]> {
+  const res = await apiFetch(apiUrl("/api/v1/multi-user/course-units/catalog"));
+  const data = await unwrap<{ course_units: CatalogCourseUnit[] }>(
+    res,
+    "Failed to load course catalog",
+  );
+  return data.course_units;
+}
+
+/** Request enrollment in a course unit found via the catalog. */
+export async function requestEnrollment(courseUnitId: string): Promise<void> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/enrollment-requests`,
+    ),
+    { method: "POST" },
+  );
+  await unwrap<{ enrollment: unknown }>(res, "Failed to request enrollment");
 }

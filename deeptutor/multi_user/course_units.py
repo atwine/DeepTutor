@@ -73,11 +73,17 @@ def _load_enrollments() -> dict[str, dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def create_course_unit(name: str, term: str, instructor_ids: list[str]) -> dict[str, Any]:
+def create_course_unit(
+    name: str,
+    term: str,
+    instructor_ids: list[str],
+    description: str = "",
+) -> dict[str, Any]:
     record = {
         "id": new_course_unit_id(),
         "name": name,
         "term": term,
+        "description": description,
         "instructor_ids": [str(uid) for uid in instructor_ids if str(uid).strip()],
         "created_at": utc_now(),
     }
@@ -101,6 +107,7 @@ def update_course_unit(
     *,
     name: str | None = None,
     term: str | None = None,
+    description: str | None = None,
     instructor_ids: list[str] | None = None,
 ) -> dict[str, Any] | None:
     with _WRITE_LOCK:
@@ -112,6 +119,8 @@ def update_course_unit(
             record["name"] = name
         if term is not None:
             record["term"] = term
+        if description is not None:
+            record["description"] = description
         if instructor_ids is not None:
             record["instructor_ids"] = [str(uid) for uid in instructor_ids if str(uid).strip()]
         units[course_unit_id] = record
@@ -151,10 +160,12 @@ def list_course_units_for_instructor(user_id: str) -> list[dict[str, Any]]:
 
 
 def list_course_units_for_student(user_id: str) -> list[dict[str, Any]]:
+    """Units ``user_id`` has *approved* access to — a pending request alone
+    doesn't grant it."""
     unit_ids = {
         rec.get("course_unit_id")
         for rec in _load_enrollments().values()
-        if str(rec.get("user_id")) == str(user_id)
+        if str(rec.get("user_id")) == str(user_id) and rec.get("status", "approved") == "approved"
     }
     units = _load_course_units()
     return [units[uid] for uid in unit_ids if uid in units]
@@ -165,27 +176,89 @@ def list_course_units_for_student(user_id: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+def _find_enrollment(
+    enrollments: dict[str, dict[str, Any]], course_unit_id: str, user_id: str
+) -> dict[str, Any] | None:
+    for record in enrollments.values():
+        if (
+            record.get("course_unit_id") == course_unit_id
+            and str(record.get("user_id")) == str(user_id)
+        ):
+            return record
+    return None
+
+
 def enroll_student(course_unit_id: str, user_id: str) -> dict[str, Any] | None:
-    """Enroll ``user_id`` in ``course_unit_id``. Returns the existing enrollment
-    if one is already present (idempotent), or None if the course unit doesn't exist."""
+    """Instructor/admin directly enrolls a student — always ends up approved.
+    The manual fallback path (e.g. the student can't reach the platform
+    themselves, or an instructor is confirming someone in person). If the
+    student already has a *pending* request, this approves it in place
+    (an instructor clicking "Enroll" on someone who already asked should
+    obviously let them in, not silently no-op); an already-approved
+    enrollment is left as-is. Returns None if the course unit doesn't exist."""
     with _WRITE_LOCK:
         units = _load_course_units()
         if course_unit_id not in units:
             return None
         enrollments = _load_enrollments()
-        for record in enrollments.values():
-            if (
-                record.get("course_unit_id") == course_unit_id
-                and str(record.get("user_id")) == str(user_id)
-            ):
-                return record
+        existing = _find_enrollment(enrollments, course_unit_id, user_id)
+        if existing is not None:
+            if existing.get("status", "approved") != "approved":
+                existing["status"] = "approved"
+                existing["approved_at"] = utc_now()
+                _write_json(ENROLLMENTS_FILE, enrollments)
+            return existing
         record = {
             "id": new_enrollment_id(),
             "course_unit_id": course_unit_id,
             "user_id": str(user_id),
+            "status": "approved",
             "created_at": utc_now(),
+            "approved_at": utc_now(),
         }
         enrollments[record["id"]] = record
+        _write_json(ENROLLMENTS_FILE, enrollments)
+        return record
+
+
+def request_enrollment(course_unit_id: str, user_id: str) -> dict[str, Any] | None:
+    """Student-initiated: creates a ``pending`` enrollment for the instructor
+    to approve or reject. Idempotent — an existing enrollment of either
+    status (already pending, or already approved) is returned unchanged, so
+    re-requesting can't downgrade an approved student back to pending.
+    Returns None if the course unit doesn't exist."""
+    with _WRITE_LOCK:
+        units = _load_course_units()
+        if course_unit_id not in units:
+            return None
+        enrollments = _load_enrollments()
+        existing = _find_enrollment(enrollments, course_unit_id, user_id)
+        if existing is not None:
+            return existing
+        record = {
+            "id": new_enrollment_id(),
+            "course_unit_id": course_unit_id,
+            "user_id": str(user_id),
+            "status": "pending",
+            "created_at": utc_now(),
+            "approved_at": "",
+        }
+        enrollments[record["id"]] = record
+        _write_json(ENROLLMENTS_FILE, enrollments)
+        return record
+
+
+def approve_enrollment(course_unit_id: str, user_id: str) -> dict[str, Any] | None:
+    """Approve a pending enrollment request. Returns None if there is no
+    matching pending request (already approved, rejected/removed, or never
+    requested)."""
+    with _WRITE_LOCK:
+        enrollments = _load_enrollments()
+        record = _find_enrollment(enrollments, course_unit_id, user_id)
+        if record is None or record.get("status", "approved") != "pending":
+            return None
+        record["status"] = "approved"
+        record["approved_at"] = utc_now()
         _write_json(ENROLLMENTS_FILE, enrollments)
         return record
 
