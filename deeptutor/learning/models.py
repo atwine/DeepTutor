@@ -208,6 +208,12 @@ class LearningProgress(BaseModel):
     feynman_explanations: dict[str, str] = Field(default_factory=dict)
     stage_failure_counts: dict[str, int] = Field(default_factory=dict)
     stage_failure_notes: dict[str, str] = Field(default_factory=dict)
+    # Turn id of the last replace-mode mastery_build call. Lets the tool
+    # refuse a second replace rebuild within the same turn — some models
+    # re-issue mastery_build repeatedly against the round budget instead of
+    # recognizing the first call already succeeded (see
+    # MasteryBuildTool.execute). Empty when no build has happened yet.
+    last_build_turn_id: str = ""
     version: int = 0
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)

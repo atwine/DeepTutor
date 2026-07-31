@@ -399,7 +399,9 @@ class AgentLoop:
             stage=LOOP_STAGE,
             metadata={"trace_kind": "warning"},
         )
-        messages.append({"role": "user", "content": self.pipeline._finish_exhausted_instruction()})
+        messages.append(
+            {"role": "user", "content": self.pipeline._finish_exhausted_instruction(self.context)}
+        )
         try:
             result = await self._call_llm(
                 messages=messages,

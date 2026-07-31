@@ -414,7 +414,25 @@ class AgenticChatPipeline:
         messages.append({"role": "user", "content": user_content})
         return self._prepare_messages_with_attachments(messages, context)
 
-    def _finish_exhausted_instruction(self) -> str:
+    def _finish_exhausted_instruction(self, context: UnifiedContext | None = None) -> str:
+        """Instruction fed back when the round budget runs out without a
+        terminal label, prompting one last tool-less LLM call.
+
+        Capability-agnostic by default. A capability can override this via an
+        optional ``finish_exhausted_override(context) -> str | None`` hook
+        (same "optional, read via getattr" convention as ``pre_loop`` /
+        ``on_intermediate``), so a forced finish mid-capability doesn't fall
+        back to generic phrasing that reads as out-of-character — see
+        ``MasteryLoopCapability.finish_exhausted_override``.
+        """
+        if context is not None:
+            for cap in self._active_loop_capabilities(context):
+                hook = getattr(cap, "finish_exhausted_override", None)
+                if not callable(hook):
+                    continue
+                override = hook(context)
+                if isinstance(override, str) and override.strip():
+                    return override
         return self._prompt_assembler.finish_exhausted_instruction()
 
     def _tool_manifest(self, enabled_tools: list[str]) -> str:

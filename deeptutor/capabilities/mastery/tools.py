@@ -564,10 +564,41 @@ class MasteryBuildTool(BaseTool):
 
         service = _new_service()
         progress = service.get_or_create(path_id)
+        turn_id = str(kwargs.get("_turn_id") or "").strip()
+
+        already_built_this_turn = (
+            mode == "replace"
+            and progress.modules
+            and turn_id
+            and progress.last_build_turn_id == turn_id
+        )
         offset = len(progress.modules) if mode == "append" else 0
         new_modules, error = _parse_modules(kwargs.get("modules"), path_id, offset)
         if error:
             return ToolResult(content=error, success=False)
+
+        if already_built_this_turn or (
+            mode == "replace" and progress.modules and _modules_equivalent(progress.modules, new_modules)
+        ):
+            # Either this turn already did a replace-build (some models
+            # re-issue mastery_build against the round budget instead of
+            # recognizing the first call succeeded), or the new plan matches
+            # what's on file byte-for-byte. Either way, nudge toward
+            # mastery_status instead of silently re-saving and inviting yet
+            # another rebuild call.
+            return _json_result(
+                {
+                    "status": "already_built",
+                    "hint": (
+                        "This mastery path is already built for this turn — nothing "
+                        "changed. Call mastery_status next and continue teaching; do "
+                        "not call mastery_build again this turn unless the learner's "
+                        "material actually changed."
+                    ),
+                    "map": map_summary(progress),
+                },
+                meta_key="mastery_build",
+            )
 
         combined = (list(progress.modules) + new_modules) if mode == "append" else new_modules
         service.replace_modules(progress, combined)
@@ -575,6 +606,8 @@ class MasteryBuildTool(BaseTool):
         if combined:
             progress.current_module_id = combined[0].id
             progress.current_kp_index = 0
+        if mode == "replace" and turn_id:
+            progress.last_build_turn_id = turn_id
         service.save(progress)
         kp_count = sum(len(m.knowledge_points) for m in new_modules)
         return _json_result(
@@ -587,6 +620,27 @@ class MasteryBuildTool(BaseTool):
             },
             meta_key="mastery_build",
         )
+
+
+def _modules_equivalent(existing: list[LearningModule], new: list[LearningModule]) -> bool:
+    """Whether a replace-mode ``mastery_build`` call would be a no-op.
+
+    Compares module/knowledge-point names and types only — not the generated
+    ids, which are always freshly derived from ``path_id`` + index and so
+    would never match across calls even for an identical plan. Good enough to
+    stop the model looping ``mastery_build`` on an unchanged plan; a
+    substantively different plan (renamed/reordered/added points) still
+    triggers a real rebuild.
+    """
+    if len(existing) != len(new):
+        return False
+    for old_m, new_m in zip(existing, new):
+        if old_m.name != new_m.name or len(old_m.knowledge_points) != len(new_m.knowledge_points):
+            return False
+        for old_kp, new_kp in zip(old_m.knowledge_points, new_m.knowledge_points):
+            if old_kp.name != new_kp.name or old_kp.type != new_kp.type:
+                return False
+    return True
 
 
 def _parse_modules(

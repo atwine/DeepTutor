@@ -54,6 +54,25 @@ class MasteryLoopCapability:
         _ = context
         return ""
 
+    def finish_exhausted_override(self, context: UnifiedContext) -> str | None:
+        """In-character forced-finish instruction for a mastery-path turn.
+
+        Without this, a round-budget-exhausted turn falls back to the
+        generic, capability-agnostic finish instruction (see
+        ``AgenticChatPipeline._finish_exhausted_instruction``), which can
+        read as out-of-character mid-mastery-path — e.g. a stray "final
+        answer" framing that belongs to a different capability's prompts.
+        """
+        if not self.is_active(context):
+            return None
+        return (
+            "The exploration budget for this turn is used up — stop calling tools now. "
+            "In your own voice as the learner's tutor, briefly summarize what this turn "
+            "covered (or, if you already built or checked the mastery path, say so plainly) "
+            "and invite the learner to continue in their next message. Do not write a "
+            "generic 'final answer'; end in character."
+        )
+
 
 def _prompt_text(prompts: dict[str, Any], path: tuple[str, ...]) -> str:
     value: Any = prompts
