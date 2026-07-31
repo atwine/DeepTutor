@@ -642,10 +642,12 @@ function CopyActionButton({
   );
 }
 
-// Thumbs up/down on an assistant response, with an optional short comment on
-// down-vote — needed to compare LLMs/RAG configs against real reactions
-// rather than just guessing at quality. Persisted per-message; re-clicking
-// the active rating clears it.
+// Thumbs up/down on an assistant response. Clicking either opens a small
+// popup asking a directed follow-up question; the rating + comment (plus
+// the question/answer pair, snapshotted server-side) are persisted to the
+// backend for later review — none of it is ever echoed back into the chat
+// transcript itself, so the conversation stays clean. Re-clicking the
+// already-active rating clears it (no popup, since there's nothing to ask).
 function FeedbackButtons({
   sessionId,
   messageId,
@@ -657,13 +659,12 @@ function FeedbackButtons({
 }) {
   const { t } = useTranslation();
   const [current, setCurrent] = useState<MessageFeedback | null>(feedback ?? null);
-  const [showComment, setShowComment] = useState(false);
-  const [comment, setComment] = useState(feedback?.comment ?? "");
+  const [pendingRating, setPendingRating] = useState<"up" | "down" | null>(null);
+  const [draftComment, setDraftComment] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setCurrent(feedback ?? null);
-    setComment(feedback?.comment ?? "");
   }, [feedback]);
 
   const submit = useCallback(
@@ -690,13 +691,29 @@ function FeedbackButtons({
   );
 
   function handleRate(rating: "up" | "down") {
-    const next = current?.rating === rating ? null : rating;
-    if (next === "down") setShowComment(true);
-    void submit(next, comment);
+    if (current?.rating === rating) {
+      // Toggling the active rating off — nothing to ask, just clear it.
+      void submit(null, "");
+      setPendingRating(null);
+      return;
+    }
+    setDraftComment("");
+    setPendingRating(rating);
+  }
+
+  function closePopup() {
+    setPendingRating(null);
+    setDraftComment("");
+  }
+
+  function submitPopup() {
+    if (!pendingRating) return;
+    void submit(pendingRating, draftComment.trim());
+    closePopup();
   }
 
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="relative flex items-center gap-0.5">
       <Tooltip label={t("Good response")} side="top">
         <button
           type="button"
@@ -729,19 +746,48 @@ function FeedbackButtons({
           <ThumbsDown size={15} strokeWidth={1.5} />
         </button>
       </Tooltip>
-      {(showComment || current?.comment) && current?.rating && (
-        <input
-          type="text"
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          onBlur={() => {
-            if (current && comment !== (current.comment ?? "")) {
-              void submit(current.rating, comment);
-            }
-          }}
-          placeholder={t("What went wrong? (optional)")}
-          className="ml-1 w-48 rounded-md border border-[var(--border)] bg-transparent px-2 py-0.5 text-[12px] text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
-        />
+      {pendingRating && (
+        <div className="absolute bottom-full left-0 z-30 mb-2 w-64 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 shadow-lg">
+          <p className="text-[12px] font-medium leading-relaxed text-[var(--foreground)]">
+            {pendingRating === "up"
+              ? t("What was good about this response?")
+              : t("What went wrong with this response?")}
+          </p>
+          <textarea
+            autoFocus
+            rows={2}
+            value={draftComment}
+            onChange={(e) => setDraftComment(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                closePopup();
+              } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                submitPopup();
+              }
+            }}
+            placeholder={t("Details (kept private, not shown in chat)")}
+            className="mt-2 w-full resize-none rounded-md border border-[var(--border)] bg-transparent px-2 py-1.5 text-[12px] text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+          />
+          <div className="mt-2 flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={closePopup}
+              className="rounded-md px-2 py-1 text-[11.5px] font-medium text-[var(--muted-foreground)] hover:bg-[var(--muted)]/40"
+            >
+              {t("Cancel")}
+            </button>
+            <button
+              type="button"
+              onClick={submitPopup}
+              disabled={saving}
+              className="rounded-md bg-[var(--primary)] px-2.5 py-1 text-[11.5px] font-medium text-[var(--primary-foreground)] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {t("Submit")}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

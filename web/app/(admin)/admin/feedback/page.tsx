@@ -161,7 +161,15 @@ export default function FeedbackReviewPage() {
                       {formatDate(entry.updated_at || entry.created_at, lang)}
                     </span>
                   </div>
-                  <p className="mt-2 line-clamp-3 text-sm text-[var(--foreground)]">
+                  {entry.question && (
+                    <p className="mt-2 line-clamp-2 text-xs text-[var(--muted-foreground)]">
+                      <span className="font-medium">{t("Q")}:</span> {entry.question}
+                    </p>
+                  )}
+                  <p className="mt-1 line-clamp-3 text-sm text-[var(--foreground)]">
+                    <span className="font-medium text-[var(--muted-foreground)]">
+                      {t("A")}:
+                    </span>{" "}
                     {entry.content}
                   </p>
                   {entry.comment && (

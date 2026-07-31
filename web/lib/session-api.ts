@@ -224,6 +224,8 @@ export interface FeedbackEntry {
   session_id: string;
   session_title: string;
   content: string;
+  /** The paired user question this response answered, snapshotted at rating time. */
+  question: string;
   capability: string;
   rating: "up" | "down" | null;
   comment: string;

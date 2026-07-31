@@ -1061,12 +1061,25 @@ class SQLiteSessionStore:
     ) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id FROM messages WHERE id = ? AND session_id = ? AND role = 'assistant'",
+                "SELECT id, content FROM messages WHERE id = ? AND session_id = ? AND role = 'assistant'",
                 (message_id, session_id),
             ).fetchone()
             if row is None:
                 return None
-            payload = {"rating": rating, "comment": comment, "updated_at": time.time()}
+            # Snapshot the question/answer pair at rating time so the review
+            # page still shows the full context even if the message is later
+            # edited or the turn's branch changes — not just a bare comment.
+            question_row = conn.execute(
+                "SELECT content FROM messages WHERE session_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
+                (session_id, message_id),
+            ).fetchone()
+            payload = {
+                "rating": rating,
+                "comment": comment,
+                "updated_at": time.time(),
+                "question": question_row["content"] if question_row else "",
+                "answer": row["content"],
+            }
             conn.execute(
                 "UPDATE messages SET feedback_json = ? WHERE id = ?",
                 (_json_dumps(payload), message_id),
@@ -1113,6 +1126,7 @@ class SQLiteSessionStore:
                     "session_id": row["session_id"],
                     "session_title": row["session_title"],
                     "content": row["content"],
+                    "question": feedback.get("question") or "",
                     "capability": row["capability"] or "",
                     "rating": feedback.get("rating"),
                     "comment": feedback.get("comment") or "",
