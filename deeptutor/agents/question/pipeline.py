@@ -124,6 +124,28 @@ _PROTOCOL_REPAIR = LabelProtocol(
     tool_label=None,
 )
 
+# Detects a THINK reply that narrates a fake tool call as JSON-shaped prose
+# (``{"name": "web_fetch", "parameters": {...}}``) instead of emitting a real
+# ``tool_calls`` entry — the protocol prompt already forbids this explicitly,
+# but some local models do it anyway. Matches a quoted ``name`` followed
+# somewhat nearby by a ``parameters`` key so a stray unrelated JSON blob
+# doesn't false-positive.
+_NARRATED_TOOL_CALL_RE = re.compile(
+    r'"name"\s*:\s*"(?P<name>[A-Za-z_][A-Za-z0-9_]*)"[^{}]{0,200}"parameters"\s*:',
+    re.DOTALL,
+)
+
+
+def _detect_narrated_tool_call(text: str, known_tools: frozenset[str] | set[str]) -> str | None:
+    """Return the tool name if ``text`` looks like a narrated fake call to
+    one of ``known_tools`` rather than a real function-calling invocation."""
+    for match in _NARRATED_TOOL_CALL_RE.finditer(text):
+        name = match.group("name")
+        if name in known_tools:
+            return name
+    return None
+
+
 DEFAULT_MAX_EXPLORE_ITERATIONS = 8
 DEFAULT_MAX_QUIZ_ITERATIONS_PER_QUESTION = 5
 DEFAULT_MAX_TOKENS = 4000
@@ -1965,6 +1987,30 @@ class _BaseLoopHost:
         return self._pipeline._t(
             f"protocol.{violation}",
             default=f"Protocol violation: {violation}.",
+        )
+
+    async def on_intermediate(self, label: str, text: str) -> str | None:
+        """Catch a THINK reply that narrates a fake tool call as JSON-shaped
+        prose instead of actually calling it — a known failure mode for some
+        local models even though the protocol explicitly forbids it (see
+        pipeline.yaml's TOOL label description). Injects a corrective user
+        message for the next iteration rather than silently looping on the
+        same unexecuted "plan"."""
+        if label != LABEL_THINK:
+            return None
+        known_tools = set(self._pipeline._resolved_tools(self._context))
+        narrated = _detect_narrated_tool_call(text, known_tools)
+        if narrated is None:
+            return None
+        return self._pipeline._t(
+            "protocol.narrated_tool_call_repair",
+            tool=narrated,
+            default=(
+                f"You described a call to `{narrated}` as text instead of actually "
+                "calling it. Do not write JSON or describe the call in your reply. "
+                f"Reply now with the `{LABEL_TOOL}` label and issue the real tool "
+                "call through the function-calling mechanism."
+            ),
         )
 
     # The two attributes below are set by each subclass.
