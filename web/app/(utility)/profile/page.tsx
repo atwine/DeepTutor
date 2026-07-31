@@ -321,58 +321,62 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* Details card */}
-            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm">
-              <h2 className="text-sm font-semibold text-[var(--foreground)]">
-                {t("Details")}
-              </h2>
-              <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
-                {t(
-                  "Your real name and registration number, so instructors can find you when enrolling you in a course unit.",
-                )}
-              </p>
+            {/* Details card — registration number only makes sense for
+                students (it's what instructors search on to enroll someone);
+                admins and instructors have no use for it. */}
+            {!isAdmin && !isInstructor && (
+              <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm">
+                <h2 className="text-sm font-semibold text-[var(--foreground)]">
+                  {t("Details")}
+                </h2>
+                <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
+                  {t(
+                    "Your real name and registration number, so instructors can find you when enrolling you in a course unit.",
+                  )}
+                </p>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <label className="block text-xs text-[var(--muted-foreground)]">
-                  {t("Full name")}
-                  <input
-                    type="text"
-                    value={fullNameDraft}
-                    onChange={(e) => setFullNameDraft(e.target.value)}
-                    disabled={detailsSaving}
-                    placeholder={t("e.g. Jane Doe")}
-                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
-                  />
-                </label>
-                <label className="block text-xs text-[var(--muted-foreground)]">
-                  {t("Registration number")}
-                  <input
-                    type="text"
-                    value={regNumberDraft}
-                    onChange={(e) => setRegNumberDraft(e.target.value)}
-                    disabled={detailsSaving}
-                    placeholder={t("e.g. 2026/BSE/001")}
-                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
-                  />
-                </label>
-              </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="block text-xs text-[var(--muted-foreground)]">
+                    {t("Full name")}
+                    <input
+                      type="text"
+                      value={fullNameDraft}
+                      onChange={(e) => setFullNameDraft(e.target.value)}
+                      disabled={detailsSaving}
+                      placeholder={t("e.g. Jane Doe")}
+                      className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                    />
+                  </label>
+                  <label className="block text-xs text-[var(--muted-foreground)]">
+                    {t("Registration number")}
+                    <input
+                      type="text"
+                      value={regNumberDraft}
+                      onChange={(e) => setRegNumberDraft(e.target.value)}
+                      disabled={detailsSaving}
+                      placeholder={t("e.g. 2026/BSE/001")}
+                      className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                    />
+                  </label>
+                </div>
 
-              <div className="mt-4 flex items-center gap-3">
-                <button
-                  onClick={() => void handleSaveDetails()}
-                  disabled={detailsSaving || !detailsDirty}
-                  className="rounded-lg bg-[var(--foreground)] px-3 py-1.5 text-sm font-medium text-[var(--background)]
-                             hover:opacity-90 disabled:opacity-40 transition-colors"
-                >
-                  {detailsSaving ? t("Saving…") : t("Save")}
-                </button>
-                {detailsSaved && (
-                  <span className="text-xs text-[var(--muted-foreground)]">
-                    {t("Saved")}
-                  </span>
-                )}
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    onClick={() => void handleSaveDetails()}
+                    disabled={detailsSaving || !detailsDirty}
+                    className="rounded-lg bg-[var(--foreground)] px-3 py-1.5 text-sm font-medium text-[var(--background)]
+                               hover:opacity-90 disabled:opacity-40 transition-colors"
+                  >
+                    {detailsSaving ? t("Saving…") : t("Save")}
+                  </button>
+                  {detailsSaved && (
+                    <span className="text-xs text-[var(--muted-foreground)]">
+                      {t("Saved")}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Avatar card */}
             <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm">

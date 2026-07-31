@@ -1936,6 +1936,7 @@
   "Web search providers.": "Web search providers.",
   "Configure web search providers. Used by the web_search tool and any agent step that hits the open web.": "Configure web search providers. Used by the web_search tool and any agent step that hits the open web.",
   "{{count}} profiles": "{{count}} profiles",
+  "Docs tooltip": "A plain-language guide to how this platform works.",
   "Memory tooltip": "Long-term memory the tutor keeps across sessions.",
   "Browse L1 trace for this surface": "Browse L1 trace for this surface",
   "L1 trace · {{surface}}": "L1 trace · {{surface}}",

@@ -7,12 +7,11 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useAppShell } from "@/context/AppShellContext";
 import {
   BookOpen,
-  BookText,
   Bot,
   Brain,
   ChevronDown,
-  Github,
   HeartHandshake,
+  HelpCircle,
   House,
   LayoutGrid,
   Library,
@@ -27,7 +26,6 @@ import { useTranslation } from "react-i18next";
 import SessionList from "@/components/SessionList";
 import { useSidebarDrawer } from "@/components/layout/AppShell";
 import { useDevice } from "@/hooks/useDevice";
-import { VersionBadge } from "@/components/sidebar/VersionBadge";
 import type { SessionSummary } from "@/lib/session-api";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useCapabilityAccess } from "@/components/access/CapabilityAccessContext";
@@ -98,6 +96,16 @@ const PRIMARY_NAV: NavEntry[] = [
 
 const SECONDARY_NAV: NavEntry[] = [
   {
+    // A plain-language guide to the whole platform, for every role — the
+    // options here can be a lot for a first-time user, so this is the
+    // "how do I..." reference to point people at. Never gated: it has no
+    // model requirement and nothing here is role-sensitive information.
+    href: "/docs",
+    label: "Docs",
+    icon: HelpCircle,
+    tooltipKey: "Docs tooltip",
+  },
+  {
     // Memory is its own top-level console (pulled out of the Learning Space):
     // a place to inspect and curate the tutor's long-term memory, not a daily
     // workspace. Never gated — memory has no per-user model requirement.
@@ -119,8 +127,6 @@ const SECONDARY_NAV: NavEntry[] = [
   },
   { href: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
 ];
-const GITHUB_REPO_URL = "https://github.com/HKUDS/DeepTutor";
-const DOCS_URL = "https://deeptutor.info/";
 const RECENTS_COLLAPSED_KEY = "deeptutor.sidebar.recentsCollapsed";
 
 interface SidebarShellProps {
@@ -333,27 +339,6 @@ export function SidebarShell({
             );
           })}
           {renderedFooter}
-          <a
-            href={DOCS_URL}
-            target="_blank"
-            rel="noreferrer noopener"
-            title={t("Docs") as string}
-            aria-label={t("Docs") as string}
-            className="mt-1 flex h-9 w-9 items-center justify-center rounded-xl text-[var(--muted-foreground)]/70 transition-colors hover:bg-[var(--background)]/50 hover:text-[var(--foreground)]"
-          >
-            <BookText size={15} strokeWidth={1.6} />
-          </a>
-          <a
-            href={GITHUB_REPO_URL}
-            target="_blank"
-            rel="noreferrer noopener"
-            title="GitHub"
-            aria-label="GitHub"
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-[var(--muted-foreground)]/70 transition-colors hover:bg-[var(--background)]/50 hover:text-[var(--foreground)]"
-          >
-            <Github size={15} strokeWidth={1.6} />
-          </a>
-          <VersionBadge collapsed />
         </div>
       </aside>
     );
@@ -515,29 +500,6 @@ export function SidebarShell({
           );
         })}
         {renderedFooter}
-        <div className="mt-0.5 flex items-center gap-0.5">
-          <VersionBadge />
-          <a
-            href={DOCS_URL}
-            target="_blank"
-            rel="noreferrer noopener"
-            title={t("Docs") as string}
-            aria-label={t("Docs") as string}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--muted-foreground)]/55 transition-colors hover:bg-[var(--background)]/50 hover:text-[var(--muted-foreground)]"
-          >
-            <BookText size={13} strokeWidth={1.7} />
-          </a>
-          <a
-            href={GITHUB_REPO_URL}
-            target="_blank"
-            rel="noreferrer noopener"
-            title="GitHub"
-            aria-label="GitHub"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--muted-foreground)]/55 transition-colors hover:bg-[var(--background)]/50 hover:text-[var(--muted-foreground)]"
-          >
-            <Github size={13} strokeWidth={1.7} />
-          </a>
-        </div>
       </div>
     </aside>
   );
