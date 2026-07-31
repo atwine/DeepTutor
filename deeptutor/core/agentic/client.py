@@ -27,7 +27,7 @@ from deeptutor.services.provider_registry import find_by_name
 # Providers that don't reliably support OpenAI function-calling. The loop
 # still runs without tool schemas — the model just produces prose.
 _NATIVE_TOOL_BLOCKED_BINDINGS: frozenset[str] = frozenset(
-    {"anthropic", "claude", "ollama", "lm_studio", "vllm", "llama_cpp"}
+    {"anthropic", "claude", "ollama", "lm_studio", "llama_cpp"}
 )
 
 # Native provider adapters whose backends speak OpenAI-style function calling
@@ -375,8 +375,10 @@ def can_use_native_tool_calling(*, binding: str, model: str | None) -> bool:
     spec = find_by_name(binding)
     if spec and spec.backend in _NATIVE_TOOL_BACKENDS:
         return True
-    if binding in _NATIVE_TOOL_BLOCKED_BINDINGS or (spec and spec.is_local):
+    if binding in _NATIVE_TOOL_BLOCKED_BINDINGS:
         return False
     if supports_tools(binding, model):
         return True
+    if spec and spec.is_local:
+        return False
     return bool(spec and spec.backend == "openai_compat")

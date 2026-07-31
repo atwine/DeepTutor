@@ -217,7 +217,7 @@ PROVIDER_CAPABILITIES: dict[str, dict[str, object]] = {
     "vllm": {
         "supports_response_format": True,
         "supports_streaming": True,
-        "supports_tools": False,
+        "supports_tools": True,
         "supports_vision": False,
         "system_in_messages": True,
     },
