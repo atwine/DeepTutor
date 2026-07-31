@@ -361,6 +361,14 @@ export default function CourseUnitsPage() {
                           >
                             <GraduationCap size={15} />
                           </Link>
+                          <Link
+                            href={`/admin/course-units/${unit.id}/notes`}
+                            title={t("Course Notes")}
+                            className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                                     hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
+                          >
+                            <BookOpen size={15} />
+                          </Link>
                           {isAdmin && (
                             <>
                               <button

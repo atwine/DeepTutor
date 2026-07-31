@@ -164,6 +164,12 @@ export default function CourseCatalogPage() {
                         >
                           {t("Assignments")} →
                         </Link>
+                        <Link
+                          href={`/courses/${unit.id}/notes`}
+                          className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+                        >
+                          {t("Notes")} →
+                        </Link>
                       </>
                     ) : unit.my_status === "pending" ? (
                       <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-400">
