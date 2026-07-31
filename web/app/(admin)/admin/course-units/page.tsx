@@ -17,6 +17,7 @@ import { RosterEditor } from "./RosterEditor";
 import {
   BookOpen,
   ClipboardList,
+  GraduationCap,
   RefreshCw,
   ArrowLeft,
   Plus,
@@ -351,6 +352,14 @@ export default function CourseUnitsPage() {
                                      hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
                           >
                             <ClipboardList size={15} />
+                          </Link>
+                          <Link
+                            href={`/admin/course-units/${unit.id}/gradebook`}
+                            title={t("Gradebook")}
+                            className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                                     hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
+                          >
+                            <GraduationCap size={15} />
                           </Link>
                           {isAdmin && (
                             <>

@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from deeptutor.api.routers.auth import (
@@ -33,6 +34,7 @@ from .assignments import (
 )
 from .course_units import get_course_unit, is_approved_student_of, is_instructor_of
 from .grading import grade_submission
+from .gradebook import build_gradebook, build_gradebook_csv
 from .identity import get_user_by_id
 
 router = APIRouter()
@@ -304,3 +306,35 @@ async def get_my_submission_endpoint(
     if not is_approved_student_of(user_id, assignment["course_unit_id"]):
         raise HTTPException(status_code=403, detail="You are not enrolled in this course unit")
     return {"submission": get_latest_submission(assignment_id, user_id)}
+
+
+def _require_course_unit_manage_access(current: TokenPayload, course_unit_id: str) -> None:
+    if get_course_unit(course_unit_id) is None:
+        raise HTTPException(status_code=404, detail="Course unit not found")
+    if not _manages_course_unit(current, course_unit_id):
+        raise HTTPException(status_code=403, detail="You do not manage this course unit")
+
+
+@router.get("/course-units/{course_unit_id}/gradebook")
+async def get_gradebook_endpoint(
+    course_unit_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    _require_course_unit_manage_access(current, course_unit_id)
+    return build_gradebook(course_unit_id)
+
+
+@router.get("/course-units/{course_unit_id}/gradebook/export")
+async def export_gradebook_csv_endpoint(
+    course_unit_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> PlainTextResponse:
+    _require_course_unit_manage_access(current, course_unit_id)
+    unit = get_course_unit(course_unit_id)
+    csv_text = build_gradebook_csv(course_unit_id)
+    safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in unit["name"]).strip() or "gradebook"
+    return PlainTextResponse(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.csv"'},
+    )
