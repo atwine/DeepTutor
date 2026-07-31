@@ -372,10 +372,34 @@ export default memo(function ChatComposer({
   const restoreFocusOnReturnRef = useRef(false);
   const inputHandleRef = useRef<ComposerInputHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const moreCapsCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   if (lastCapMenuOpen !== capMenuOpen) {
     setLastCapMenuOpen(capMenuOpen);
     if (!capMenuOpen) setMoreCapsOpen(false);
   }
+
+  // The flyout is a separate absolutely-positioned element, not part of the
+  // trigger's own layout box, so crossing the ~6px pointer-bridge gap between
+  // them can leave the trigger's hoverable area before entering the flyout's
+  // — an instant onMouseLeave->close then wins the race against the mouse
+  // actually reaching the menu. A short close-delay (cancelled by re-entering
+  // either the trigger or the flyout) closes the same gap without requiring
+  // the two elements to visually overlap.
+  const cancelMoreCapsClose = () => {
+    if (moreCapsCloseTimerRef.current) {
+      clearTimeout(moreCapsCloseTimerRef.current);
+      moreCapsCloseTimerRef.current = null;
+    }
+  };
+  const scheduleMoreCapsClose = () => {
+    cancelMoreCapsClose();
+    moreCapsCloseTimerRef.current = setTimeout(() => setMoreCapsOpen(false), 200);
+  };
+  useEffect(() => {
+    return () => {
+      if (moreCapsCloseTimerRef.current) clearTimeout(moreCapsCloseTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!prefillInputRef) return;
@@ -906,8 +930,11 @@ export default memo(function ChatComposer({
                       return (
                         <div
                           className="group/more relative"
-                          onMouseEnter={() => setMoreCapsOpen(true)}
-                          onMouseLeave={() => setMoreCapsOpen(false)}
+                          onMouseEnter={() => {
+                            cancelMoreCapsClose();
+                            setMoreCapsOpen(true);
+                          }}
+                          onMouseLeave={scheduleMoreCapsClose}
                           onFocus={() => setMoreCapsOpen(true)}
                           onBlur={(event) => {
                             const next = event.relatedTarget;
@@ -955,13 +982,20 @@ export default memo(function ChatComposer({
                           </button>
                           {/* Right flyout. ``pl-1.5`` is a pointer bridge so the
                               cursor can cross the gap without dropping hover;
-                              click/focus also open it for touch and keyboard. */}
+                              click/focus also open it for touch and keyboard.
+                              It also has its own enter/leave handlers — being
+                              absolutely positioned, it's outside the trigger's
+                              layout box, so the close-delay above is what
+                              actually bridges the gap; these just keep it open
+                              once the cursor has made it across. */}
                           <div
                             className={`absolute bottom-0 left-full z-50 pl-1.5 transition-opacity duration-150 ${
                               moreCapsOpen
                                 ? "visible opacity-100"
                                 : "invisible opacity-0"
                             }`}
+                            onMouseEnter={cancelMoreCapsClose}
+                            onMouseLeave={scheduleMoreCapsClose}
                           >
                             <div className="w-[240px] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--popover)] py-1 shadow-lg backdrop-blur-md">
                               {loopCaps.map((cap) => (
