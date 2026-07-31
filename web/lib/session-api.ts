@@ -123,7 +123,11 @@ async function expectJson<T>(response: Response): Promise<T> {
     return new Promise(() => {});
   }
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    const detail = await response
+      .json()
+      .then((data) => (typeof data?.detail === "string" ? data.detail : null))
+      .catch(() => null);
+    throw new Error(detail ?? `Request failed: ${response.status}`);
   }
   return response.json() as Promise<T>;
 }

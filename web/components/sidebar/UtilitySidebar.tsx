@@ -9,6 +9,7 @@ import { AdminLink } from "@/components/auth/AdminLink";
 import { CoursesLink } from "@/components/auth/CoursesLink";
 import { ProfileLink } from "@/components/auth/ProfileLink";
 import { useAppShell } from "@/context/AppShellContext";
+import { notify } from "@/lib/notifications";
 import {
   deleteSession,
   listSessions,
@@ -71,7 +72,17 @@ export default function UtilitySidebar() {
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
       if (!window.confirm(t("Delete this chat history?"))) return;
-      await deleteSession(sessionId);
+      try {
+        await deleteSession(sessionId);
+      } catch (error) {
+        notify(
+          error instanceof Error
+            ? error.message
+            : t("Failed to delete this chat."),
+          { tone: "error" },
+        );
+        return;
+      }
       setSessions((prev) =>
         prev.filter((session) => session.session_id !== sessionId),
       );

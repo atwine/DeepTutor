@@ -31,6 +31,7 @@ import { VersionBadge } from "@/components/sidebar/VersionBadge";
 import type { SessionSummary } from "@/lib/session-api";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useCapabilityAccess } from "@/components/access/CapabilityAccessContext";
+import { useAuthStatus } from "@/hooks/useAuthStatus";
 import type { Capability } from "@/lib/capability-routes";
 
 interface NavEntry {
@@ -40,6 +41,9 @@ interface NavEntry {
   tooltipKey?: string;
   /** Model capability this feature needs; locked when the user lacks it. */
   requires?: Capability;
+  /** Roles that can see this item at all. Omit to show to every role
+   * (including a signed-out/auth-disabled deployment). */
+  roles?: ("admin" | "instructor" | "user")[];
 }
 
 const PRIMARY_NAV: NavEntry[] = [
@@ -60,12 +64,15 @@ const PRIMARY_NAV: NavEntry[] = [
   {
     // My Agents is its own top-level feature (pulled out of the Learning
     // Space): connect a live local Claude Code / Codex to consult in chat,
-    // and manage imported agent conversations. Ungated — managing connections
-    // and imports needs no per-user model grant.
+    // and manage imported agent conversations. Ungated on model capability —
+    // managing connections and imports needs no per-user model grant — but
+    // it's a developer-facing feature (its own config page under
+    // /settings/agents is already admin-only), so students don't see it.
     href: "/agents",
     label: "My Agents",
     icon: Bot,
     tooltipKey: "Agents tooltip",
+    roles: ["admin", "instructor"],
   },
   {
     href: "/co-writer",
@@ -101,14 +108,16 @@ const SECONDARY_NAV: NavEntry[] = [
   },
   {
     // Knowledge Center sits just above Settings: it's a console for managing
-    // KBs and retrieval engines, not a daily workspace. Never gated — embedding
-    // / search are shared admin infrastructure, no per-user model grant needed.
+    // KBs and retrieval engines, not a daily workspace. Ungated on model
+    // capability, but creating/deleting KBs and connecting a LightRAG server
+    // is admin-level system configuration — admin-only.
     href: "/knowledge",
     label: "Knowledge Center",
     icon: BookOpen,
     tooltipKey: "Knowledge tooltip",
+    roles: ["admin"],
   },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
 ];
 const GITHUB_REPO_URL = "https://github.com/HKUDS/DeepTutor";
 const DOCS_URL = "https://deeptutor.info/";
@@ -150,6 +159,21 @@ export function SidebarShell({
   const { sidebarCollapsed, setSidebarCollapsed: setCollapsed } = useAppShell();
   const { isMobile } = useDevice();
   const drawer = useSidebarDrawer();
+  const { enabled: authEnabled, role } = useAuthStatus();
+
+  // Auth disabled (solo/local use, no real accounts) never hides anything —
+  // the single user is effectively the admin. With auth enabled, hide a
+  // role-gated item until the role is actually known (mirrors AdminLink /
+  // CoursesLink, which likewise render nothing until resolved) rather than
+  // flashing it and then pulling it away.
+  const visibleForRole = (item: NavEntry) => {
+    if (!item.roles) return true;
+    if (!authEnabled) return true;
+    if (!role) return false;
+    return item.roles.includes(role as "admin" | "instructor" | "user");
+  };
+  const visiblePrimaryNav = PRIMARY_NAV.filter(visibleForRole);
+  const visibleSecondaryNav = SECONDARY_NAV.filter(visibleForRole);
 
   // Inside the mobile drawer the icon-only rail is pointless — the panel is
   // already hidden when you don't want it, so it always opens fully expanded
@@ -231,7 +255,7 @@ export function SidebarShell({
 
         {/* Primary nav */}
         <nav className="mt-1 flex w-full flex-col items-center gap-1 px-1.5">
-          {PRIMARY_NAV.map((item) => {
+          {visiblePrimaryNav.map((item) => {
             const active = pathname.startsWith(item.href);
             const locked = navLocked(item);
             const description = locked
@@ -291,7 +315,7 @@ export function SidebarShell({
         {/* Secondary nav + footer */}
         <div className="flex w-full flex-col items-center gap-1 px-1.5">
           <div className="my-1 h-px w-7 bg-[var(--border)]/40" />
-          {SECONDARY_NAV.map((item) => {
+          {visibleSecondaryNav.map((item) => {
             const active = pathname.startsWith(item.href);
             return (
               <Link
@@ -371,7 +395,7 @@ export function SidebarShell({
       {/* Primary nav */}
       <nav className="px-2 pt-1">
         <div className="space-y-px">
-          {PRIMARY_NAV.map((item) => {
+          {visiblePrimaryNav.map((item) => {
             const active = pathname.startsWith(item.href);
             const locked = navLocked(item);
             if (locked) {
@@ -472,7 +496,7 @@ export function SidebarShell({
 
       {/* Secondary nav + footer */}
       <div className="border-t border-[var(--border)]/40 px-2 py-2">
-        {SECONDARY_NAV.map((item) => {
+        {visibleSecondaryNav.map((item) => {
           const active = pathname.startsWith(item.href);
           return (
             <Link

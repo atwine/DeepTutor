@@ -153,6 +153,11 @@ async def rename_session(session_id: str, payload: SessionRenameRequest):
 @router.delete("/{session_id}")
 async def delete_session(session_id: str):
     store = get_session_store()
+    get_active_turn = getattr(store, "get_active_turn", None)
+    if get_active_turn is not None and await get_active_turn(session_id):
+        raise HTTPException(
+            status_code=409, detail="Cannot delete a chat while it's generating a response"
+        )
     deleted = await store.delete_session(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
