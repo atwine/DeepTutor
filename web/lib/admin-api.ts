@@ -10,6 +10,8 @@ export interface UserRecord {
   disabled?: boolean;
   /** Avatar marker: "", "icon:<name>:<color>", or "img:<version>". */
   avatar?: string;
+  full_name?: string;
+  registration_number?: string;
 }
 
 export async function listUsers(): Promise<UserRecord[]> {

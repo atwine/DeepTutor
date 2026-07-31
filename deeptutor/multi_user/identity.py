@@ -52,6 +52,8 @@ def _canonical_record(
             "created_at": utc_now(),
             "disabled": False,
             "avatar": "",
+            "full_name": "",
+            "registration_number": "",
         }
     if not isinstance(value, dict):
         return None
@@ -68,6 +70,8 @@ def _canonical_record(
         "created_at": str(value.get("created_at") or utc_now()),
         "disabled": bool(value.get("disabled", False)),
         "avatar": str(value.get("avatar") or ""),
+        "full_name": str(value.get("full_name") or ""),
+        "registration_number": str(value.get("registration_number") or ""),
     }
 
 
@@ -202,9 +206,44 @@ def list_user_info(  # nosec B107 - empty defaults mean "no env fallback supplie
             "created_at": record.get("created_at", ""),
             "disabled": bool(record.get("disabled", False)),
             "avatar": str(record.get("avatar") or ""),
+            "full_name": str(record.get("full_name") or ""),
+            "registration_number": str(record.get("registration_number") or ""),
         }
         for username, record in load_users(env_username, env_password_hash).items()
     ]
+
+
+def search_enrollable_users(query: str, *, limit: int = 20) -> list[dict[str, Any]]:
+    """Find student accounts (role == "user") by username, full name, or
+    registration number substring match, case-insensitive.
+
+    Scoped to non-admin, non-instructor accounts and to a minimal field set:
+    this backs the instructor-facing enrollment picker, and ``GET /users``
+    (which returns the full roster with roles/timestamps) is admin-only, so
+    an instructor has no other way to look up a student to enroll.
+    """
+    needle = query.strip().lower()
+    if not needle:
+        return []
+    matches: list[dict[str, Any]] = []
+    for username, record in load_users().items():
+        if str(record.get("role") or "user") != "user":
+            continue
+        full_name = str(record.get("full_name") or "")
+        reg_number = str(record.get("registration_number") or "")
+        haystack = f"{username} {full_name} {reg_number}".lower()
+        if needle in haystack:
+            matches.append(
+                {
+                    "id": str(record.get("id") or ""),
+                    "username": username,
+                    "full_name": full_name,
+                    "registration_number": reg_number,
+                }
+            )
+            if len(matches) >= limit:
+                break
+    return matches
 
 
 def get_user(username: str) -> dict[str, Any] | None:
@@ -226,6 +265,32 @@ def delete_user(username: str) -> bool:
         return False
     users.pop(username, None)
     _write_users(users)
+    return True
+
+
+def update_profile_details(
+    username: str,
+    *,
+    full_name: str | None = None,
+    registration_number: str | None = None,
+) -> bool:
+    """Update the current user's own display name / registration number.
+
+    These identify a real person for departmental reporting (rosters, grade
+    exports) — distinct from ``username``, which is just the login handle.
+    ``None`` leaves a field unchanged; pass ``""`` to clear it.
+    """
+    if not USERS_FILE.exists():
+        return False
+    with _USERS_WRITE_LOCK:
+        users = load_users()
+        if username not in users:
+            return False
+        if full_name is not None:
+            users[username]["full_name"] = full_name
+        if registration_number is not None:
+            users[username]["registration_number"] = registration_number
+        _write_users(users)
     return True
 
 

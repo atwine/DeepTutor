@@ -8,6 +8,8 @@ export interface ProfileInfo {
   disabled?: boolean;
   /** Avatar marker: "", "icon:<name>:<color>", or "img:<version>". */
   avatar?: string;
+  full_name?: string;
+  registration_number?: string;
 }
 
 function extractDetail(data: unknown, fallback: string): string {
@@ -42,6 +44,21 @@ export async function setAvatarMarker(avatar: string): Promise<string> {
   }
   const data = await res.json();
   return String(data.avatar ?? avatar);
+}
+
+/** Update the current user's own display name and/or registration number. */
+export async function updateProfileDetails(
+  updates: Partial<Pick<ProfileInfo, "full_name" | "registration_number">>,
+): Promise<void> {
+  const res = await apiFetch(apiUrl("/api/v1/auth/profile/details"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(extractDetail(data, "Failed to update profile"));
+  }
 }
 
 /** Upload an avatar image (already cropped/resized client-side). */

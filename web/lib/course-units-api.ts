@@ -16,7 +16,16 @@ export interface RosterEntry {
   user_id: string;
   username: string;
   role: string;
+  full_name: string;
+  registration_number: string;
   enrolled_at: string;
+}
+
+export interface StudentSearchResult {
+  id: string;
+  username: string;
+  full_name: string;
+  registration_number: string;
 }
 
 async function unwrap<T>(res: Response, fallback: string): Promise<T> {
@@ -130,4 +139,19 @@ export async function getCourseUnitRoster(
     "Failed to fetch roster",
   );
   return data.roster;
+}
+
+/** Find student accounts by username, full name, or registration number. */
+export async function searchStudents(
+  query: string,
+): Promise<StudentSearchResult[]> {
+  if (!query.trim()) return [];
+  const res = await apiFetch(
+    apiUrl(`/api/v1/multi-user/students/search?q=${encodeURIComponent(query)}`),
+  );
+  const data = await unwrap<{ students: StudentSearchResult[] }>(
+    res,
+    "Failed to search students",
+  );
+  return data.students;
 }

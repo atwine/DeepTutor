@@ -154,6 +154,8 @@ class UserInfo(BaseModel):
     created_at: str
     disabled: bool = False
     avatar: str = ""
+    full_name: str = ""
+    registration_number: str = ""
 
 
 # Markers settable through PUT /profile. Image markers ("img:<version>") are
@@ -178,6 +180,38 @@ class UpdateProfileRequest(BaseModel):
         v = v.strip()
         if v and not _ICON_MARKER_RE.match(v):
             raise ValueError("Avatar must be empty or 'icon:<name>:<color>'")
+        return v
+
+
+class UpdateProfileDetailsRequest(BaseModel):
+    """Payload for the PUT /profile/details endpoint.
+
+    Distinct from ``UpdateProfileRequest`` (which is avatar-only) so this
+    field set can grow (cohort/program, etc.) without touching the avatar
+    contract. Both fields are optional so a caller can update just one.
+    """
+
+    full_name: str | None = None
+    registration_number: str | None = None
+
+    @field_validator("full_name")
+    @classmethod
+    def full_name_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if len(v) > 200:
+            raise ValueError("Full name is too long")
+        return v
+
+    @field_validator("registration_number")
+    @classmethod
+    def registration_number_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if len(v) > 64:
+            raise ValueError("Registration number is too long")
         return v
 
 
@@ -666,6 +700,30 @@ async def update_profile(
     if current.user_id and _USER_ID_RE.match(current.user_id):
         delete_avatar_file(current.user_id)
     return {"ok": True, "avatar": body.avatar}
+
+
+@router.put("/profile/details")
+async def update_profile_details_endpoint(
+    body: UpdateProfileDetailsRequest,
+    payload: TokenPayload | None = Depends(require_auth),
+) -> dict:
+    """Update the current user's own display name and/or registration number.
+
+    Self-service by design: these identify a real person for rosters and
+    grade exports, and the account holder is the one who knows them —
+    instructors search by these fields to enroll a student (see
+    ``/api/v1/multi-user/students/search``), they don't set them.
+    """
+    current = _require_profile_identity(payload)
+    from deeptutor.multi_user.identity import update_profile_details
+
+    if not update_profile_details(
+        current.username,
+        full_name=body.full_name,
+        registration_number=body.registration_number,
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return {"ok": True}
 
 
 @router.put("/profile/avatar")

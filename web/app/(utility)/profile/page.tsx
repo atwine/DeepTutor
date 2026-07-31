@@ -11,6 +11,7 @@ import {
   getProfile,
   removeAvatarImage,
   setAvatarMarker,
+  updateProfileDetails,
   uploadAvatarImage,
   type ProfileInfo,
 } from "@/lib/profile-api";
@@ -102,6 +103,10 @@ export default function ProfilePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fullNameDraft, setFullNameDraft] = useState("");
+  const [regNumberDraft, setRegNumberDraft] = useState("");
+  const [detailsSaving, setDetailsSaving] = useState(false);
+  const [detailsSaved, setDetailsSaved] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,7 +123,11 @@ export default function ProfilePage() {
       }
       try {
         const info = await getProfile();
-        if (!cancelled) setProfile(info);
+        if (!cancelled) {
+          setProfile(info);
+          setFullNameDraft(info.full_name ?? "");
+          setRegNumberDraft(info.registration_number ?? "");
+        }
       } catch {
         if (!cancelled) setError(t("Failed to load profile"));
       } finally {
@@ -181,6 +190,37 @@ export default function ProfilePage() {
     await logout();
     router.replace("/login");
   }, [router]);
+
+  const detailsDirty =
+    profile !== null &&
+    (fullNameDraft !== (profile.full_name ?? "") ||
+      regNumberDraft !== (profile.registration_number ?? ""));
+
+  const handleSaveDetails = useCallback(async () => {
+    setDetailsSaving(true);
+    setError(null);
+    try {
+      await updateProfileDetails({
+        full_name: fullNameDraft,
+        registration_number: regNumberDraft,
+      });
+      setProfile((prev) =>
+        prev
+          ? {
+              ...prev,
+              full_name: fullNameDraft,
+              registration_number: regNumberDraft,
+            }
+          : prev,
+      );
+      setDetailsSaved(true);
+      setTimeout(() => setDetailsSaved(false), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDetailsSaving(false);
+    }
+  }, [fullNameDraft, regNumberDraft]);
 
   const descriptor = parseAvatarMarker(profile?.avatar);
   const hasImage = descriptor.kind === "image";
@@ -271,6 +311,59 @@ export default function ProfilePage() {
                     </p>
                   )}
                 </div>
+              </div>
+            </div>
+
+            {/* Details card */}
+            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm">
+              <h2 className="text-sm font-semibold text-[var(--foreground)]">
+                {t("Details")}
+              </h2>
+              <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
+                {t(
+                  "Your real name and registration number, so instructors can find you when enrolling you in a course unit.",
+                )}
+              </p>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs text-[var(--muted-foreground)]">
+                  {t("Full name")}
+                  <input
+                    type="text"
+                    value={fullNameDraft}
+                    onChange={(e) => setFullNameDraft(e.target.value)}
+                    disabled={detailsSaving}
+                    placeholder={t("e.g. Jane Doe")}
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                  />
+                </label>
+                <label className="block text-xs text-[var(--muted-foreground)]">
+                  {t("Registration number")}
+                  <input
+                    type="text"
+                    value={regNumberDraft}
+                    onChange={(e) => setRegNumberDraft(e.target.value)}
+                    disabled={detailsSaving}
+                    placeholder={t("e.g. 2026/BSE/001")}
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-4 flex items-center gap-3">
+                <button
+                  onClick={() => void handleSaveDetails()}
+                  disabled={detailsSaving || !detailsDirty}
+                  className="rounded-lg bg-[var(--foreground)] px-3 py-1.5 text-sm font-medium text-[var(--background)]
+                             hover:opacity-90 disabled:opacity-40 transition-colors"
+                >
+                  {detailsSaving ? t("Saving…") : t("Save")}
+                </button>
+                {detailsSaved && (
+                  <span className="text-xs text-[var(--muted-foreground)]">
+                    {t("Saved")}
+                  </span>
+                )}
               </div>
             </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Fragment, useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { fetchAuthStatus } from "@/lib/auth";
@@ -13,6 +13,7 @@ import {
   type CourseUnit,
 } from "@/lib/course-units-api";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { RosterEditor } from "./RosterEditor";
 import {
   BookOpen,
   RefreshCw,
@@ -20,6 +21,7 @@ import {
   Plus,
   Pencil,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -60,6 +62,7 @@ export default function CourseUnitsPage() {
   const [formError, setFormError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<CourseUnit | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [expandedUnitId, setExpandedUnitId] = useState<string | null>(null);
 
   const load = useCallback(async (admin: boolean) => {
     setLoading(true);
@@ -293,49 +296,70 @@ export default function CourseUnitsPage() {
                   <th className="px-5 py-3 font-medium">{t("Term")}</th>
                   <th className="px-5 py-3 font-medium">{t("Instructor(s)")}</th>
                   <th className="px-5 py-3 font-medium">{t("Created")}</th>
-                  {isAdmin && (
-                    <th className="px-5 py-3 font-medium text-right">{t("Actions")}</th>
-                  )}
+                  <th className="px-5 py-3 font-medium text-right">{t("Actions")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
                 {units.map((unit) => (
-                  <tr key={unit.id} className="hover:bg-[var(--background)]/50 transition-colors">
-                    <td className="px-5 py-3 font-medium text-[var(--foreground)]">
-                      {unit.name}
-                    </td>
-                    <td className="px-5 py-3 text-[var(--muted-foreground)]">
-                      {unit.term || "—"}
-                    </td>
-                    <td className="px-5 py-3 text-[var(--muted-foreground)]">
-                      {instructorNames(unit)}
-                    </td>
-                    <td className="px-5 py-3 text-[var(--muted-foreground)]">
-                      {formatDate(unit.created_at, lang)}
-                    </td>
-                    {isAdmin && (
+                  <Fragment key={unit.id}>
+                    <tr className="hover:bg-[var(--background)]/50 transition-colors">
+                      <td className="px-5 py-3 font-medium text-[var(--foreground)]">
+                        {unit.name}
+                      </td>
+                      <td className="px-5 py-3 text-[var(--muted-foreground)]">
+                        {unit.term || "—"}
+                      </td>
+                      <td className="px-5 py-3 text-[var(--muted-foreground)]">
+                        {instructorNames(unit)}
+                      </td>
+                      <td className="px-5 py-3 text-[var(--muted-foreground)]">
+                        {formatDate(unit.created_at, lang)}
+                      </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-end gap-1.5">
                           <button
-                            onClick={() => openEdit(unit)}
-                            title={t("Edit")}
+                            onClick={() =>
+                              setExpandedUnitId((current) =>
+                                current === unit.id ? null : unit.id,
+                              )
+                            }
+                            title={t("Manage roster")}
                             className="rounded-lg p-1.5 text-[var(--muted-foreground)]
                                      hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
                           >
-                            <Pencil size={15} />
+                            <Users size={15} />
                           </button>
-                          <button
-                            onClick={() => setDeleteTarget(unit)}
-                            title={t("Delete")}
-                            className="rounded-lg p-1.5 text-[var(--muted-foreground)]
-                                     hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                          >
-                            <Trash2 size={15} />
-                          </button>
+                          {isAdmin && (
+                            <>
+                              <button
+                                onClick={() => openEdit(unit)}
+                                title={t("Edit")}
+                                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                                         hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
+                              >
+                                <Pencil size={15} />
+                              </button>
+                              <button
+                                onClick={() => setDeleteTarget(unit)}
+                                title={t("Delete")}
+                                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                                         hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
+                    </tr>
+                    {expandedUnitId === unit.id && (
+                      <tr>
+                        <td colSpan={5} className="p-0">
+                          <RosterEditor courseUnitId={unit.id} />
+                        </td>
+                      </tr>
                     )}
-                  </tr>
+                  </Fragment>
                 ))}
               </tbody>
             </table>

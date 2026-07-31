@@ -33,7 +33,7 @@ from .course_units import (
     update_course_unit,
 )
 from .grants import load_grant, save_grant
-from .identity import get_user_by_id, list_user_info
+from .identity import get_user_by_id, list_user_info, search_enrollable_users
 from .knowledge_access import admin_kb_base_dir
 from .model_access import is_owner_bound
 from .paths import get_admin_path_service
@@ -420,7 +420,22 @@ async def course_unit_roster_endpoint(
                 "user_id": enrollment["user_id"],
                 "username": username,
                 "role": record.get("role", "user"),
+                "full_name": str(record.get("full_name") or ""),
+                "registration_number": str(record.get("registration_number") or ""),
                 "enrolled_at": enrollment.get("created_at", ""),
             }
         )
     return {"roster": roster}
+
+
+@router.get("/students/search")
+async def search_students_endpoint(
+    q: str = "",
+    _: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """Find student accounts by username, full name, or registration number —
+    backs the enrollment picker. Scoped to role=="user" accounts and a
+    minimal field set (see :func:`search_enrollable_users`), since ``GET
+    /users`` (the full roster) is admin-only and instructors need a way to
+    look someone up without it."""
+    return {"students": search_enrollable_users(q)}
