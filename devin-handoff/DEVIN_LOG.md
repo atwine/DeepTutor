@@ -238,3 +238,64 @@ worth a dedicated look if `mastery_quiz` failures start showing up for real stud
 -malformation finding above is not yet in `TODO.md` as its own item — worth adding if it
 recurs, following the same `on_intermediate`-repair-hook pattern used for the Quiz capability
 fix (§5 of the architecture doc) rather than a bespoke retry mechanism.
+
+---
+
+## 2026-08-01 — Claude — TODO.md item 17: edge-case testing pass, full results
+
+**Item**: TODO.md item 17.
+**Status**: done (testing). Fixes for the 2 bugs found are NOT yet applied — see below.
+**What changed**: nothing in application code — this was a test-and-record pass. Full case
+list, live results, and a fix-direction for each bug are in
+`devin-handoff/EDGE_CASE_TESTING.md` (new file) — read that file directly rather than this
+summary for the actual evidence per case.
+**Verified**: built a real fixture set (2 instructors, 2 students, 2-3 course units, 4
+assignments — auto-graded and free-text — 1 Book) via direct API calls against the live admin
+account, then ran 12 of 14 planned cases live; 2 (K2, E3) resolved by reading the actual
+grading/enrollment code instead, since forcing them live would have required patching code to
+inject a failure. All temp accounts, course units, assignments, and the book fixture were
+deleted afterward.
+**New findings — 2 real bugs, 2 known limitations, 8 clean passes**:
+1. 🐛 **Attempt-limit race condition**, but only for AI-Judge-graded (free-text) questions —
+   two near-simultaneous submits both succeed on a 1-attempt assignment. Auto-graded (choice)
+   questions don't reproduce it: no `await` sits between the count-check and the write for that
+   path, so there's no real yield point for a second request to interleave. The free-text
+   path's `await llm_complete(...)` inside grading is what opens the window. Fix direction in
+   the doc.
+2. 🐛 **`delete_course_unit()` doesn't cascade** — orphans assignments, submissions, and the
+   book-course-unit index permanently. Confirmed for both (assignments+submissions, and
+   separately the book index). The original owning instructor gets locked out of their own
+   orphaned data with a confusing "not enrolled" 403; admin can still reach it forever since
+   `_manages_course_unit` never checks whether the unit itself still exists. Fix direction (mirror
+   the existing `enrollments.json` cleanup already in that function) is in the doc.
+3. ⚠️ Emptying a unit's `instructor_ids` while a request is pending makes it unreachable by any
+   instructor (admin-only from then on) — access control is correct, just no operational
+   visibility that it happened.
+4. ⚠️ A transient AI-Judge failure permanently records a 0 and consumes the student's attempt,
+   with no regrade endpoint to fix it after the fact.
+**Left for later / handing back**: the two 🐛 items are real, understood, and have a clear fix
+direction written up — they're good candidates for Devin to pick up directly (they don't
+require any product decision, just the cascade-delete / re-check-under-lock implementation).
+The two ⚠️ items are judgment calls on the product owner's priorities, not obviously
+worth fixing immediately — flagged rather than fixed.
+
+**Explicit ask for Devin — audit this pass for gaps before fixing anything.** 12 of the 14
+cases in `EDGE_CASE_TESTING.md` have live evidence; 2 (K2, E3) were answered by reading code
+instead of forcing them live, and are noted as such in the doc — worth a second look,
+especially E3 if you can force an LLM failure without too much trouble (temporarily pointing
+the LLM config at an unreachable endpoint for one request, or a targeted unit test that mocks
+`llm_complete` to raise, would both work without needing code changes left behind).
+
+Beyond re-checking K2/E3, please also look for cases this pass didn't think to cover at all —
+the matrix was built from a code inventory of `course_units.py`, `assignments_router.py`, and
+`book_access_router.py` (see `ARCHITECTURE_AND_COMPLETED_WORK.md` for what's actually built),
+so anything outside those three files' surface (e.g. interactions between course-unit/
+assignment state and the feedback system, or Memory/Knowledge Center's own multi-user
+isolation, which was never part of this pass at all) is a real gap in coverage, not something
+already ruled out. If you find something, add it as a new row in `EDGE_CASE_TESTING.md`
+(don't renumber or reorder existing rows) and log what you found here the same way this entry
+does.
+
+Once the audit is done, the two 🐛 bugs (attempt-limit race, `delete_course_unit` cascade) are
+ready to fix directly — the doc has a fix direction for each, no product decision needed
+first.
