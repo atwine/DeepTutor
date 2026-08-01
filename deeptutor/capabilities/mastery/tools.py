@@ -651,8 +651,16 @@ def _parse_modules(
     Ids are generated server-side (``<path>_m<i>_kp<j>``) so the model never
     controls storage keys; unknown knowledge types fall back to 'concept'.
     """
+    if isinstance(raw_modules, str):
+        try:
+            raw_modules = json.loads(raw_modules)
+        except Exception:
+            pass
     if not isinstance(raw_modules, list) or not raw_modules:
-        return [], "mastery_build needs a non-empty 'modules' array."
+        return [], (
+            "mastery_build needs a non-empty 'modules' array, e.g.: "
+            '{"modules": [{"name": "Module Name", "knowledge_points": [{"name": "Objective name", "type": "concept"}]}]}'
+        )
     modules: list[LearningModule] = []
     for i, raw in enumerate(raw_modules):
         if not isinstance(raw, dict):
