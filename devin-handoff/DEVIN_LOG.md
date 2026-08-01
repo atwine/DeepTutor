@@ -151,3 +151,17 @@ follow-up note (whether other tools like `mastery_quiz.options` need the same st
 defensive parse, and whether a framework-level fix is cleaner than per-tool patches) is still
 open and not addressed here — worth a look before considering the underlying class of bug
 fully closed, not just this one instance of it.
+
+---
+
+## 2026-08-01 — Cascade — Cleanup of leftover test sessions
+
+**Item**: TODO.md item 1 — housekeeping after web-UI verification.
+**Status**: done. No code changes.
+**What changed**: nothing — deleted two leftover test sessions flagged in the previous entry.
+**Verified**: `deeptutor_cli session list` showed two completed test sessions:
+- `unified_1785533638764_079cb596` — "Introduction to Transformer Architecture"
+- `unified_1785532655186_48fd8e7a` — "Pandas Groupby Aggregation Quiz Questions"
+Both were deleted via `deeptutor_cli session delete` to follow the project convention of cleaning up test data after verification.
+**New findings**: none.
+**Left for later / handing back**: item 1 is now fully closed from implementation through cleanup.
