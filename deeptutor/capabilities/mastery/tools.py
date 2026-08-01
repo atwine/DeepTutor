@@ -88,6 +88,22 @@ def _resolve_turn_id(kwargs: dict[str, Any]) -> str:
     return str(kwargs.get("_turn_id") or "").strip()
 
 
+def _parse_judge_verdict_fraction(verdict_text: str) -> float:
+    """Map the AI Judge's opening marker to a numeric score.
+
+    Mirrors ``_parse_verdict_fraction`` in ``deeptutor/multi_user/grading.py``;
+    duplicated here to keep Mastery Path's tool layer self-contained. An
+    unrecognized verdict defaults to 1.0 so the deterministic grader remains
+    authoritative when the judge response is malformed.
+    """
+    head = verdict_text.strip()[:40]
+    if "\u2705" in head:
+        return 1.0
+    if "\u26a0" in head:
+        return 0.5
+    return 0.0
+
+
 def _question_bank_type(question_type: str) -> str:
     qtype = str(question_type or "").strip().lower()
     if qtype == "choice":
@@ -350,17 +366,18 @@ class MasteryQuizTool(BaseTool):
 
 
 class MasteryGradeTool(BaseTool):
-    """Grade the learner's answer to the pending question (deterministic)."""
+    """Grade the learner's answer to the pending question (AI-judged)."""
 
     def get_definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="mastery_grade",
             description=(
                 "Grade the learner's answer to the question you registered with "
-                "mastery_quiz. Grading is deterministic against the stored "
-                "expected answer; this updates mastery, advances spaced "
-                "repetition, and tells you whether the objective's gate is now "
-                "cleared. Then give the learner feedback."
+                "mastery_quiz. Uses an AI judge against the question, expected "
+                "answer, and the learner's full response so stated misconceptions "
+                "are caught even when a selected option is otherwise correct; this "
+                "updates mastery, advances spaced repetition, and tells you whether "
+                "the objective's gate is now cleared. Then give the learner feedback."
             ),
             parameters=[
                 ToolParameter(
@@ -394,6 +411,39 @@ class MasteryGradeTool(BaseTool):
                 pending, _resolve_turn_id(kwargs)
             )
 
+        judge_feedback = ""
+        judge_fraction = 1.0
+        try:
+            from deeptutor.api.routers.quiz_judge import (
+                _JUDGE_SYSTEM_PROMPTS,
+                _build_judge_user_prompt,
+            )
+            from deeptutor.services.llm import complete as llm_complete
+
+            language = "en"
+            system_prompt = _JUDGE_SYSTEM_PROMPTS.get(language, _JUDGE_SYSTEM_PROMPTS["en"])
+            user_prompt = _build_judge_user_prompt(
+                language=language,
+                question=pending.prompt,
+                question_type=pending.question_type,
+                options=choice_options or None,
+                correct_answer=expected_answer,
+                explanation="",
+                user_answer=answer,
+                has_image=False,
+                image_count=0,
+            )
+            judge_feedback = await llm_complete(user_prompt, system_prompt=system_prompt)
+            judge_fraction = _parse_judge_verdict_fraction(judge_feedback)
+        except Exception as exc:
+            logger.warning("AI Judge grading call failed in mastery_grade: %s", exc)
+            judge_feedback = ""
+            judge_fraction = 1.0
+
+        is_correct_override: bool | None = None
+        if judge_feedback:
+            is_correct_override = judge_fraction >= 1.0
+
         is_correct = service.grade_and_record(
             progress,
             question_id=pending.question_id,
@@ -403,6 +453,7 @@ class MasteryGradeTool(BaseTool):
             expected_answer=expected_answer,
             question_type=pending.question_type,
             scheduler=scheduler,
+            is_correct_override=is_correct_override,
         )
         await _sync_mastery_attempt_to_question_bank(
             session_id=_resolve_session_id(kwargs),
@@ -418,6 +469,7 @@ class MasteryGradeTool(BaseTool):
         mastered = bool(kp and is_mastered(progress, kp))
         payload = {
             "is_correct": is_correct,
+            "feedback": judge_feedback,
             "knowledge_point_id": pending.knowledge_point_id,
             "mastery": round(display_mastery(progress, kp), 3) if kp else 0.0,
             "threshold": round(gate_threshold(kp.type), 3) if kp else 0.0,

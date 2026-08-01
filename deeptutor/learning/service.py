@@ -170,6 +170,7 @@ class LearningService:
         question_type: str = "short",
         self_attribution: str = "",
         scheduler: SpacedRepetitionScheduler | None = None,
+        is_correct_override: bool | None = None,
     ) -> bool:
         """Grade one answer and fold it through the full post-answer pipeline.
 
@@ -178,10 +179,16 @@ class LearningService:
         of truth for what happens when a student answers, shared by every
         interactive stage. Grading is fail-closed: with no stored expected
         answer the attempt is recorded wrong, never right.
+
+        ``is_correct_override`` lets callers (e.g. an AI Judge checking for
+        stated misconceptions) replace the deterministic answer check while
+        still going through the same mastery/scheduler bookkeeping.
         """
         is_correct = bool(expected_answer) and grade_answer(
             user_answer, expected_answer, question_type
         )
+        if is_correct_override is not None:
+            is_correct = bool(is_correct_override)
         self.record_quiz_attempt(
             progress,
             QuizAttempt(

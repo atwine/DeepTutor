@@ -165,3 +165,28 @@ fully closed, not just this one instance of it.
 Both were deleted via `deeptutor_cli session delete` to follow the project convention of cleaning up test data after verification.
 **New findings**: none.
 **Left for later / handing back**: item 1 is now fully closed from implementation through cleanup.
+
+---
+
+## 2026-08-01 — Cascade — TODO.md item 2: mastery_grade now uses the AI Judge
+
+**Item**: TODO.md item 2 — improve `mastery_grade` to catch stated misconceptions.
+**Status**: done (implementation + live tool verification).
+**What changed**:
+- `deeptutor/learning/service.py` — `LearningService.grade_and_record()` now accepts an optional `is_correct_override` kwarg. When supplied, the post-answer bookkeeping (record attempt, recompute mastery, advance scheduler, persist) still runs through the single source of truth, but the correctness bit comes from the caller instead of the deterministic `grade_answer()` check.
+- `deeptutor/capabilities/mastery/tools.py` — `MasteryGradeTool.execute()` now calls the Quiz AI Judge (`_build_judge_user_prompt` / `_JUDGE_SYSTEM_PROMPTS` from `deeptutor/api/routers/quiz_judge.py`, plus `llm_complete`) before recording. The judge's verdict replaces the deterministic grade, so a superficially-correct answer that contains a confident misconception is now marked incorrect and the judge's explanatory feedback is returned in the tool result. The deterministic check remains as a silent fallback if the judge call fails.
+- Imported lazily inside `execute` to avoid the import cycle that would happen if `quiz_judge.py` were pulled in at module load via the tool registry.
+- Updated the tool description to tell the model that grading checks for stated misconceptions.
+
+**Root cause**: `MasteryGradeTool` was calling `service.grade_and_record()`, which used `grade_answer()` — purely string/keyword/fuzzy matching. A student could write "fillna() fills missing values, but isn't it basically the same as dropna()? They both just get rid of missing values." and be marked correct because the answer contained the expected keywords, while the underlying misconception went unchallenged.
+
+**Verified**:
+- Rebuilt production Docker image (`docker compose -f docker-compose.yml build deeptutor`) and restarted containers.
+- Direct tool test in the running container against the live vLLM endpoint:
+  - **Short answer with misconception**: `"It fills missing values, but isn't fillna() basically the same as dropna()? They both just get rid of the missing values."` → judge returned `⚠️ Partially correct...`, `is_correct=false`, and detailed feedback explaining the misconception.
+  - **Choice answer with stated misconception**: selected `"B: fillna()"` but explained that it's "basically the same as dropna()" → judge returned `⚠️ Partially correct, because although the learner chose the correct function, they misunderstood its purpose...`, `is_correct=false`.
+  - **Correct answer**: `"It replaces missing values with a value or method that you specify."` → judge returned `✅ Correct...`, `is_correct=true`.
+- Test data (`test-grade-*.json` files under `data/user/workspace/learning`) was deleted after verification.
+
+**New findings**: Reusing the Quiz AI Judge prompt works cleanly for Mastery Path and directly addresses the false-positive grading pattern. The only caveat is that every `mastery_grade` now incurs an LLM call, so this trades cost/latency for correctness. If that becomes an issue, a future optimization could run the judge only when the deterministic grader says correct (fail-closed) or only for `short`/`open` questions.
+**Left for later / handing back**: Consider whether the framework-wide string-argument issue noted in item 1 also affects `mastery_quiz.options` or other mastery tools with this vLLM provider. Item 2 is otherwise closed.
