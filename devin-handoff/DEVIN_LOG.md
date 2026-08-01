@@ -190,3 +190,51 @@ Both were deleted via `deeptutor_cli session delete` to follow the project conve
 
 **New findings**: Reusing the Quiz AI Judge prompt works cleanly for Mastery Path and directly addresses the false-positive grading pattern. The only caveat is that every `mastery_grade` now incurs an LLM call, so this trades cost/latency for correctness. If that becomes an issue, a future optimization could run the judge only when the deterministic grader says correct (fail-closed) or only for `short`/`open` questions.
 **Left for later / handing back**: Consider whether the framework-wide string-argument issue noted in item 1 also affects `mastery_quiz.options` or other mastery tools with this vLLM provider. Item 2 is otherwise closed.
+
+---
+
+## 2026-08-01 — Claude — Web-UI validation of item 2 (Devin's mastery_grade fix)
+
+**Item**: TODO.md item 2 — closing out Devin's implementation with a genuine end-to-end
+browser test (real interactive quiz card, real typed free-text answer), not just a direct
+tool-level call.
+**Status**: done. Confirms Devin's fix works through the actual student-facing flow.
+**What changed**: nothing — verification only. Rebuilt the image (`docker compose -f
+docker-compose.yml build deeptutor` — cache-hit on the `deeptutor/` layer, confirming Devin's
+local edit was already baked in from Devin's own rebuild) and redeployed.
+**Verified**: created a temporary fresh student account (`temp_grade_test`, role `user`, zero
+prior mastery history — necessary because the standing `admin` test account already had
+`missing_value_handling` mastered from earlier sessions and would just short-circuit to
+"already mastered" without ever reaching a real grading call) via `POST /api/v1/auth/users`,
+granted it the vLLM model via the admin Users page's "Assign access" panel (note: the
+checkbox toggle alone does **not** persist — the panel has a separate "Save assignments"
+button below the visible fold that's easy to miss; confirmed by reloading and seeing "0
+models" until the Save button was actually clicked). Logged in as that account, built a fresh
+mastery path, asked for a quiz, and got a real interactive multiple-choice card ("What is
+missing value handling in pandas?", options A-D + "Other — write your own reply"). Selected
+"Other" and typed a deliberately confused free-text answer: *"It means replacing missing
+values using fillna(), but isn't that basically the same as dropna()? They both just get rid
+of the missing values in the end."* The response correctly identified the confusion — *"Your
+answer... was partially correct, but it showed some confusion between the purposes and
+functionalities of `fillna()` and `dropna()`"* — with an accurate explanation of the actual
+distinction, instead of accepting the superficially-plausible phrasing at face value. Trace
+confirmed exactly one `mastery_grade` call. Deleted both test sessions and the temp account
+afterward.
+**New findings**: **`mastery_quiz`'s question-presentation step is flaky under live vLLM,
+independent of Devin's grading fix.** On the same account, two earlier attempts to get a quiz
+question (via `"Quiz me on missing_value_handling now."` and a follow-up in the same session)
+both failed with `"I could not produce a useful response from the model output."` — backend
+logs showed `Error code: 400 - {'error': {'message': 'Unterminated string starting at: line 1
+column 15 (char 14)', ...}}`, i.e. the model emitted malformed/truncated JSON for the quiz
+tool call, same general failure family as the Quiz-capability narrated-tool-call issue and the
+`mastery_build` string-argument issue already documented in this log and in
+`ARCHITECTURE_AND_COMPLETED_WORK.md` §5. It resolved on the third attempt, in a brand-new
+session with clean context (starting fresh rather than retrying in the same
+now-polluted-with-errors session appears to matter). **This is a real, separate, currently
+unfixed reliability gap** — not blocking (it self-resolved with a retry + fresh session), but
+worth a dedicated look if `mastery_quiz` failures start showing up for real students, since
+"just retry in a new chat" isn't a fix a student can be expected to know to do.
+**Left for later / handing back**: TODO.md item 2 is closed. The new `mastery_quiz` JSON
+-malformation finding above is not yet in `TODO.md` as its own item — worth adding if it
+recurs, following the same `on_intermediate`-repair-hook pattern used for the Quiz capability
+fix (§5 of the architecture doc) rather than a bespoke retry mechanism.
