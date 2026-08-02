@@ -183,7 +183,45 @@ open task.
 
 ---
 
-## 7. Phase 10 wrap-up
+## 7. Move course-unit/assignment storage off flat JSON onto a real database
+
+**Large, multi-session effort. Do not start without explicit go-ahead on which phase —
+see `DATABASE_MIGRATION_PLAN.md` in this folder for the full scoping (schema draft, phased
+plan, what's in/out of scope, honest sizing).**
+
+Prompted by a scalability review: `course_units.py`, `assignments.py`, and `course_books.py`
+store everything as flat JSON files, read/rewritten in full on every operation, serialized by
+a single in-process `threading.Lock` per file. Confirmed real problems: writes aren't atomic
+(a crash mid-write can corrupt a whole file), the in-process locks silently stop providing any
+protection at all the moment this app ever runs as more than one process (e.g. two Railway
+replicas), every read is O(total records system-wide) rather than O(what was actually asked
+for), and `delete_course_unit()`'s cascade-delete (added this session, see architecture doc §
+on K1/C1/C2) has to manually sweep three separate files by hand — exactly the kind of thing a
+real foreign-key `ON DELETE CASCADE` does declaratively and can't forget to do.
+
+**Target**: PostgreSQL (Railway offers it as a one-click managed addon) + SQLAlchemy 2.0 async
++ asyncpg. Every existing public function in these three modules keeps its exact name and
+signature, so the routers that call them (`router.py`, `assignments_router.py`,
+`book_access_router.py`) don't need to change at all — this is the constraint that keeps the
+blast radius bounded to "rewrite what's inside these three files."
+
+**Suggested first step, if picked up**: Phase A only — stand up a Postgres container in
+`docker-compose.yml` (mirrors the existing `pocketbase` sidecar) and confirm the app can
+connect to it. Low-risk, easily reversible, de-risks the "does this fit the existing deployment
+shape" question before committing to rewriting any real logic in Phases B onward.
+
+**Explicitly out of scope for this migration** (own tradeoffs, don't fold these in): `identity.py`
+(users) and `grants.py` (already per-user-sharded, lower urgency) stay as JSON for now; chat/
+session storage (already per-user SQLite) is architecturally sound as-is and isn't touched.
+
+**Regression suite already exists**: `EDGE_CASE_TESTING.md`'s 14 documented cases cover exactly
+this subsystem's tricky behavior (cascade deletes, the attempt-limit race, enrollment lifecycle,
+cross-instructor isolation) — re-run that same matrix against the DB-backed implementation
+before considering any phase past B done, rather than inventing new verification from scratch.
+
+---
+
+## 8. Phase 10 wrap-up
 
 **Small, low-urgency, do last.**
 
