@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { fetchAuthStatus } from "@/lib/auth";
@@ -12,7 +12,7 @@ import {
   type StudentAssignmentView,
   type Submission,
 } from "@/lib/assignments-api";
-import { ArrowLeft, Check, ClipboardList, X as XIcon } from "lucide-react";
+import { ArrowLeft, Check, ClipboardList, Clock, X as XIcon } from "lucide-react";
 import Link from "next/link";
 
 function QuestionInput({
@@ -146,6 +146,14 @@ export default function StudentAssignmentsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
+  // A4: briefing screen state — student sees info before starting
+  const [started, setStarted] = useState(false);
+  // A4: timer state for timed assignments
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // A5: submission receipt state
+  const [showReceipt, setShowReceipt] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -172,12 +180,19 @@ export default function StudentAssignmentsPage() {
     if (expandedId === assignment.id) {
       setExpandedId(null);
       setDetail(null);
+      setStarted(false);
+      setTimeRemaining(null);
+      if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
     setExpandedId(assignment.id);
     setDetail(null);
     setAnswers({});
     setSubmitError("");
+    setStarted(false);
+    setShowReceipt(false);
+    setTimeRemaining(null);
+    if (timerRef.current) clearInterval(timerRef.current);
     setDetailLoading(true);
     try {
       const full = (await getAssignment(assignment.id)) as StudentAssignmentView;
@@ -189,8 +204,33 @@ export default function StudentAssignmentsPage() {
     }
   }
 
+  function handleStartAssignment() {
+    if (!detail) return;
+    setStarted(true);
+    // A4: start timer for timed assignments
+    if (detail.is_timed && detail.time_limit_minutes) {
+      const totalSeconds = detail.time_limit_minutes * 60;
+      setTimeRemaining(totalSeconds);
+      const start = Date.now();
+      timerRef.current = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - start) / 1000);
+        const remaining = totalSeconds - elapsed;
+        if (remaining <= 0) {
+          setTimeRemaining(0);
+          if (timerRef.current) clearInterval(timerRef.current);
+          // Auto-submit on time expiry
+          void handleSubmit();
+        } else {
+          setTimeRemaining(remaining);
+        }
+      }, 1000);
+    }
+  }
+
   async function handleSubmit() {
     if (!detail || submitting) return;
+    // Stop timer if running
+    if (timerRef.current) clearInterval(timerRef.current);
     setSubmitting(true);
     setSubmitError("");
     try {
@@ -199,9 +239,14 @@ export default function StudentAssignmentsPage() {
         answer: answers[q.question_id] ?? "",
       }));
       const submission = await submitAssignment(detail.id, payload);
-      setDetail((prev) =>
-        prev ? { ...prev, my_attempts: prev.my_attempts + 1, my_latest_submission: submission } : prev,
-      );
+      // A5: Show receipt briefly before results
+      setShowReceipt(true);
+      setTimeout(() => {
+        setShowReceipt(false);
+        setDetail((prev) =>
+          prev ? { ...prev, my_attempts: prev.my_attempts + 1, my_latest_submission: submission } : prev,
+        );
+      }, 2000);
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : t("Failed to submit"));
     } finally {
@@ -258,11 +303,14 @@ export default function StudentAssignmentsPage() {
                   <div className="min-w-0">
                     <h2 className="font-medium text-[var(--foreground)]">{a.title}</h2>
                     <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
-                      {t("{{count}} questions · weight {{weight}}", {
-                        count: a.question_count,
-                        weight: a.weight,
-                      })}
+                      {a.question_count === 1
+                        ? t("1 question")
+                        : t("{{count}} questions", { count: a.question_count })}
+                      {" · "}{t("weight {{weight}}", { weight: a.weight })}
                       {a.due_at ? ` · ${t("due")} ${a.due_at}` : ""}
+                      {a.is_timed && a.time_limit_minutes
+                        ? ` · ${t("{{min}} min timed", { min: a.time_limit_minutes })}`
+                        : ""}
                     </p>
                     {a.description && (
                       <p className="mt-2 text-sm text-[var(--muted-foreground)]">
@@ -284,7 +332,20 @@ export default function StudentAssignmentsPage() {
                   <div className="mt-4 border-t border-[var(--border)] pt-4">
                     {detailLoading ? (
                       <p className="text-sm text-[var(--muted-foreground)]">{t("Loading…")}</p>
-                    ) : !detail ? null : detail.my_latest_submission ? (
+                    ) : !detail ? null : showReceipt ? (
+                      /* A5: Brief submission receipt */
+                      <div className="flex flex-col items-center py-8 text-center">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15">
+                          <Check size={24} className="text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <p className="mt-3 text-sm font-medium text-[var(--foreground)]">
+                          {t("Submission received")}
+                        </p>
+                        <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                          {t("Your answers have been recorded. Results loading…")}
+                        </p>
+                      </div>
+                    ) : detail.my_latest_submission ? (
                       <>
                         <ResultView submission={detail.my_latest_submission} />
                         {detail.my_attempts < detail.attempt_limit && (
@@ -296,8 +357,66 @@ export default function StudentAssignmentsPage() {
                           </p>
                         )}
                       </>
+                    ) : !started ? (
+                      /* A4: Pre-assignment briefing screen */
+                      <div className="space-y-4">
+                        <div className="rounded-lg border border-[var(--border)] bg-[var(--background)]/50 p-4">
+                          <h3 className="text-sm font-semibold text-[var(--foreground)]">
+                            {detail.title}
+                          </h3>
+                          {detail.description && (
+                            <p className="mt-2 text-sm text-[var(--muted-foreground)]">
+                              {detail.description}
+                            </p>
+                          )}
+                          <div className="mt-3 flex flex-wrap gap-3 text-xs text-[var(--muted-foreground)]">
+                            <span>
+                              {detail.question_count === 1
+                                ? t("1 question")
+                                : t("{{count}} questions", { count: detail.question_count })}
+                            </span>
+                            <span>{t("weight {{weight}}", { weight: detail.weight })}</span>
+                            <span>
+                              {detail.attempt_limit === 1
+                                ? t("1 attempt")
+                                : t("{{count}} attempts", { count: detail.attempt_limit })}
+                            </span>
+                            {detail.due_at && <span>{t("due")} {detail.due_at}</span>}
+                            {detail.is_timed && detail.time_limit_minutes && (
+                              <span className="flex items-center gap-1">
+                                <Clock size={12} />
+                                {t("{{min}} minutes", { min: detail.time_limit_minutes })}
+                              </span>
+                            )}
+                          </div>
+                          {detail.is_timed && detail.time_limit_minutes && (
+                            <p className="mt-3 text-xs font-medium text-amber-600 dark:text-amber-400">
+                              {t("This is a timed assignment. Once you start, you will have {{min}} minutes to complete it. Your answers will be auto-submitted when time expires.", { min: detail.time_limit_minutes })}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={handleStartAssignment}
+                          className="rounded-lg bg-[var(--foreground)] px-4 py-2 text-sm font-medium text-[var(--background)] hover:opacity-90"
+                        >
+                          {t("Start assignment")}
+                        </button>
+                      </div>
                     ) : (
                       <div className="space-y-4">
+                        {/* A4: Timer display for timed assignments */}
+                        {timeRemaining !== null && (
+                          <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
+                            timeRemaining <= 60
+                              ? "bg-red-500/10 text-red-600 dark:text-red-400"
+                              : timeRemaining <= 300
+                                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                : "bg-[var(--muted)]/40 text-[var(--foreground)]"
+                          }`}>
+                            <Clock size={14} />
+                            {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, "0")} {t("remaining")}
+                          </div>
+                        )}
                         {detail.questions.map((q) => (
                           <div key={q.question_id}>
                             <p className="mb-2 text-sm text-[var(--foreground)]">

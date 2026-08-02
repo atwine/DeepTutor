@@ -14,6 +14,7 @@ stay authoritative until their respective tracks land.
 from .engine import dispose_engine, get_engine, get_session_factory, session_scope
 from .models import (
     Assignment,
+    AssignmentAccessGrant,
     Base,
     CourseBookEntry,
     CourseUnit,
@@ -24,6 +25,7 @@ from .models import (
 
 __all__ = [
     "Assignment",
+    "AssignmentAccessGrant",
     "Base",
     "CourseBookEntry",
     "CourseUnit",

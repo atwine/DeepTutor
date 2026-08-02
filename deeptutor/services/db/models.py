@@ -151,9 +151,15 @@ class Assignment(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
     created_by: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    # A4: timed assignment support — optional countdown for "major" assignments.
+    is_timed: Mapped[bool] = mapped_column(nullable=False, default=False)
+    time_limit_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="assignments")
     submissions: Mapped[list["Submission"]] = relationship(
+        back_populates="assignment", cascade="all, delete-orphan"
+    )
+    access_grants: Mapped[list["AssignmentAccessGrant"]] = relationship(
         back_populates="assignment", cascade="all, delete-orphan"
     )
 
@@ -180,6 +186,43 @@ class Submission(Base):
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     assignment: Mapped[Assignment] = relationship(back_populates="submissions")
+
+
+# ---------------------------------------------------------------------------
+# Track A (Round 2) — per-student exception/emergency access
+# ---------------------------------------------------------------------------
+
+
+class AssignmentAccessGrant(Base):
+    """Per-student override for attempt limits and/or due dates on a specific
+    assignment. Created by an instructor when a student has an emergency or
+    needs accommodation — the submit flow checks this grant in addition to
+    the assignment's own limits."""
+
+    __tablename__ = "assignment_access_grants"
+    __table_args__ = (
+        UniqueConstraint(
+            "assignment_id", "user_id", name="uq_access_grant_assignment_user"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: f"aag_{uuid.uuid4().hex}"
+    )
+    assignment_id: Mapped[str] = mapped_column(
+        ForeignKey("assignments.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    # If set, the student gets this many *extra* attempts on top of the
+    # assignment's base attempt_limit. NULL means no extra attempts granted.
+    extra_attempts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # If set, this student's personal deadline (overrides assignment.due_at).
+    # NULL means the assignment's own due_at applies as normal.
+    extended_due_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    granted_by: Mapped[str] = mapped_column(String, nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    assignment: Mapped[Assignment] = relationship(back_populates="access_grants")
 
 
 # ---------------------------------------------------------------------------

@@ -20,6 +20,7 @@ is not affected by the async change.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -27,7 +28,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from deeptutor.services.db import session_scope
-from deeptutor.services.db.models import Assignment, Submission
+from deeptutor.services.db.models import Assignment, AssignmentAccessGrant, Submission
+
+# Sentinel for "parameter not provided" (distinct from None which means
+# "clear the field") — used by update_assignment for nullable fields.
+_UNSET = object()
 
 # Auto-gradable by exact (normalized) string match against `correct_answer`.
 QUESTION_TYPES_AUTO_GRADABLE = {"choice", "concept", "fill_in_blank"}
@@ -91,6 +96,8 @@ def _assignment_to_dict(a: Assignment) -> dict[str, Any]:
         "status": a.status,
         "created_by": a.created_by,
         "created_at": a.created_at.isoformat() if a.created_at else "",
+        "is_timed": a.is_timed,
+        "time_limit_minutes": a.time_limit_minutes,
     }
 
 
@@ -125,6 +132,8 @@ async def create_assignment(
     attempt_limit: int = 1,
     due_at: str = "",
     created_by: str = "",
+    is_timed: bool = False,
+    time_limit_minutes: int | None = None,
 ) -> dict[str, Any]:
     record = Assignment(
         id=new_assignment_id(),
@@ -137,6 +146,8 @@ async def create_assignment(
         due_at=due_at,
         status="draft",
         created_by=created_by,
+        is_timed=is_timed,
+        time_limit_minutes=time_limit_minutes,
     )
     async with session_scope() as session:
         session.add(record)
@@ -172,12 +183,15 @@ async def update_assignment(
     weight: float | None = None,
     attempt_limit: int | None = None,
     due_at: str | None = None,
+    is_timed: bool | None = None,
+    time_limit_minutes: int | None = _UNSET,  # type: ignore[assignment]
 ) -> dict[str, Any] | None:
     """Questions can only be edited while the assignment is still a draft —
     once published, a student may already be looking at them, and changing
     the question set out from under an in-progress or already-graded attempt
     would make scores incomparable between students. Metadata (title,
-    description, weight, due date) can still change after publish."""
+    description, weight, due date, timer settings) can still change after
+    publish."""
     async with session_scope() as session:
         result = await session.execute(
             select(Assignment).where(Assignment.id == assignment_id)
@@ -199,6 +213,10 @@ async def update_assignment(
             record.attempt_limit = max(1, int(attempt_limit))
         if due_at is not None:
             record.due_at = due_at
+        if is_timed is not None:
+            record.is_timed = is_timed
+        if time_limit_minutes is not _UNSET:
+            record.time_limit_minutes = time_limit_minutes
         await session.flush()
         return _assignment_to_dict(record)
 
@@ -212,6 +230,28 @@ async def publish_assignment(assignment_id: str) -> dict[str, Any] | None:
         if record is None:
             return None
         record.status = "published"
+        await session.flush()
+        return _assignment_to_dict(record)
+
+
+async def unpublish_assignment(assignment_id: str) -> dict[str, Any] | None:
+    """Revert a published assignment back to draft. Existing submissions are
+    preserved (scores remain for audit/history), but no *new* submissions are
+    accepted while the assignment is in draft status — the submit endpoint
+    already checks ``status == "published"`` before allowing a submit.
+
+    Decision rationale (logged in DEVIN_LOG.md): option (a) from the plan —
+    keep existing submissions, just block new ones while in draft. This allows
+    an instructor to fix a typo in a question (questions become editable again
+    once status is 'draft') without destroying grading history."""
+    async with session_scope() as session:
+        result = await session.execute(
+            select(Assignment).where(Assignment.id == assignment_id)
+        )
+        record = result.scalar_one_or_none()
+        if record is None:
+            return None
+        record.status = "draft"
         await session.flush()
         return _assignment_to_dict(record)
 
@@ -426,3 +466,141 @@ async def create_submission_checked(
         session.add(record)
         await session.flush()
         return _submission_to_dict(record)
+
+
+# ---------------------------------------------------------------------------
+# Access grants (A3) — per-student exception/emergency access
+# ---------------------------------------------------------------------------
+
+
+async def get_access_grant(
+    assignment_id: str, user_id: str
+) -> dict[str, Any] | None:
+    """Retrieve a per-student access grant for an assignment, or None."""
+    async with session_scope() as session:
+        result = await session.execute(
+            select(AssignmentAccessGrant).where(
+                AssignmentAccessGrant.assignment_id == assignment_id,
+                AssignmentAccessGrant.user_id == str(user_id),
+            )
+        )
+        grant = result.scalar_one_or_none()
+        if grant is None:
+            return None
+        return _grant_to_dict(grant)
+
+
+async def upsert_access_grant(
+    assignment_id: str,
+    user_id: str,
+    *,
+    extra_attempts: int | None = None,
+    extended_due_at: str | None = None,
+    granted_by: str,
+) -> dict[str, Any]:
+    """Create or update a per-student access grant. Upsert on
+    (assignment_id, user_id) unique constraint."""
+    async with session_scope() as session:
+        result = await session.execute(
+            select(AssignmentAccessGrant).where(
+                AssignmentAccessGrant.assignment_id == assignment_id,
+                AssignmentAccessGrant.user_id == str(user_id),
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing is not None:
+            if extra_attempts is not None:
+                existing.extra_attempts = extra_attempts
+            if extended_due_at is not None:
+                existing.extended_due_at = extended_due_at
+            existing.granted_by = granted_by
+            existing.granted_at = datetime.now(timezone.utc)
+            await session.flush()
+            return _grant_to_dict(existing)
+        grant = AssignmentAccessGrant(
+            id=f"aag_{uuid4().hex}",
+            assignment_id=assignment_id,
+            user_id=str(user_id),
+            extra_attempts=extra_attempts,
+            extended_due_at=extended_due_at,
+            granted_by=granted_by,
+        )
+        session.add(grant)
+        await session.flush()
+        return _grant_to_dict(grant)
+
+
+async def revoke_access_grant(assignment_id: str, user_id: str) -> bool:
+    """Remove a per-student access grant."""
+    async with session_scope() as session:
+        result = await session.execute(
+            delete(AssignmentAccessGrant).where(
+                AssignmentAccessGrant.assignment_id == assignment_id,
+                AssignmentAccessGrant.user_id == str(user_id),
+            )
+        )
+        return result.rowcount > 0
+
+
+async def list_access_grants_for_assignment(
+    assignment_id: str,
+) -> list[dict[str, Any]]:
+    """List all per-student grants for an assignment."""
+    async with session_scope() as session:
+        result = await session.execute(
+            select(AssignmentAccessGrant).where(
+                AssignmentAccessGrant.assignment_id == assignment_id
+            )
+        )
+        return [_grant_to_dict(g) for g in result.scalars()]
+
+
+def _grant_to_dict(g: AssignmentAccessGrant) -> dict[str, Any]:
+    return {
+        "id": g.id,
+        "assignment_id": g.assignment_id,
+        "user_id": g.user_id,
+        "extra_attempts": g.extra_attempts,
+        "extended_due_at": g.extended_due_at,
+        "granted_by": g.granted_by,
+        "granted_at": g.granted_at.isoformat() if g.granted_at else "",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Due-at enforcement (A2) + access-grant-aware attempt limit
+# ---------------------------------------------------------------------------
+
+
+def get_effective_attempt_limit(
+    assignment: dict[str, Any], grant: dict[str, Any] | None
+) -> int:
+    """Compute the effective attempt limit for a student, taking their
+    per-student access grant into account."""
+    base = assignment["attempt_limit"]
+    if grant and grant.get("extra_attempts"):
+        return base + grant["extra_attempts"]
+    return base
+
+
+def check_due_at(
+    assignment: dict[str, Any], grant: dict[str, Any] | None
+) -> None:
+    """Raise ValueError if the assignment is past its due date for this
+    student. If the student has an extended_due_at grant, that overrides
+    the assignment's due_at. Empty/unparseable due_at means no deadline."""
+    due_at_str = assignment.get("due_at") or ""
+    if grant and grant.get("extended_due_at"):
+        due_at_str = grant["extended_due_at"]
+    if not due_at_str:
+        return  # No deadline
+    try:
+        due_at = datetime.fromisoformat(due_at_str)
+    except (ValueError, TypeError):
+        return  # Unparseable — treat as no deadline
+    # Ensure timezone-aware comparison
+    if due_at.tzinfo is None:
+        due_at = due_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if now > due_at:
+        raise ValueError("This assignment is past its due date.")
