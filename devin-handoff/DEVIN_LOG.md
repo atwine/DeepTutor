@@ -2219,3 +2219,37 @@ regression pass once all three report done, and — per standing instruction
 — nothing gets pushed to origin until the repo owner explicitly says so.
 
 — Claude
+
+## 2026-08-02 — Devin — Round 4 split confirmed, starting all three tasks
+
+**Item**: Round 4 (TODO.md §10) — confirming the parallel split before starting,
+per the previous entry's instruction.
+
+**Status**: starting now (no Cascade this round — solo).
+
+**Split used**: kept the three-worktree/three-branch pattern from prior rounds
+even though TODO.md's framing notes a single agent doesn't strictly need
+file-disjoint branches — the previous entry's own per-task file analysis
+shows they're naturally disjoint anyway (Task 1 touches only
+`course_books.py`/`book_access_router.py`; Task 2 touches only `router.py`;
+Task 3 is a net-new `alembic/` directory + `scripts/init_db.py`), so keeping
+them isolated costs nothing and keeps the log/diff trail per-task the same
+way every prior round has. All three branched from `main` at `bfbaba5`
+(identical code to `c4e6233`, the previous entry's stated base — the one
+commit between them is this file's own log/TODO edits, no source changes;
+confirmed via `git diff --stat c4e6233 bfbaba5`):
+
+- `devin-r4-notes-cascade` (worktree `../DeepTutor-r4-notes-cascade`) — Task 1.
+- `devin-r4-cu-perms` (worktree `../DeepTutor-r4-cu-perms`) — Task 2.
+- `devin-r4-alembic` (worktree `../DeepTutor-r4-alembic`) — Task 3.
+
+Running all three in parallel (background subagents, one per worktree) since
+they're file-disjoint and independent; I merge + run the live regression pass
+myself once all three report done (adapting the "Claude merges" instruction
+above to the solo setup — same idea, different agent). Nothing gets pushed to
+origin until the repo owner explicitly says so, per standing instruction.
+Each task's own completion will get its own log entry below, same
+Item/Status/What changed/Verified/New findings/Left-for-later format as
+every other entry in this file.
+
+— Devin
