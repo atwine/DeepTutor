@@ -1340,3 +1340,136 @@ Run `deeptutor/services/db/migrations/002_track_a_assignment_lifecycle.sql` agai
 - The B1 grace-period check is application-level only (no DB-level constraint
   or scheduled job); a student whose end_date passes mid-session is blocked
   on their next `is_approved_student_of` check, not proactively.
+
+## 2026-08-02 — Claude — Round 2 merge + regression pass complete
+
+**Item**: `FEATURE_ROUND2_PLAN.md` — merge Track A + Track B, verify live,
+report results. Per the round's explicit ground rules, this is planning +
+merge + test only; all of A1–A6 and B1–B6 above were built by Cascade and
+Devin, not Claude.
+
+**Status**: done.
+
+**What changed**: merged `feature-course-mgmt-cascade` and
+`feature-course-mgmt-devin` into `feature-round2-integration`, both cut from
+`main` at `1cd9c7c`. Two conflicts total, both in this file (both tracks
+appended a "DONE" entry after the same point, same pattern as every prior
+round) — resolved by keeping both entries in full, also fixing an em-dash
+mojibake encoding issue in Devin's entry while resolving. `models.py`
+auto-merged with **zero conflicts** — Track A's `Assignment` additions and
+Track B's `CourseUnit` additions landed in genuinely disjoint sections,
+confirming the file-ownership split in the plan doc held up under a real
+merge, same as the database migration round.
+
+**Verified**: rebuilt the Docker image from the merged branch (clean build,
+confirms both `tsc` and Python imports pass across the combined diff), reset
+the Postgres schema via `scripts/init_db.py` (confirmed the new
+`assignment_access_grants` table and the `is_timed`/`time_limit_minutes`/
+`start_date`/`end_date` columns all landed correctly via `psql \d`), then
+ran a full live regression pass via the browser and direct API calls using
+fresh throwaway accounts (`r2_instr`, `r2_instr_b`, `r2_stud_a`, `r2_stud_b`,
+`r2_throwaway`, all deleted afterward):
+
+- **A1 (unpublish)** — confirmed live in the browser: Publish → Unpublish
+  correctly reverts `published` → `draft` and back, submissions preserved.
+- **A2 (due_at enforcement)** — confirmed via API: a published assignment
+  with a past `due_at` correctly rejects submission (400 "past its due
+  date").
+- **A3 (per-student access grant)** — confirmed via API: the same student
+  blocked by A2 above was unblocked after an instructor granted them an
+  `extended_due_at`; a second, ungranted student on the same assignment
+  stayed correctly blocked (control check).
+- **A4 (pre-assignment briefing + timer)** — confirmed live in the browser
+  end-to-end: briefing screen shows title/weight/attempts/time-limit and an
+  explicit warning, nothing loads until "Start assignment" is clicked, the
+  countdown renders and updates in real time, and it correctly auto-submits
+  (scored 0.0, "no answer" recorded) when the clock hit zero.
+- **A5 (submission receipt)** — confirmed functionally: grading and
+  feedback render correctly after submit; the 2-second receipt animation
+  itself is too fast to reliably catch in a screenshot, not independently
+  re-verified frame-by-frame, but the underlying flow works.
+- **A6 (polish)** — pluralization fix confirmed ("1 question", not "1
+  questions"); the "New assignment" button-hide fix confirmed (an
+  unauthorized instructor viewing another instructor's course no longer
+  sees the button at all). The error-copy unification was **not** done —
+  see New findings below.
+- **B1 (start/end dates + grace period)** — confirmed live: dates render on
+  the student catalog card; a course unit with an `end_date` in
+  2025-06-01 (well past the 7-day grace period) correctly 403s a student
+  ("not enrolled") while the instructor retained full roster access
+  (archival access never blocked, as designed).
+- **B2 (student-initiated leave)** — confirmed via API: student's leave
+  request correctly flips `Enrollment.status` to `leave_requested`, and
+  `GET .../leave-requests` correctly lists it for the instructor. **The
+  instructor-side UI to see/act on it does not exist** — see New findings.
+- **B3 (cross-course report)** — confirmed via API: `GET
+  /instructor/report` correctly compiles both the instructor's active and
+  expired course units, with per-assignment scores and a weighted final
+  grade, excludes other instructors' units. **No frontend page exists** —
+  matches Devin's own log entry, not a new finding.
+- **B4 (instructor self-service course creation)** — confirmed live: a
+  freshly-created instructor has a working "New course unit" button (admin
+  previously had exclusive access to this), and the creating instructor is
+  auto-added to `instructor_ids`.
+- **B5 (user-deletion cascade)** — confirmed via API: created a throwaway
+  student, enrolled them, had them submit an assignment, deleted the
+  account — their `Enrollment` and `Submission` rows were both gone from
+  the roster/submissions views immediately after, no orphaning. This closes
+  the one item in this round closest to an actual pre-existing bug.
+- **B6 (delete-dialog copy)** — confirmed live: the course-unit delete
+  confirmation now correctly mentions assignments/submissions, not just
+  enrollments — see New findings for one side effect of the new copy.
+- **K1 and C1 re-verified on the merged code** (both tracks touched
+  `assignments.py`/`course_units.py` substantially, worth re-confirming
+  these didn't regress): fired two concurrent submits on a fresh 1-attempt
+  free-text assignment — one succeeded, one correctly rejected, exactly one
+  submission recorded (K1 holds). Deleted a course unit with real,
+  graded submissions in it — assignment/submission both cleanly 404 after,
+  instructor's course-unit list stopped showing it immediately, no orphan
+  (C1 holds).
+
+**New findings — four real gaps, none blocking, worth a follow-up pass**:
+1. **A4's timer has no toggle anywhere in the instructor-facing creation
+   form.** `is_timed`/`time_limit_minutes` exist on the model and the
+   student-facing briefing screen correctly renders and enforces them
+   client-side — but there is no checkbox/field in
+   `web/app/(admin)/admin/course-units/[courseUnitId]/assignments/page.tsx`
+   to actually set them. Confirmed by inspecting the live creation dialog
+   (title/description/weight/attempt-limit/due-date/questions only) — the
+   only way to make an assignment timed today is a direct API `PUT` call.
+   This is the most consequential of the four findings — the feature is
+   real and works, it's just unreachable from the UI it was built for.
+2. **A6's error-copy unification wasn't done.** The plan asked for the
+   assignments page's blocked-instructor message to match the gradebook
+   page's "You do not manage this course unit" — confirmed live, the
+   assignments page still says "You are not enrolled in this course unit"
+   (the student-facing message) for the identical blocked-instructor case.
+   Cosmetic, not a security issue — the underlying access control is
+   correct either way.
+3. **B2's instructor-side leave-request UI genuinely doesn't exist**, not
+   just "not yet built" as a caveat — confirmed live by opening the exact
+   roster panel a leave request would need to appear in: it shows the
+   enrolled roster and pending join-requests, with zero mention of the
+   pending leave request that was sitting in the database at the time.
+   Right now a student can request to leave and there is no way for an
+   instructor to discover that request short of an API call — worth
+   prioritizing this specific piece before this ships, since the feature
+   is otherwise invisible/dead from the instructor's side.
+4. **B6's new delete-dialog copy references a feature that doesn't exist.**
+   It now suggests "Consider archiving instead if you need to keep the
+   grade history" — but no archive mechanism exists anywhere in this
+   codebase (confirmed: not mentioned in either track's build notes, no
+   archive-related endpoint or status field anywhere). Minor, but worth
+   either removing that sentence or actually scoping an archive feature
+   before the copy references one.
+
+**Left for later / handing back**: the four findings above, plus everything
+Cascade and Devin already flagged as left for later in their own entries
+(Alembic tooling, B3's frontend page). All test data (5 throwaway accounts,
+3 course units, 6 assignments, their submissions/grants) has been deleted;
+verified the system is back to its pre-test state. Branch
+`feature-round2-integration` is merged locally and ready for review — per
+standing instruction, nothing gets pushed to origin until the repo owner
+explicitly says so.
+
+— Claude
