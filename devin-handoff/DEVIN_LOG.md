@@ -2219,3 +2219,161 @@ regression pass once all three report done, and — per standing instruction
 — nothing gets pushed to origin until the repo owner explicitly says so.
 
 — Claude
+
+## 2026-08-02 — Devin — Round 4 Task 3 done: Alembic migration tooling added
+
+**Item**: Round 4 Task 3 — add real Alembic migration tooling, replacing
+`scripts/init_db.py`'s plain `Base.metadata.create_all()` bootstrap.
+
+**Status**: done.
+
+**Branch**: `devin-r4-alembic`, worktree `../DeepTutor-r4-alembic`, branched
+from `main`.
+
+**What changed**:
+- `pyproject.toml` — added `"alembic>=1.13.0,<2.0.0"` to the base
+  `dependencies` list (next to `sqlalchemy[asyncio]`/`asyncpg`, the same
+  place those already live — this isn't behind an extras group, it's a core
+  dependency of the always-installed package). Updated the neighboring
+  comment, which explicitly said "No Alembic yet... add Alembic the first
+  time this schema needs a real migration" — that sentence is now false,
+  so it was rewritten to describe the current state instead of the old plan.
+- `alembic.ini` (new) — `script_location = alembic` and `prepend_sys_path = .`
+  (both were already the generated defaults and didn't need changing).
+  `sqlalchemy.url` is a placeholder — see below, it's not actually used for
+  the normal `alembic upgrade head` path in this project.
+- `alembic/env.py` (new) — imports `Base` from
+  `deeptutor/services/db/models.py` for `target_metadata` (autogenerate
+  support), and — this is the one deliberate deviation from Alembic's
+  stock async template — calls `deeptutor.services.db.engine.get_engine()`
+  directly instead of building a fresh engine from `alembic.ini`'s
+  `sqlalchemy.url` via `async_engine_from_config`. Reason: `get_engine()`
+  already encodes this project's `DATABASE_URL` resolution order (env var,
+  the `postgres://` -> `postgresql+asyncpg://` rewrite) *and* the local-dev
+  SSL-disable workaround for the docker-compose postgres service (see that
+  function's own comments in `engine.py`) — reimplementing that in `env.py`
+  from the ini file's URL would be a second, driftable copy of the same
+  logic. `alembic.ini`'s `sqlalchemy.url` is consequently just a placeholder
+  that only matters for `--sql` (offline) mode, which this project doesn't
+  use; said so explicitly in both files so a future reader doesn't wonder
+  why changing it has no effect.
+- `alembic/versions/65b81544bdc8_baseline_current_schema.py` (new) — the
+  initial baseline migration. `upgrade()` creates all 9 current tables
+  (`course_units`, `course_unit_instructors`, `enrollments`, `assignments`,
+  `submissions`, `course_book_entries`, `notifications`,
+  `notification_reads`, `assignment_access_grants`) with every column/FK/
+  index/unique-constraint currently in `models.py` — including the three
+  rounds' worth of hand-applied additions this task's own background
+  mentioned (`CourseUnit.start_date`/`end_date`/`is_archived`,
+  `Assignment.is_timed`/`time_limit_minutes`/`is_major`/`passing_score`,
+  the `assignment_access_grants`/`notifications`/`notification_reads`
+  tables). `downgrade()` drops everything in reverse order (Alembic
+  autogenerate wrote both directions; not manually hand-edited beyond
+  reviewing for correctness).
+- `scripts/init_db.py` — rewritten to shell out to
+  `alembic upgrade head` (run with `cwd` set to the repo root, so
+  `alembic.ini`'s relative `script_location` resolves regardless of the
+  caller's own working directory) instead of calling `create_all()`
+  directly. Kept the same "read `DATABASE_URL` the same way `engine.py`
+  does" framing in the docstring since that's still true — it's just
+  Alembic's `env.py` doing that read now, one layer down.
+- `deeptutor/services/db/migrations/002_track_a_assignment_lifecycle.sql` —
+  NOT deleted (see "New findings" below for why), but prefixed with a
+  `SUPERSEDED` comment block pointing at the new Alembic baseline and
+  explicitly saying not to run it again.
+- `deeptutor/services/db/migrations/README.md` (new) — one-paragraph pointer
+  so a future reader landing in this now-legacy directory immediately finds
+  `alembic/` instead.
+
+**Verified** (this is the actual deliverable — schema parity, not just "the
+commands ran"):
+1. Ran `alembic revision --autogenerate -m "baseline current schema"`
+   **against the live, already-populated local Postgres first** — this
+   produced an EMPTY migration (`upgrade()`/`downgrade()` both just `pass`).
+   That's expected, not a bug: autogenerate diffs the target `Base.metadata`
+   against the CURRENT state of whatever database it's pointed at, and the
+   live DB already matches `models.py` exactly (the whole reason three
+   rounds of hand-applied `ALTER`s existed was to keep it that way) — so
+   there was nothing to diff. Documenting this because it's a genuine gotcha
+   for whoever writes the *next* migration: autogenerate must be run against
+   a database that's actually behind the target metadata, not the live one,
+   or it will silently produce a no-op migration.
+2. Created a fresh empty database (`deeptutor_alembic_baseline`, dropped
+   after) via `docker exec deeptutor-postgres psql ... CREATE DATABASE`,
+   pointed `DATABASE_URL` at it, and re-ran the same autogenerate command.
+   This time it correctly detected all 9 tables as new
+   (`alembic.autogenerate.compare` logged each `Detected added table`/
+   `Detected added index` line — captured in this entry's own session, not
+   just inferred from the file). Ran `alembic upgrade head` against that
+   same fresh database to actually apply it.
+3. Created a second fresh database (`deeptutor_createall_check`, dropped
+   after), ran the **old** `create_all()` path directly (temporarily, to get
+   a "ground truth" — not the final `init_db.py`, which by this point had
+   already been rewritten) against it.
+4. Diffed the two databases' schemas with
+   `pg_dump --schema-only --no-owner --no-privileges` on both, piped through
+   PowerShell's `Compare-Object`. The only differences were: (a) the
+   `alembic_version` bookkeeping table itself (expected — that's Alembic's
+   own tracking table, not part of the application schema, and
+   intentionally absent from the `create_all()`-only side), and (b) the
+   `pg_dump`-generated `\restrict`/`\unrestrict` session tokens (a
+   pg_dump-version artifact, not a schema difference). Zero differences in
+   actual tables/columns/types/nullability/FKs/indexes/constraints.
+5. Re-ran the exact final `scripts/init_db.py` (post-rewrite, no manual
+   `PYTHONPATH` set) against a third fresh database
+   (`deeptutor_initdb_check`, dropped after) to confirm the real
+   entrypoint — not just raw `alembic` CLI calls — works end-to-end
+   unmodified from a clean checkout's perspective; `\dt` afterward showed
+   all 9 application tables + `alembic_version`.
+6. `python -c "from deeptutor.multi_user.router import router; ..."` against
+   the live (untouched, real) local Postgres still imports cleanly (28
+   routes) — confirms this change didn't touch anything the rest of the app
+   depends on at import time.
+
+All temporary databases (`deeptutor_alembic_baseline`,
+`deeptutor_createall_check`, `deeptutor_initdb_check`) were dropped after
+verification; the live `deeptutor` database was never touched by any of
+this task's DDL.
+
+**New findings**:
+- The three "manually-applied schema changes" mentioned in this task's brief
+  are folded into ONE baseline migration rather than replayed as three
+  separate migration files reproducing history. This is an intentional
+  simplification, not an oversight: replaying them as separate revisions
+  would require reconstructing the *exact* intermediate schema states
+  (including ones that may never have existed cleanly in isolation, since
+  they were applied by hand over time, possibly out of the order the
+  columns were introduced in `models.py`'s own history) purely for
+  cosmetic history — with zero actual migration-ordering benefit, since
+  nobody is upgrading a real database that's sitting at one of those
+  intermediate states. A single baseline matching today's live schema is
+  simpler, verifiably correct (per the diff above), and is exactly what
+  Alembic's own docs recommend for "adopting Alembic into an existing,
+  already-migrated-by-hand project."
+- Decided NOT to delete the old raw `.sql` file
+  (`002_track_a_assignment_lifecycle.sql`) even though it's now fully
+  superseded — it's historical documentation of *why* certain columns/
+  tables exist (its own header comments explain the feature intent behind
+  `is_timed`/`assignment_access_grants` better than a bare Alembic
+  `create_table` call does), and deleting it destroys that context for a
+  net-zero behavioral gain. Marked it superseded instead, with an explicit
+  "do not run this again" and a pointer to the real migration path.
+
+**Left for later / handing back**:
+- No CI step currently runs `alembic upgrade head` against a fresh database
+  as a regression check (mentioned as a nice-to-have in this task's brief).
+  Not done here — this task's scope was the tooling + baseline + verified
+  parity, not a CI pipeline change, and there was no existing CI config
+  in-scope to extend cleanly without guessing at infra this repo may or may
+  not have.
+- From now on: any schema change should be authored as
+  `alembic revision --autogenerate -m "..."` (against a database state that
+  actually differs from the target — see the autogenerate gotcha in
+  "Verified" above) after editing `deeptutor/services/db/models.py`, review
+  the generated file, then `alembic upgrade head` — not another manual
+  `ALTER TABLE`/drop-and-recreate. This should be added to whatever
+  onboarding doc future schema-change authors read first (not done as part
+  of this task — didn't want to guess which doc that is without checking
+  with the repo owner).
+
+— Devin
