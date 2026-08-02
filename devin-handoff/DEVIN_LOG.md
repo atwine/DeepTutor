@@ -1061,3 +1061,141 @@ pass; worth a follow-up sweep if time allows before Railway deployment, but
 none of them touch code this migration changed.
 
 — Claude
+
+## 2026-08-02 — Claude — Full UI walkthrough with a realistic fake class
+
+**Item**: not in TODO.md — user-requested end-to-end UI verification before
+moving on to the security review / Railway deployment work, to sanity-check
+the merged Postgres migration through the actual browser rather than only
+through direct API calls (as Phase G above did).
+
+**Status**: done.
+
+**What changed**: no code changes — this was a pure verification pass. Built
+and tore down a realistic fake class through the live UI only (2 instructors,
+6 students, 4 course units, 5 assignments, 6 graded submissions), then
+deleted every bit of it.
+
+**Verified, all via the browser (not curl)**:
+- Admin creates users and promotes roles through `/admin/users` — includes
+  discovering the app requires a confirmation click on any role change
+  (a `Change role` dialog), which the first attempt at a role change didn't
+  account for and silently no-opped until confirmed properly.
+- Admin creates course units and assigns instructors via `/admin/course-units`
+  — confirmed course units are admin-created-and-instructor-assigned, not
+  self-service; an instructor's own Course Units page has no create button,
+  by design.
+- Instructors build assignments (mixing multiple-choice and free-text
+  questions, draft + published) scoped correctly to only their own courses.
+- Students browse the catalog, request enrollment, get approved/rejected,
+  re-request after rejection (C4, live in the UI this time, not just via
+  code reading) — all state transitions rendered correctly, no stale badges.
+- Students take assignments through the real submission UI: auto-grade and
+  AI-Judge grading both render live, including watching the AI-Judge
+  correctly dock a student who wrote "dropna() and fillna() are basically
+  the same thing" (the exact false-positive-catch case from §2.3 of the
+  architecture doc) via the UI rather than curl.
+- Attempt-limit enforcement holds at the UI layer too — after one attempt,
+  the assignment renders as read-only results, no way to trigger a second
+  submit from the UI (K1's backend fix from Phase G, now also confirmed to
+  not depend on the frontend hiding the button as its only defense — see
+  finding below).
+- Gradebook and CSV export correct across all 4 courses, including the
+  "enrolled but hasn't submitted" `—` cell and the zero-student empty state.
+- Cross-boundary isolation confirmed via direct URL navigation (not just
+  hidden nav links): `instr_beta` hitting `instr_alpha`'s course by ID gets
+  a clean 403-equivalent page, never leaked data. Same for an unenrolled
+  student hitting a course's assignment list directly.
+- Cascade delete (C1/C2) reconfirmed live end-to-end through the actual UI:
+  deleted a course with real submissions in it, `instr_alpha`'s own Course
+  Units page just silently no longer shows it — no error, no "not enrolled"
+  confusion (the pre-migration bug this whole effort was partly about).
+
+**New findings, both minor / non-blocking**:
+1. **UI-only access-control gap, not a real security hole.** On a course
+   unit an instructor doesn't manage, `assignments_router`'s "New assignment"
+   button still renders and opens the create dialog (the page-level guard
+   correctly blocks the *page*, but the create-button visibility isn't
+   gated the same way). Confirmed the actual `POST` is still rejected
+   server-side ("You do not manage this course unit") — so there's no real
+   privilege escalation, just a confusing dead-end button an unauthorized
+   instructor could click and get an error from. Cosmetic, worth a small
+   frontend fix (hide the button using the same check the page-level message
+   already uses).
+2. **Inconsistent error copy for the same blocked-instructor case.** The
+   gradebook page says "You do not manage this course unit"; the assignments
+   page for the identical blocked scenario says "You are not enrolled in
+   this course unit" (a message written for the student case, not this
+   one). Confusing but not a security issue — recommend unifying the copy.
+3. **Small pluralization bug**: assignment list rows always say
+   "N questions" even when N=1 ("1 questions"). Cosmetic only.
+4. **Delete-course-unit confirmation dialog undersells what it does**: the
+   copy says "This permanently removes '<name>' and its enrollments" — true,
+   but it also cascades assignments/submissions/course-book links, which
+   the dialog doesn't mention. Not incorrect, just incomplete; worth
+   updating the copy so an instructor/admin isn't surprised by the full
+   scope of what a delete does.
+
+**Left for later / handing back**: none of the above four are urgent or
+migration-related — they're pre-existing UI polish items surfaced by this
+being the first time this subsystem got a full live click-through rather
+than API-level testing. All fake data (2 instructors, 6 students, 4 course
+units, their assignments/submissions) has been deleted; verified the system
+is back to its pre-test state (`admin`, `student1`, `student2`,
+`instructor@bigdataclass.local`, zero course units).
+
+— Claude
+
+## 2026-08-02 — Claude — Round 2 handoff: course-management gaps, Cascade + Devin only
+
+**Item**: not in TODO.md yet — 17 product notes the repo owner took while
+watching the live UI walkthrough above, now scoped into two tracks. Full
+detail, current-state citations, and per-item build notes are in
+`devin-handoff/FEATURE_ROUND2_PLAN.md` — read that before starting, this
+entry is just the pointer + the ground rules.
+
+**Status**: planning done, implementation not started.
+
+**Explicit instruction from the repo owner this round**: Claude does not
+implement any of this round's items. Cascade and Devin do the building;
+Claude's job is the plan (done, see the linked doc), then merging both
+branches and running the full regression pass once both report done — same
+division of labor as the database migration, just with Claude one layer
+further back this time.
+
+**The split**:
+- `feature-course-mgmt-cascade` (Track A, Cascade) — assignment lifecycle:
+  un-publish, `due_at` enforcement, per-student exception/emergency-access
+  grants, a pre-assignment briefing screen with an optional timer for major
+  assignments, a submission confirmation/receipt state, plus a handful of
+  small polish items (pluralization bug, an instructor-facing UI-only
+  access gap on the "New assignment" button, inconsistent error copy).
+- `feature-course-mgmt-devin` (Track B, Devin) — course lifecycle and
+  reporting: start/end dates with a grace period after end, student-
+  initiated leave-course (instructor confirms, matching the existing
+  join-request pattern), a cross-course/per-instructor compiled report,
+  instructor self-service course creation (currently admin-only), and the
+  user-deletion cascade gap (`Enrollment`/`Submission` rows currently
+  orphan forever when an account is deleted — closest thing in this batch
+  to an actual bug, prioritize it if short on time).
+
+Both branches cut from `main` at `1cd9c7c`. File ownership is fully
+disjoint except both tracks add columns to `deeptutor/services/db/models.py`
+— Track A only touches the `Assignment` class, Track B only touches
+`CourseUnit`, both additive-only, to keep a merge conflict there unlikely
+(not impossible — if it happens, Claude resolves it at merge time, same as
+last round's `DEVIN_LOG.md` conflict).
+
+**Deliberately out of scope this round** (flagged in the plan doc so
+they're not silently dropped, not because they don't matter): AI-assisted
+assignment/exam question generation scoped to an instructor's actual taught
+content, and Knowledge Base/Book upload quotas + retention. Both are bigger,
+separate-surface efforts that deserve their own scoping round rather than
+being squeezed into this one.
+
+**Left for later / handing back**: everything above — to Cascade and Devin.
+Log start and completion in this file per the usual format; Claude merges
+and tests once both are done, and — per standing instruction — nothing gets
+pushed to origin until the repo owner explicitly says so.
+
+— Claude

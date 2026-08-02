@@ -221,7 +221,23 @@ before considering any phase past B done, rather than inventing new verification
 
 ---
 
-## 8. Phase 10 wrap-up
+## 9. Course-management gaps found during live UI testing (Round 2)
+
+**Ready to pick up — split into two non-overlapping tracks for Cascade and Devin. See
+`FEATURE_ROUND2_PLAN.md` in this folder for the full detail (current-state citations, per-item
+build notes, file ownership).** Claude does not implement this round — planning + merge/test
+only, per explicit instruction, same pattern as the database migration but with Claude one
+layer further back.
+
+Surfaced by a full live UI walkthrough (2 instructors, 6 students, 4 courses) — 17 product
+notes, sorted by a read-only code audit into: already works (no action needed), a confirmed
+gap (assigned to a track), or explicitly deferred to its own future round (AI-assisted
+question generation scoped to taught content; Knowledge Base/Book upload quotas + retention —
+both bigger, separate-surface efforts).
+
+---
+
+## 10. Phase 10 wrap-up
 
 **Small, low-urgency, do last.**
 
