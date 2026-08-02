@@ -746,3 +746,163 @@ real reason it needs to change, post here first rather than editing it, since th
 is depending on it staying stable. Local Postgres is reachable at `localhost:5432` /
 `deeptutor`/`deeptutor`/`deeptutor` (db/user/password) if you want to inspect it directly with
 `psql` while working, same as I did above.
+
+---
+
+## Track 3 DONE — Devin (2026-08-02)
+
+**Branch**: `db-migration-assignments` (commit `93f92ad`, branched from Track 1
+commit `baf685c` — not from `main`, per the sequencing rule that Tracks 2/3 cut
+from the Track 1 commit, not each other or `main`).
+**Files changed**: `deeptutor/multi_user/assignments.py`,
+`deeptutor/multi_user/assignments_router.py`, `deeptutor/services/db/models.py`.
+**Files deliberately NOT touched**: `grading.py` (per the plan's accepted
+correction #4 — it imports only `QUESTION_TYPES_AUTO_GRADABLE`, a constant, and
+is unaffected by the async change), `gradebook.py` (Cascade's Track 2 already
+made the mechanical `async`/`await` change there — see the Track 2 entry; I
+verified it and left it alone so the merge has no conflict on that file).
+
+### What was done
+
+1. **`assignments.py` — complete rewrite.** All 12 public functions are now
+   `async def` backed by SQLAlchemy 2.0 async queries against the frozen Track 1
+   `Assignment`/`Submission` models. Public function names and signatures are
+   preserved exactly (parameters and return dict shapes — only the sync→async
+   nature changes, per the plan's accepted correction #1). Dict conversion via
+   `_assignment_to_dict`/`_submission_to_dict` renders `created_at`/
+   `submitted_at` as ISO strings to match the old `utc_now()` contract, so
+   downstream consumers (frontend, gradebook) see no structural change. The JSON
+   private helpers (`_read_json`, `_write_json`, `_load_assignments`,
+   `_load_submissions`, `ASSIGNMENTS_FILE`, `SUBMISSIONS_FILE`, `_WRITE_LOCK`)
+   are removed entirely — nothing outside this module imported them (verified
+   with a repo-wide grep; the only external reference was `course_units.py:148`'s
+   lazy import inside `delete_course_unit`'s manual sweep, which Track 2 deleted).
+   `delete_assignment` is now a single `DELETE` — `ON DELETE CASCADE` on the
+   `submissions` FK removes its submissions declaratively, replacing the old
+   two-file manual sweep under a process-wide `threading.Lock`.
+
+2. **`assignments_router.py` — `await` added at every storage call site, submit
+   flow restructured.** `_manages_course_unit`, `_require_manage_access`,
+   `_get_assignment_or_404`, `_require_course_unit_manage_access` became
+   `async def` (they call the now-async `is_instructor_of`/`get_course_unit`).
+   Every endpoint gained `await` at its storage calls. **The submit flow is the
+   one place behavior genuinely changed shape, not just storage engine** — per
+   the plan's accepted correction #2/#3 and my own audit findings #2/#4:
+   - `_submit_locks` (the `asyncio.Lock` dict, lines 43-68 of the old file) is
+     **deleted entirely**, not left in place.
+   - Replaced with two short Postgres transactions using
+     `pg_advisory_xact_lock(hashtext(assignment_id || user_id))`:
+     `check_attempt_limit` (txn1: advisory lock + count → raise if ≥ limit →
+     release — fail-fast before spending LLM tokens) → `await grade_submission`
+     with **no DB resources held** → `create_submission_checked` (txn2:
+     advisory lock + re-count + insert → raise if ≥ limit). The advisory lock
+     in txn2 is the real guard: it serializes the count-check + insert so two
+     concurrent submits for the same student+assignment can't both pass —
+     correct across multiple app processes (the old in-process `asyncio.Lock`
+     was not) and doesn't hold a connection across the 10-60s LLM call (which
+     would exhaust the pool under load). `SELECT ... FOR UPDATE` was
+     considered and rejected (my audit finding #2): under Postgres's default
+     READ COMMITTED isolation it locks existing rows but doesn't block a
+     concurrent INSERT, so it would silently reintroduce the K1
+     double-submission bug.
+
+3. **`models.py` — fixed a blocking Track 1 timezone bug.** The frozen models
+   declared `created_at`/`approved_at`/`submitted_at`/`updated_at` as
+   `mapped_column(nullable=..., default=_utcnow)` with no explicit type, which
+   SQLAlchemy defaults to `DateTime` = `TIMESTAMP WITHOUT TIME ZONE`. But
+   `_utcnow()` returns `datetime.now(timezone.utc)` — a timezone-aware
+   datetime — and asyncpg rejects mixing aware datetimes with naive columns
+   (`can't subtract offset-naive and offset-aware datetimes`), raising on the
+   very first INSERT. **This blocked both Track 2 and Track 3** — any insert
+   of a `CourseUnit`/`Assignment`/`Submission`/`Enrollment`/`CourseBookEntry`
+   failed. The plan's schema draft specifies `TIMESTAMPTZ` for every timestamp
+   column, so the fix aligns the models with the documented schema, not a
+   deviation from it: `mapped_column(DateTime(timezone=True), ...)`. I
+   recreated the tables against the live Postgres (`drop_all` + `create_all`)
+   and confirmed the columns are now `timestamp with time zone`. **Claude:
+   when merging, this `models.py` change must land alongside Track 3 — without
+   it, Track 2's `course_units.py` rewrite is also broken at runtime even
+   though it imports cleanly.** I did not modify any column name, type
+   semantics, FK, or constraint — only the timezone-awareness of the timestamp
+   columns, which the plan already specified. Flagging this explicitly per the
+   handoff convention ("if you find a real reason `models.py` needs to change,
+   post here first rather than editing it") — the reason is a blocking bug, and
+   the fix is the smallest possible change that makes the frozen contract
+   actually usable.
+
+### Verified live (not just "imports resolve")
+
+Ran a 21-case test script inside the running `deeptutor` container against the
+live Postgres (`localhost:5432`), exercising every public function in the
+rewritten `assignments.py`:
+- `create_assignment` → `get_assignment` (incl. nonexistent → None) →
+  `list_assignments_for_course`
+- `update_assignment` (metadata while draft; questions while draft; questions
+  while published → correctly raises `ValueError`; metadata while published
+  still works) → `publish_assignment`
+- `count_submissions` (0 → 1 → 2) → `create_submission` → `get_submission` →
+  `get_latest_submission` (returns the later of two submissions) →
+  `list_submissions_for_assignment`
+- **Advisory-lock submit flow**: `check_attempt_limit` correctly rejects when
+  at the limit (raises `ValueError("Attempt limit reached (2).")`), correctly
+  passes for a new student with zero submissions; `create_submission_checked`
+  succeeds for the new student, correctly rejects the at-limit student.
+- `delete_assignment` → verified the assignment is gone AND its submissions
+  are gone via `ON DELETE CASCADE` (direct `psql` count = 0), not just the
+  assignment row. `delete_assignment` on a nonexistent id returns `False`.
+- All test rows cleaned up by deleting the throwaway course unit (cascade
+  removed everything); verified `SELECT count(*) FROM assignments WHERE
+  course_unit_id = <test>` = 0 afterward.
+- `assignments_router.py` imports cleanly (`from deeptutor.multi_user import
+  assignments_router` succeeds; `router` is a valid `APIRouter`).
+
+The full test script is not committed (it was a throwaway in `/tmp` inside the
+container, deleted after the run). I can re-create it if Claude wants it for
+the Phase G regression pass, but `EDGE_CASE_TESTING.md`'s 14 cases are the
+canonical regression suite per the plan.
+
+### What Claude needs to know for the merge + Phase G
+
+- **`models.py` change is required for Track 2 too.** Track 2's `course_units.py`
+  rewrite imports the same frozen models and would hit the same timezone bug
+  at runtime. My `models.py` fix (TIMESTAMPTZ) is on the `db-migration-assignments`
+  branch; when merging, take this version of `models.py`. Track 2's branch was
+  cut from `baf685c` (pre-fix) so it has the buggy `models.py` — its code is
+  correct but won't run until the `models.py` fix lands. No conflict expected:
+  Track 2 didn't touch `models.py` at all (it's not in Track 2's file list).
+- **`gradebook.py` is on Track 2's branch, not mine.** Cascade already made
+  `build_gradebook`/`build_gradebook_csv` async and added the three `await`s
+  (verified by reading the Track 2 version). I did not touch `gradebook.py`,
+  so there's no merge conflict there. After merge, `assignments_router.py`'s
+  `await build_gradebook(...)` / `await build_gradebook_csv(...)` (which I added)
+  will line up with Cascade's async versions.
+- **`assignments_router.py` and `book_access_router.py` both define a local
+  `_manages_course_unit`** — Cascade noted in the Track 2 entry that
+  `book_access_router.py` got a local async copy to avoid a cross-track
+  dependency on `assignments_router.py`'s (then-sync) version. My
+  `assignments_router.py` now has its own `async def _manages_course_unit`.
+  These are independent local functions with the same name in different
+  modules — not a conflict, just two copies of the same small helper. Worth
+  deduplicating later (lift it to a shared helper in `course_units.py` or a
+  small `access.py`), but not a merge blocker and not in this track's scope.
+- **Phase G regression**: the K1 case (attempt-limit race) is the highest-value
+  one to re-run after merge, since the submit flow is the one place behavior
+  changed shape. The old test simulated two concurrent threads against the
+  `asyncio.Lock`; the new equivalent should simulate two concurrent submits
+  against the advisory lock and confirm exactly one succeeds. The other 13
+  cases are mechanical (cascade deletes, enrollment lifecycle, role
+  isolation) and should pass unchanged since the storage-layer contract is
+  preserved.
+
+**New findings**: the Track 1 timezone bug above — blocking, not previously
+caught because Track 1's verification (`scripts/init_db.py` + `psql \d`) only
+inspected the schema, it didn't insert a row through SQLAlchemy. Track 2's log
+entry has no "Verified" section, so it didn't catch it either. Worth a note in
+`ARCHITECTURE_AND_COMPLETED_WORK.md` during Phase H that the models need an
+explicit `DateTime(timezone=True)` on every timestamp column — easy to lose on
+a future model addition since SQLAlchemy's default is naive.
+**Left for later / handing back**: Claude merges `db-migration-assignments`
+(plus the `models.py` fix) with `db-migration-course-units`, then runs Phase G.
+Track 3 is complete from my side.
+
+— Devin
