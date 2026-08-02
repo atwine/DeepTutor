@@ -1473,3 +1473,172 @@ standing instruction, nothing gets pushed to origin until the repo owner
 explicitly says so.
 
 — Claude
+
+## 2026-08-02 — Claude (Round 3 track) — Assignment UX: results page, retake policy, timer submit
+
+**Item**: Round 3 ask (three items) — a dedicated post-submit results
+page/route, a major/quiz + pass/fail retake policy, and confirming a timed
+assignment's manual "Submit" stays available before the countdown expires.
+Branch: `fix-round3-assignment-ux` (worktree off `feature-round2-integration`).
+Scope was explicitly the three items below — did not touch the two
+separately-logged Round 2 QA gaps mentioned as background context (the
+missing `is_timed` checkbox in the creation form, and the assignments-page
+vs. gradebook-page blocked-instructor error-copy mismatch); both are still
+open, left for whoever picks up that specific follow-up.
+
+**Status**: done.
+
+**What changed**:
+
+1. **Dedicated results page** (new route,
+   `web/app/(utility)/courses/[courseUnitId]/assignments/[assignmentId]/results/page.tsx`):
+   fetches the assignment via the existing `getAssignment` endpoint (which
+   already returns `my_latest_submission` for a student), renders the score
+   plus the same per-question feedback the old inline result showed, plus
+   "Back to assignments" and "Home" links. Extracted the per-question
+   feedback block into a shared `web/components/assignments/ResultView.tsx`
+   (was previously a local function, now used by both this new page and the
+   list page's "revisit a past attempt" view).
+   `web/app/(utility)/courses/[courseUnitId]/assignments/page.tsx`'s
+   `handleSubmit` now does a brief (900ms) receipt flash, then
+   `router.push`'s to the results route instead of swapping a results block
+   into the same page — this applies identically to a manual "Submit" click
+   and the timer's auto-submit on expiry, since both call the same
+   `handleSubmit` (single shared code path, per the item 3 requirement).
+
+2. **Retake policy** (`is_major` / `passing_score`):
+   - `deeptutor/services/db/models.py` — added `is_major: bool` (default
+     `False`) and `passing_score: float | None` (nullable) to the
+     `Assignment` class only, as pure additions near the other Round 2
+     `is_timed`/`time_limit_minutes` columns. No other class in this file
+     touched.
+   - `deeptutor/multi_user/assignments.py` — `create_assignment`/
+     `update_assignment` gained the two params (`passing_score` uses the
+     existing `_UNSET` sentinel pattern, same as `time_limit_minutes`, so
+     `None` can be explicitly set to clear it via PUT).
+     `get_effective_attempt_limit` now hard-caps the effective limit at 1
+     when `is_major` is true, regardless of the stored `attempt_limit`
+     value — deliberately not mutating the stored column, so toggling
+     `is_major` off later doesn't lose whatever attempt count the
+     instructor had configured. New `get_retake_block_reason(assignment,
+     grant, attempts_count, latest_submission)` is the single source of
+     truth for whether a student can submit again, returning `None` or a
+     `(reason_code, message)` tuple with `reason_code` in
+     `{"attempt_limit", "already_passed"}` — used by both the submit
+     endpoint (to reject) and the student-facing assignment view (to
+     explain in advance), so enforcement and UI messaging can't drift
+     apart.
+   - `deeptutor/multi_user/assignments_router.py` — `AssignmentCreate`/
+     `AssignmentUpdate` gained `is_major`/`passing_score`;
+     `create_assignment_endpoint`/`update_assignment_endpoint` pass them
+     through. `_assignment_summary` includes both fields.
+     `get_assignment_endpoint`'s student view now returns the effective
+     `attempt_limit` (via `get_effective_attempt_limit`, folding in the
+     `is_major` cap and any access-grant `extra_attempts`) instead of the
+     raw stored value, plus `retake_blocked_reason` /
+     `retake_blocked_message`. `submit_assignment_endpoint` now calls
+     `get_retake_block_reason` right after computing the effective attempt
+     limit (fail-fast, before the LLM grading call) and rejects with 400 if
+     blocked — this sits alongside (doesn't replace) the existing
+     advisory-lock-guarded `check_attempt_limit`/`create_submission_checked`
+     pair, which remains the concurrency-safe backstop for the plain
+     attempt-limit case (same message text either way, so no user-visible
+     difference — just redundant-but-harmless double-checking under a race).
+   - `web/lib/assignments-api.ts` — `AssignmentSummary`/`AssignmentDraft`
+     gained `is_major`/`passing_score`; `StudentAssignmentView` gained
+     `retake_blocked_reason` (typed `"attempt_limit" | "already_passed" |
+     null`) and `retake_blocked_message`.
+   - `web/app/(admin)/.../assignments/page.tsx` (create form): added a
+     "Retake policy" section — a "Major assignment (no retakes)" checkbox
+     that disables and visually forces the attempt-limit field to 1 (and
+     the submit payload actually sends `attempt_limit: 1` when checked, not
+     just a greyed-out display, so the stored value matches the effective
+     one), and, when not major, a second checkbox to enable a 0-100
+     "Passing score (%)" field. Row captions in the list now show "major
+     (no retakes)" or "passing score N%" alongside the existing question
+     count/weight/attempts caption.
+   - `web/app/(utility)/.../assignments/page.tsx` (student list): revisiting
+     a past attempt now shows the specific block reason
+     (`retake_blocked_reason`) instead of a generic attempts-used line, and
+     — when not blocked — a "Try again" button that resets local state and
+     re-runs the briefing/question flow (this button didn't exist before at
+     all; the previous code always rendered the last result with no way to
+     manually trigger a further attempt through the UI, even when
+     `attempt_limit` was configured above 1 — a pre-existing gap this fix
+     incidentally closes, not something I was told to look for but needed
+     for the new retake policy to be reachable from the UI at all). The
+     pre-assignment briefing screen also now shows "major (no retakes)" or
+     "passing score N%" alongside the existing question-count/weight/
+     attempts/timer info.
+
+3. **Timer + manual submit**: confirmed (no code change needed) that the
+   manual "Submit" button was already rendered unconditionally alongside the
+   countdown display once `started` is true — only `submitting` (mid-request)
+   disables it, never the timer state. Reworded the timed-assignment warning
+   on the briefing screen to say explicitly "You can submit at any time
+   before the timer ends" so this is stated to the student, not just true
+   in the implementation. Auto-submit-on-expiry (`handleStartAssignment`'s
+   `setInterval` calling `void handleSubmit()` at zero) is unchanged and now
+   benefits from the same results-page navigation and retake-policy check as
+   a manual submit, since it's the identical function.
+
+**Verified** (per this track's constraint — no Docker/Postgres, static
+checks only):
+- `deeptutor/services/db/models.py` imports cleanly standalone;
+  `Assignment.__table__.columns.keys()` confirms `is_major`/`passing_score`
+  are present alongside all pre-existing columns, nothing else on the table
+  changed.
+- `deeptutor/multi_user/assignments.py` imports cleanly; manually exercised
+  `get_effective_attempt_limit` and `get_retake_block_reason` with
+  representative dict inputs (is_major cap forces 1 regardless of a higher
+  configured attempt_limit; extra_attempts grant adds correctly for a
+  non-major assignment; passing_score block triggers only when the latest
+  score meets the threshold and is_major is false; attempt_limit block
+  still fires when exhausted) — all four cases returned the expected
+  result.
+- `deeptutor/multi_user/assignments_router.py` does not import cleanly in
+  this static environment — confirmed via `git stash` that this is
+  pre-existing and unrelated to this track's changes: `grading.py` ->
+  `quiz_judge.py` requires a runtime config file (`main.yaml` under
+  `data/user/settings`) that isn't present outside a running deployment;
+  the identical `FileNotFoundError` reproduces on the pre-change file too.
+  Reviewed the router diff by inspection instead (function signatures,
+  sentinel handling, HTTPException paths).
+- Frontend: `npm ci` (no `node_modules` existed in this worktree — installed
+  fresh from the existing `package-lock.json`), then `npx tsc --noEmit`
+  (exit 0, zero errors) and `npx eslint` targeted at all five changed/added
+  frontend files (zero warnings/errors).
+
+**New findings / design calls beyond the explicit spec**:
+- Chose to hard-cap the effective attempt limit for `is_major` rather than
+  overwriting the stored `attempt_limit` column server-side, to avoid
+  silently discarding an instructor's configured value if they later
+  uncheck "Major assignment." The creation-form UI still sends
+  `attempt_limit: 1` on create when the box is checked (so what's stored
+  matches what's effective in the common case), but the server-side
+  `get_effective_attempt_limit` hard cap is the actual guarantee against "no
+  matter what value was configured," including a direct API call that
+  bypasses the form.
+- Deliberately did not let a per-student access-grant's `extra_attempts`
+  override the `is_major` cap — a major/final exam's whole point is "no
+  retakes," and an instructor's own emergency-grant workflow (A3) is a
+  separate, explicit mechanism; silently reopening a major exam via a
+  generic grant felt like the wrong default. Not explicitly specified either
+  way — flagging in case the product owner wants the opposite.
+- Found and fixed, as a necessary complement to the retake-policy work (not
+  separately requested, but the policy would otherwise have no UI-reachable
+  effect for `attempt_limit > 1` cases): the student assignments list page
+  had no "try again" affordance at all before this change — once
+  `my_latest_submission` existed, the UI always rendered that result with no
+  path back to another attempt, even when attempts remained. Added a "Try
+  again" button, gated on the same `retake_blocked_reason` the server
+  computes.
+
+**Left for later / handing back**: the two Round 2 QA gaps noted as
+background context at the top of this entry (no `is_timed` checkbox in the
+creation form; assignments-page vs. gradebook-page error-copy mismatch) —
+neither was in this track's explicit scope, both still open. Live
+Docker-based regression testing of everything in this entry is still
+needed (per this track's constraint, only static checks were run here).
+
+— Claude

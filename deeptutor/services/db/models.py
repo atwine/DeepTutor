@@ -161,6 +161,15 @@ class Assignment(Base):
     # A4: timed assignment support — optional countdown for "major" assignments.
     is_timed: Mapped[bool] = mapped_column(nullable=False, default=False)
     time_limit_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Round 3: retake policy tied to major/quiz + pass/fail, not just a raw
+    # attempt counter (see assignments.py's get_effective_attempt_limit /
+    # get_retake_block_reason). is_major hard-caps the *effective* attempt
+    # limit at 1 regardless of the stored attempt_limit value — nullable=False
+    # with a default since every assignment needs a definite answer here.
+    # passing_score is a 0-100 percentage; NULL means no pass/fail gating
+    # (current behavior: attempt_limit is the only gate).
+    is_major: Mapped[bool] = mapped_column(nullable=False, default=False)
+    passing_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="assignments")
     submissions: Mapped[list["Submission"]] = relationship(

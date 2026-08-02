@@ -98,6 +98,8 @@ def _assignment_to_dict(a: Assignment) -> dict[str, Any]:
         "created_at": a.created_at.isoformat() if a.created_at else "",
         "is_timed": a.is_timed,
         "time_limit_minutes": a.time_limit_minutes,
+        "is_major": a.is_major,
+        "passing_score": a.passing_score,
     }
 
 
@@ -134,6 +136,8 @@ async def create_assignment(
     created_by: str = "",
     is_timed: bool = False,
     time_limit_minutes: int | None = None,
+    is_major: bool = False,
+    passing_score: float | None = None,
 ) -> dict[str, Any]:
     record = Assignment(
         id=new_assignment_id(),
@@ -148,6 +152,8 @@ async def create_assignment(
         created_by=created_by,
         is_timed=is_timed,
         time_limit_minutes=time_limit_minutes,
+        is_major=is_major,
+        passing_score=passing_score,
     )
     async with session_scope() as session:
         session.add(record)
@@ -185,6 +191,8 @@ async def update_assignment(
     due_at: str | None = None,
     is_timed: bool | None = None,
     time_limit_minutes: int | None = _UNSET,  # type: ignore[assignment]
+    is_major: bool | None = None,
+    passing_score: float | None = _UNSET,  # type: ignore[assignment]
 ) -> dict[str, Any] | None:
     """Questions can only be edited while the assignment is still a draft —
     once published, a student may already be looking at them, and changing
@@ -217,6 +225,10 @@ async def update_assignment(
             record.is_timed = is_timed
         if time_limit_minutes is not _UNSET:
             record.time_limit_minutes = time_limit_minutes
+        if is_major is not None:
+            record.is_major = is_major
+        if passing_score is not _UNSET:
+            record.passing_score = passing_score
         await session.flush()
         return _assignment_to_dict(record)
 
@@ -576,11 +588,66 @@ def get_effective_attempt_limit(
     assignment: dict[str, Any], grant: dict[str, Any] | None
 ) -> int:
     """Compute the effective attempt limit for a student, taking their
-    per-student access grant into account."""
+    per-student access grant into account.
+
+    Round 3 retake policy: if ``is_major`` is set, the effective limit is
+    hard-capped at 1 no matter what ``attempt_limit`` is stored on the
+    record — an instructor should not be able to accidentally allow a
+    retake on a major/final exam. This is enforced here (the single place
+    both the submit flow and the student-facing view read the limit from)
+    rather than by mutating the stored ``attempt_limit`` column, so toggling
+    ``is_major`` off later doesn't lose whatever value the instructor had
+    configured. Per-student access grants are deliberately still ignored for
+    a major assignment's own attempt count — an emergency accommodation
+    grant is a separate, explicit instructor action (see A3), not something
+    that should silently reopen a major exam via a generic default."""
+    if assignment.get("is_major"):
+        return 1
     base = assignment["attempt_limit"]
     if grant and grant.get("extra_attempts"):
         return base + grant["extra_attempts"]
     return base
+
+
+def get_retake_block_reason(
+    assignment: dict[str, Any],
+    grant: dict[str, Any] | None,
+    attempts_count: int,
+    latest_submission: dict[str, Any] | None,
+) -> tuple[str, str] | None:
+    """Single source of truth for whether a student may submit again.
+
+    Returns ``None`` if another submission is allowed, otherwise a
+    ``(reason_code, message)`` tuple where ``reason_code`` is one of:
+
+    - ``"attempt_limit"`` — every configured/granted attempt has been used.
+    - ``"already_passed"`` — not a major assignment, a ``passing_score`` is
+      configured, and the student's most recent submission already cleared
+      it. A student shouldn't be able to keep retrying just to inflate an
+      already-passing score, even if attempts remain.
+
+    Used by both the submit endpoint (to reject a disallowed resubmission —
+    manual click and timer auto-submit both funnel through the same submit
+    function, so this one check covers both paths) and the student-facing
+    assignment view (to explain, before they try, why a "Try again" option
+    isn't offered) — so enforcement and UI messaging can never drift apart.
+
+    If ``passing_score`` is ``None`` and ``is_major`` is ``False``, this
+    reduces to the pre-existing attempt-limit-only behavior."""
+    effective_limit = get_effective_attempt_limit(assignment, grant)
+    if attempts_count >= effective_limit:
+        return ("attempt_limit", f"Attempt limit reached ({effective_limit}).")
+    passing_score = assignment.get("passing_score")
+    if not assignment.get("is_major") and passing_score is not None and latest_submission:
+        max_score = latest_submission.get("max_score") or 0
+        if max_score > 0:
+            pct = (latest_submission.get("score", 0) / max_score) * 100
+            if pct >= passing_score:
+                return (
+                    "already_passed",
+                    "You have already passed this assignment and cannot submit again.",
+                )
+    return None
 
 
 def check_due_at(
