@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    DateTime,
     Float,
     ForeignKey,
     Integer,
@@ -57,7 +58,7 @@ class CourseUnit(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     term: Mapped[str] = mapped_column(String, nullable=False, default="")
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    created_at: Mapped[datetime] = mapped_column(nullable=False, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     instructors: Mapped[list["CourseUnitInstructor"]] = relationship(
         back_populates="course_unit", cascade="all, delete-orphan"
@@ -109,8 +110,8 @@ class Enrollment(Base):
     user_id: Mapped[str] = mapped_column(String, nullable=False)
     # 'pending' | 'approved' — matches Enrollment.status in course_units.py today.
     status: Mapped[str] = mapped_column(String, nullable=False, default="approved")
-    created_at: Mapped[datetime] = mapped_column(nullable=False, default=_utcnow)
-    approved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="enrollments")
 
@@ -149,7 +150,7 @@ class Assignment(Base):
     # 'draft' | 'published'
     status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
     created_by: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(nullable=False, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="assignments")
     submissions: Mapped[list["Submission"]] = relationship(
@@ -176,7 +177,7 @@ class Submission(Base):
     )
     score: Mapped[float] = mapped_column(Float, nullable=False)
     max_score: Mapped[float] = mapped_column(Float, nullable=False)
-    submitted_at: Mapped[datetime] = mapped_column(nullable=False, default=_utcnow)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     assignment: Mapped[Assignment] = relationship(back_populates="submissions")
 
@@ -202,7 +203,7 @@ class CourseBookEntry(Base):
     )
     # 'draft' | 'published'
     status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
-    created_at: Mapped[datetime] = mapped_column(nullable=False, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(nullable=False, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="book_entries")
