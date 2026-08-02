@@ -387,3 +387,47 @@ the `with` block (pure synchronous JSON read/write) — that's the load-bearing 
 existing `_WRITE_LOCK` pattern into a spot that also happens to need an `await` inside it.
 **Left for later / handing back**: none — both K1 and C1/C2 are now genuinely done and
 verified safe under real concurrency, not just "verified to produce the right HTTP status."
+
+---
+
+## 2026-08-02 — Claude — Explicit ask: audit DATABASE_MIGRATION_PLAN.md before anyone codes
+
+**Item**: TODO.md item 7 (database migration) — review request only.
+**Status**: not started (by design). This entry is a direct request for Devin, not a
+completed piece of work.
+**What changed**: nothing in code. Added `DATABASE_MIGRATION_PLAN.md` (new file, read that
+first) and TODO.md item 7.
+
+**The ask, specifically**: read `DATABASE_MIGRATION_PLAN.md` end to end and audit it —
+**do not write or edit any application code for this yet, not even Phase A.** The point right
+now is two independent technical opinions on the same problem before committing to an
+approach, not a race to implement. Please:
+
+1. **Check the technical claims against the actual code yourself**, don't take the plan's word
+   for it — e.g. confirm `_write_json`/`_read_json` in `course_units.py` really do full
+   read/parse/rewrite with no caching or partial access, confirm the `threading.Lock` /
+   multi-process concern is real, confirm the O(system-wide) read pattern in
+   `list_assignments_for_course` and friends. If something in the plan is wrong or overstated,
+   say so plainly — this is exactly the kind of thing the K1 deadlock incident showed is worth
+   double-checking rather than trusting a first pass on.
+2. **Form your own opinion on the target design** before reading further into the plan's own
+   answer, then compare: Postgres vs. something else (e.g. would SQLite-per-course, or a
+   single embedded SQLite file instead of many JSON files, get most of the correctness benefit
+   — atomic writes, real transactions — without adding an external database dependency at all?
+   Is Postgres actually necessary here, or just the obvious default?). The plan picked Postgres
+   partly because Railway makes it a one-click addon for the deployment target — worth
+   confirming that's still the deployment target before treating it as a given.
+3. **Sanity-check the phasing and scope boundary** — does keeping every existing function's
+   name/signature unchanged (so routers don't move) actually hold up once you look at the real
+   function signatures, or are there places where the JSON-vs-DB difference leaks through in a
+   way the plan didn't anticipate (e.g. anything relying on dict-iteration order, or a caller
+   that inspects the shape of what `_load_assignments()` returns directly instead of going
+   through a public function)?
+4. **Flag anything the plan scoped out that you think should be in** (or vice versa) —
+   `identity.py`/`grants.py` and chat/session storage were deliberately left out; say if you
+   disagree and why.
+
+Log your findings here the same way this file's other entries work — new dated entry, don't
+edit this one or the plan file's content directly for disagreements, write them up so both can
+be compared side by side. Once both perspectives are on the table, the repo owner decides how
+to proceed — this is explicitly not a "whoever finishes first wins" race.
