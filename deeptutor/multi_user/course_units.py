@@ -1,33 +1,31 @@
 """Course unit and enrollment storage for the optional multi-user layer.
 
-Mirrors the pattern in ``identity.py``: plain JSON files under ``SYSTEM_ROOT``,
-serialized through a single process-wide lock. A ``CourseUnit`` can have more
-than one instructor id (co-instructors/TAs), and the same instructor can own
-several course units at once (e.g. teaching two subjects in one term) — both
-are plain list/many-to-many relationships, not a one-instructor-one-team
-assumption. ``Enrollment`` is the many-to-many join between students and
-course units.
+Backed by Postgres via SQLAlchemy async (see DATABASE_MIGRATION_PLAN.md).
+A ``CourseUnit`` can have more than one instructor id (co-instructors/TAs),
+and the same instructor can own several course units at once — both are
+many-to-many relationships stored in ``course_unit_instructors``.
+``Enrollment`` is the many-to-many join between students and course units,
+with a UNIQUE constraint on (course_unit_id, user_id) enforced by the DB.
+
+All public functions are ``async def`` — callers must ``await`` them.
+Names, parameters, and return shapes (plain dicts) are unchanged from the
+JSON-backed version so downstream consumers (gradebook.py, grading.py) and
+routers only gain ``await``, no logic changes.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 import logging
-from pathlib import Path
-import threading
 from typing import Any
 from uuid import uuid4
 
-from .paths import SYSTEM_ROOT, ensure_system_dirs
+from sqlalchemy import delete, select
+
+from deeptutor.services.db import session_scope
+from deeptutor.services.db.models import CourseUnit, CourseUnitInstructor, Enrollment
 
 logger = logging.getLogger(__name__)
-
-_WRITE_LOCK = threading.Lock()
-
-COURSE_DIR = SYSTEM_ROOT / "courses"
-COURSE_UNITS_FILE = COURSE_DIR / "course_units.json"
-ENROLLMENTS_FILE = COURSE_DIR / "enrollments.json"
 
 
 def new_course_unit_id() -> str:
@@ -42,30 +40,29 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-        return loaded if isinstance(loaded, dict) else {}
-    except Exception as exc:
-        logger.warning("Failed to read %s: %s", path, exc)
-        return {}
+def _unit_to_dict(unit: CourseUnit) -> dict[str, Any]:
+    """Serialize a CourseUnit ORM instance to the same dict shape the old
+    JSON store returned — preserves backward compatibility for all callers."""
+    return {
+        "id": unit.id,
+        "name": unit.name,
+        "term": unit.term,
+        "description": unit.description,
+        "instructor_ids": [i.instructor_id for i in unit.instructors],
+        "created_at": unit.created_at.isoformat() if unit.created_at else "",
+    }
 
 
-def _write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
-def _load_course_units() -> dict[str, dict[str, Any]]:
-    ensure_system_dirs()
-    return _read_json(COURSE_UNITS_FILE)
-
-
-def _load_enrollments() -> dict[str, dict[str, Any]]:
-    ensure_system_dirs()
-    return _read_json(ENROLLMENTS_FILE)
+def _enrollment_to_dict(enrollment: Enrollment) -> dict[str, Any]:
+    """Serialize an Enrollment ORM instance to the same dict shape."""
+    return {
+        "id": enrollment.id,
+        "course_unit_id": enrollment.course_unit_id,
+        "user_id": enrollment.user_id,
+        "status": enrollment.status,
+        "created_at": enrollment.created_at.isoformat() if enrollment.created_at else "",
+        "approved_at": enrollment.approved_at.isoformat() if enrollment.approved_at else "",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -73,36 +70,55 @@ def _load_enrollments() -> dict[str, dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def create_course_unit(
+async def create_course_unit(
     name: str,
     term: str,
     instructor_ids: list[str],
     description: str = "",
 ) -> dict[str, Any]:
-    record = {
-        "id": new_course_unit_id(),
-        "name": name,
-        "term": term,
-        "description": description,
-        "instructor_ids": [str(uid) for uid in instructor_ids if str(uid).strip()],
-        "created_at": utc_now(),
-    }
-    with _WRITE_LOCK:
-        units = _load_course_units()
-        units[record["id"]] = record
-        _write_json(COURSE_UNITS_FILE, units)
-    return record
+    unit_id = new_course_unit_id()
+    now = datetime.now(timezone.utc)
+    clean_ids = [str(uid) for uid in instructor_ids if str(uid).strip()]
+    async with session_scope() as session:
+        unit = CourseUnit(
+            id=unit_id,
+            name=name,
+            term=term,
+            description=description,
+            created_at=now,
+        )
+        session.add(unit)
+        await session.flush()
+        for uid in clean_ids:
+            session.add(CourseUnitInstructor(course_unit_id=unit_id, instructor_id=uid))
+        await session.flush()
+        # Eagerly load instructors for serialization
+        await session.refresh(unit, ["instructors"])
+    return _unit_to_dict(unit)
 
 
-def list_course_units() -> list[dict[str, Any]]:
-    return list(_load_course_units().values())
+async def list_course_units() -> list[dict[str, Any]]:
+    async with session_scope() as session:
+        result = await session.execute(
+            select(CourseUnit).order_by(CourseUnit.created_at)
+        )
+        units = result.scalars().unique().all()
+        # Eagerly load instructors
+        for u in units:
+            await session.refresh(u, ["instructors"])
+    return [_unit_to_dict(u) for u in units]
 
 
-def get_course_unit(course_unit_id: str) -> dict[str, Any] | None:
-    return _load_course_units().get(course_unit_id)
+async def get_course_unit(course_unit_id: str) -> dict[str, Any] | None:
+    async with session_scope() as session:
+        unit = await session.get(CourseUnit, course_unit_id)
+        if unit is None:
+            return None
+        await session.refresh(unit, ["instructors"])
+    return _unit_to_dict(unit)
 
 
-def update_course_unit(
+async def update_course_unit(
     course_unit_id: str,
     *,
     name: str | None = None,
@@ -110,105 +126,100 @@ def update_course_unit(
     description: str | None = None,
     instructor_ids: list[str] | None = None,
 ) -> dict[str, Any] | None:
-    with _WRITE_LOCK:
-        units = _load_course_units()
-        record = units.get(course_unit_id)
-        if record is None:
+    async with session_scope() as session:
+        unit = await session.get(CourseUnit, course_unit_id)
+        if unit is None:
             return None
         if name is not None:
-            record["name"] = name
+            unit.name = name
         if term is not None:
-            record["term"] = term
+            unit.term = term
         if description is not None:
-            record["description"] = description
+            unit.description = description
         if instructor_ids is not None:
-            record["instructor_ids"] = [str(uid) for uid in instructor_ids if str(uid).strip()]
-        units[course_unit_id] = record
-        _write_json(COURSE_UNITS_FILE, units)
-        return record
+            # Replace instructor list: delete existing, insert new
+            await session.execute(
+                delete(CourseUnitInstructor).where(
+                    CourseUnitInstructor.course_unit_id == course_unit_id
+                )
+            )
+            clean_ids = [str(uid) for uid in instructor_ids if str(uid).strip()]
+            for uid in clean_ids:
+                session.add(CourseUnitInstructor(course_unit_id=course_unit_id, instructor_id=uid))
+        await session.flush()
+        await session.refresh(unit, ["instructors"])
+    return _unit_to_dict(unit)
 
 
-def delete_course_unit(course_unit_id: str) -> bool:
-    with _WRITE_LOCK:
-        units = _load_course_units()
-        if course_unit_id not in units:
+async def delete_course_unit(course_unit_id: str) -> bool:
+    """Delete a course unit. ON DELETE CASCADE on foreign keys automatically
+    removes all enrollments, assignments (+ their submissions), and
+    course-book entries — no manual sweep needed."""
+    async with session_scope() as session:
+        unit = await session.get(CourseUnit, course_unit_id)
+        if unit is None:
             return False
-        units.pop(course_unit_id, None)
-        _write_json(COURSE_UNITS_FILE, units)
-        enrollments = _load_enrollments()
-        remaining = {
-            eid: rec for eid, rec in enrollments.items() if rec.get("course_unit_id") != course_unit_id
-        }
-        if len(remaining) != len(enrollments):
-            _write_json(ENROLLMENTS_FILE, remaining)
-        # Cascade: sweep assignments + their submissions and course-books
-        # entries for the deleted unit, so nothing is left orphaned pointing
-        # at a dead course_unit_id. Same pattern as the enrollment cleanup
-        # above — the unit is gone, so anything keyed to it is dead data.
-        from .assignments import ASSIGNMENTS_FILE, SUBMISSIONS_FILE, _load_assignments, _load_submissions
-        from .course_books import COURSE_BOOKS_FILE, _load as _load_course_books
-
-        assignments = _load_assignments()
-        orphaned_assignment_ids = {
-            aid for aid, rec in assignments.items() if rec.get("course_unit_id") == course_unit_id
-        }
-        if orphaned_assignment_ids:
-            remaining_assignments = {
-                aid: rec for aid, rec in assignments.items() if aid not in orphaned_assignment_ids
-            }
-            _write_json(ASSIGNMENTS_FILE, remaining_assignments)
-            submissions = _load_submissions()
-            remaining_submissions = {
-                sid: rec
-                for sid, rec in submissions.items()
-                if rec.get("assignment_id") not in orphaned_assignment_ids
-            }
-            if len(remaining_submissions) != len(submissions):
-                _write_json(SUBMISSIONS_FILE, remaining_submissions)
-        course_books = _load_course_books()
-        remaining_books = {
-            bid: rec for bid, rec in course_books.items() if rec.get("course_unit_id") != course_unit_id
-        }
-        if len(remaining_books) != len(course_books):
-            _write_json(COURSE_BOOKS_FILE, remaining_books)
-        return True
+        await session.delete(unit)
+    return True
 
 
-def is_instructor_of(user_id: str, course_unit_id: str) -> bool:
-    record = get_course_unit(course_unit_id)
-    if record is None:
-        return False
-    return str(user_id) in [str(uid) for uid in record.get("instructor_ids", [])]
+async def is_instructor_of(user_id: str, course_unit_id: str) -> bool:
+    async with session_scope() as session:
+        result = await session.execute(
+            select(CourseUnitInstructor).where(
+                CourseUnitInstructor.course_unit_id == course_unit_id,
+                CourseUnitInstructor.instructor_id == str(user_id),
+            )
+        )
+        return result.scalar_one_or_none() is not None
 
 
-def is_approved_student_of(user_id: str, course_unit_id: str) -> bool:
+async def is_approved_student_of(user_id: str, course_unit_id: str) -> bool:
     """Whether ``user_id`` has an *approved* enrollment in this course unit —
     a pending request doesn't grant access to assignments any more than it
     grants access to the course units list."""
-    return any(
-        str(rec.get("user_id")) == str(user_id) and rec.get("status", "approved") == "approved"
-        for rec in list_enrollments_for_course(course_unit_id)
-    )
+    async with session_scope() as session:
+        result = await session.execute(
+            select(Enrollment).where(
+                Enrollment.course_unit_id == course_unit_id,
+                Enrollment.user_id == str(user_id),
+                Enrollment.status == "approved",
+            )
+        )
+        return result.scalar_one_or_none() is not None
 
 
-def list_course_units_for_instructor(user_id: str) -> list[dict[str, Any]]:
-    return [
-        record
-        for record in _load_course_units().values()
-        if str(user_id) in [str(uid) for uid in record.get("instructor_ids", [])]
-    ]
+async def list_course_units_for_instructor(user_id: str) -> list[dict[str, Any]]:
+    async with session_scope() as session:
+        result = await session.execute(
+            select(CourseUnit)
+            .join(CourseUnitInstructor)
+            .where(CourseUnitInstructor.instructor_id == str(user_id))
+            .order_by(CourseUnit.created_at)
+        )
+        units = result.scalars().unique().all()
+        for u in units:
+            await session.refresh(u, ["instructors"])
+    return [_unit_to_dict(u) for u in units]
 
 
-def list_course_units_for_student(user_id: str) -> list[dict[str, Any]]:
+async def list_course_units_for_student(user_id: str) -> list[dict[str, Any]]:
     """Units ``user_id`` has *approved* access to — a pending request alone
     doesn't grant it."""
-    unit_ids = {
-        rec.get("course_unit_id")
-        for rec in _load_enrollments().values()
-        if str(rec.get("user_id")) == str(user_id) and rec.get("status", "approved") == "approved"
-    }
-    units = _load_course_units()
-    return [units[uid] for uid in unit_ids if uid in units]
+    async with session_scope() as session:
+        result = await session.execute(
+            select(CourseUnit)
+            .join(Enrollment)
+            .where(
+                Enrollment.user_id == str(user_id),
+                Enrollment.status == "approved",
+            )
+            .order_by(CourseUnit.created_at)
+        )
+        units = result.scalars().unique().all()
+        for u in units:
+            await session.refresh(u, ["instructors"])
+    return [_unit_to_dict(u) for u in units]
 
 
 # ---------------------------------------------------------------------------
@@ -216,19 +227,7 @@ def list_course_units_for_student(user_id: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def _find_enrollment(
-    enrollments: dict[str, dict[str, Any]], course_unit_id: str, user_id: str
-) -> dict[str, Any] | None:
-    for record in enrollments.values():
-        if (
-            record.get("course_unit_id") == course_unit_id
-            and str(record.get("user_id")) == str(user_id)
-        ):
-            return record
-    return None
-
-
-def enroll_student(course_unit_id: str, user_id: str) -> dict[str, Any] | None:
+async def enroll_student(course_unit_id: str, user_id: str) -> dict[str, Any] | None:
     """Instructor/admin directly enrolls a student — always ends up approved.
     The manual fallback path (e.g. the student can't reach the platform
     themselves, or an instructor is confirming someone in person). If the
@@ -236,101 +235,112 @@ def enroll_student(course_unit_id: str, user_id: str) -> dict[str, Any] | None:
     (an instructor clicking "Enroll" on someone who already asked should
     obviously let them in, not silently no-op); an already-approved
     enrollment is left as-is. Returns None if the course unit doesn't exist."""
-    with _WRITE_LOCK:
-        units = _load_course_units()
-        if course_unit_id not in units:
+    now = datetime.now(timezone.utc)
+    async with session_scope() as session:
+        unit = await session.get(CourseUnit, course_unit_id)
+        if unit is None:
             return None
-        enrollments = _load_enrollments()
-        existing = _find_enrollment(enrollments, course_unit_id, user_id)
+        result = await session.execute(
+            select(Enrollment).where(
+                Enrollment.course_unit_id == course_unit_id,
+                Enrollment.user_id == str(user_id),
+            )
+        )
+        existing = result.scalar_one_or_none()
         if existing is not None:
-            if existing.get("status", "approved") != "approved":
-                existing["status"] = "approved"
-                existing["approved_at"] = utc_now()
-                _write_json(ENROLLMENTS_FILE, enrollments)
-            return existing
-        record = {
-            "id": new_enrollment_id(),
-            "course_unit_id": course_unit_id,
-            "user_id": str(user_id),
-            "status": "approved",
-            "created_at": utc_now(),
-            "approved_at": utc_now(),
-        }
-        enrollments[record["id"]] = record
-        _write_json(ENROLLMENTS_FILE, enrollments)
-        return record
+            if existing.status != "approved":
+                existing.status = "approved"
+                existing.approved_at = now
+            return _enrollment_to_dict(existing)
+        enrollment = Enrollment(
+            id=new_enrollment_id(),
+            course_unit_id=course_unit_id,
+            user_id=str(user_id),
+            status="approved",
+            created_at=now,
+            approved_at=now,
+        )
+        session.add(enrollment)
+    return _enrollment_to_dict(enrollment)
 
 
-def request_enrollment(course_unit_id: str, user_id: str) -> dict[str, Any] | None:
+async def request_enrollment(course_unit_id: str, user_id: str) -> dict[str, Any] | None:
     """Student-initiated: creates a ``pending`` enrollment for the instructor
     to approve or reject. Idempotent — an existing enrollment of either
     status (already pending, or already approved) is returned unchanged, so
     re-requesting can't downgrade an approved student back to pending.
     Returns None if the course unit doesn't exist."""
-    with _WRITE_LOCK:
-        units = _load_course_units()
-        if course_unit_id not in units:
+    now = datetime.now(timezone.utc)
+    async with session_scope() as session:
+        unit = await session.get(CourseUnit, course_unit_id)
+        if unit is None:
             return None
-        enrollments = _load_enrollments()
-        existing = _find_enrollment(enrollments, course_unit_id, user_id)
+        result = await session.execute(
+            select(Enrollment).where(
+                Enrollment.course_unit_id == course_unit_id,
+                Enrollment.user_id == str(user_id),
+            )
+        )
+        existing = result.scalar_one_or_none()
         if existing is not None:
-            return existing
-        record = {
-            "id": new_enrollment_id(),
-            "course_unit_id": course_unit_id,
-            "user_id": str(user_id),
-            "status": "pending",
-            "created_at": utc_now(),
-            "approved_at": "",
-        }
-        enrollments[record["id"]] = record
-        _write_json(ENROLLMENTS_FILE, enrollments)
-        return record
+            return _enrollment_to_dict(existing)
+        enrollment = Enrollment(
+            id=new_enrollment_id(),
+            course_unit_id=course_unit_id,
+            user_id=str(user_id),
+            status="pending",
+            created_at=now,
+            approved_at=None,
+        )
+        session.add(enrollment)
+    return _enrollment_to_dict(enrollment)
 
 
-def approve_enrollment(course_unit_id: str, user_id: str) -> dict[str, Any] | None:
+async def approve_enrollment(course_unit_id: str, user_id: str) -> dict[str, Any] | None:
     """Approve a pending enrollment request. Returns None if there is no
     matching pending request (already approved, rejected/removed, or never
     requested)."""
-    with _WRITE_LOCK:
-        enrollments = _load_enrollments()
-        record = _find_enrollment(enrollments, course_unit_id, user_id)
-        if record is None or record.get("status", "approved") != "pending":
-            return None
-        record["status"] = "approved"
-        record["approved_at"] = utc_now()
-        _write_json(ENROLLMENTS_FILE, enrollments)
-        return record
-
-
-def unenroll_student(course_unit_id: str, user_id: str) -> bool:
-    with _WRITE_LOCK:
-        enrollments = _load_enrollments()
-        remaining = {
-            eid: rec
-            for eid, rec in enrollments.items()
-            if not (
-                rec.get("course_unit_id") == course_unit_id
-                and str(rec.get("user_id")) == str(user_id)
+    now = datetime.now(timezone.utc)
+    async with session_scope() as session:
+        result = await session.execute(
+            select(Enrollment).where(
+                Enrollment.course_unit_id == course_unit_id,
+                Enrollment.user_id == str(user_id),
+                Enrollment.status == "pending",
             )
-        }
-        if len(remaining) == len(enrollments):
-            return False
-        _write_json(ENROLLMENTS_FILE, remaining)
-        return True
+        )
+        enrollment = result.scalar_one_or_none()
+        if enrollment is None:
+            return None
+        enrollment.status = "approved"
+        enrollment.approved_at = now
+    return _enrollment_to_dict(enrollment)
 
 
-def list_enrollments_for_course(course_unit_id: str) -> list[dict[str, Any]]:
-    return [
-        record
-        for record in _load_enrollments().values()
-        if record.get("course_unit_id") == course_unit_id
-    ]
+async def unenroll_student(course_unit_id: str, user_id: str) -> bool:
+    async with session_scope() as session:
+        result = await session.execute(
+            delete(Enrollment).where(
+                Enrollment.course_unit_id == course_unit_id,
+                Enrollment.user_id == str(user_id),
+            )
+        )
+        return result.rowcount > 0
 
 
-def list_enrollments_for_student(user_id: str) -> list[dict[str, Any]]:
-    return [
-        record
-        for record in _load_enrollments().values()
-        if str(record.get("user_id")) == str(user_id)
-    ]
+async def list_enrollments_for_course(course_unit_id: str) -> list[dict[str, Any]]:
+    async with session_scope() as session:
+        result = await session.execute(
+            select(Enrollment).where(Enrollment.course_unit_id == course_unit_id)
+        )
+        enrollments = result.scalars().all()
+    return [_enrollment_to_dict(e) for e in enrollments]
+
+
+async def list_enrollments_for_student(user_id: str) -> list[dict[str, Any]]:
+    async with session_scope() as session:
+        result = await session.execute(
+            select(Enrollment).where(Enrollment.user_id == str(user_id))
+        )
+        enrollments = result.scalars().all()
+    return [_enrollment_to_dict(e) for e in enrollments]

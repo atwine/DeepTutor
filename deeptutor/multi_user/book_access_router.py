@@ -20,7 +20,6 @@ from pydantic import BaseModel
 from deeptutor.api.routers.auth import TokenPayload, require_auth, require_instructor_or_admin
 from deeptutor.multi_user.models import LOCAL_ADMIN_ID, CurrentUser
 
-from .assignments_router import _manages_course_unit
 from .course_books import (
     assign_book_to_course_unit,
     get_book_entry,
@@ -28,7 +27,7 @@ from .course_books import (
     set_book_status,
     unassign_book,
 )
-from .course_units import get_course_unit, is_approved_student_of
+from .course_units import get_course_unit, is_approved_student_of, is_instructor_of
 from .paths import local_admin_user, scope_for_user, user_context
 
 router = APIRouter()
@@ -36,6 +35,15 @@ router = APIRouter()
 
 class AssignBookRequest(BaseModel):
     course_unit_id: str
+
+
+async def _manages_course_unit(current: TokenPayload, course_unit_id: str) -> bool:
+    """Whether ``current`` has management access to the course unit.
+    Local async version — the original in assignments_router.py will be made
+    async by Track 3; this avoids a cross-track dependency."""
+    return current.role == "admin" or (
+        current.role == "instructor" and await is_instructor_of(current.user_id, course_unit_id)
+    )
 
 
 def _owner_context(owner_id: str):
@@ -101,13 +109,13 @@ async def assign_book_endpoint(
     """Attach one of *my own* books to a course unit I manage — draft by
     default. The book must actually exist in my own workspace (checked
     directly, no impersonation needed since the caller is the owner here)."""
-    if get_course_unit(payload.course_unit_id) is None:
+    if await get_course_unit(payload.course_unit_id) is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
-    if not _manages_course_unit(current, payload.course_unit_id):
+    if not await _manages_course_unit(current, payload.course_unit_id):
         raise HTTPException(status_code=403, detail="You do not manage this course unit")
     if not _book_exists_for_owner(current.user_id, book_id):
         raise HTTPException(status_code=404, detail="Book not found in your library")
-    record = assign_book_to_course_unit(book_id, current.user_id, payload.course_unit_id)
+    record = await assign_book_to_course_unit(book_id, current.user_id, payload.course_unit_id)
     return {"entry": record}
 
 
@@ -116,12 +124,12 @@ async def unassign_book_endpoint(
     book_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    entry = get_book_entry(book_id)
+    entry = await get_book_entry(book_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="This book isn't assigned to a course unit")
-    if not _manages_course_unit(current, entry["course_unit_id"]):
+    if not await _manages_course_unit(current, entry["course_unit_id"]):
         raise HTTPException(status_code=403, detail="You do not manage this course unit")
-    unassign_book(book_id)
+    await unassign_book(book_id)
     return {"ok": True}
 
 
@@ -130,12 +138,12 @@ async def publish_book_endpoint(
     book_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    entry = get_book_entry(book_id)
+    entry = await get_book_entry(book_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="This book isn't assigned to a course unit")
-    if not _manages_course_unit(current, entry["course_unit_id"]):
+    if not await _manages_course_unit(current, entry["course_unit_id"]):
         raise HTTPException(status_code=403, detail="You do not manage this course unit")
-    record = set_book_status(book_id, "published")
+    record = await set_book_status(book_id, "published")
     return {"entry": record}
 
 
@@ -144,12 +152,12 @@ async def unpublish_book_endpoint(
     book_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    entry = get_book_entry(book_id)
+    entry = await get_book_entry(book_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="This book isn't assigned to a course unit")
-    if not _manages_course_unit(current, entry["course_unit_id"]):
+    if not await _manages_course_unit(current, entry["course_unit_id"]):
         raise HTTPException(status_code=403, detail="You do not manage this course unit")
-    record = set_book_status(book_id, "draft")
+    record = await set_book_status(book_id, "draft")
     return {"entry": record}
 
 
@@ -160,14 +168,14 @@ async def list_course_unit_books_endpoint(
 ) -> dict[str, Any]:
     """Instructor/admin: every book assigned to this unit (draft + published).
     Student: published books only, and only if approved-enrolled."""
-    if get_course_unit(course_unit_id) is None:
+    if await get_course_unit(course_unit_id) is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
 
-    manages = current is not None and _manages_course_unit(current, course_unit_id)
-    entries = list_entries_for_course_unit(course_unit_id)
+    manages = current is not None and await _manages_course_unit(current, course_unit_id)
+    entries = await list_entries_for_course_unit(course_unit_id)
     if not manages:
         user_id = current.user_id if current else ""
-        if not is_approved_student_of(user_id, course_unit_id):
+        if not await is_approved_student_of(user_id, course_unit_id):
             raise HTTPException(
                 status_code=403, detail="You are not enrolled in this course unit"
             )
@@ -190,16 +198,16 @@ async def get_course_book_content_endpoint(
     """The actual read: book + spine + pages, resolved from the owner's
     workspace. A course-unit manager may preview a draft; anyone else needs
     the book to be published and themselves to be an approved student."""
-    entry = get_book_entry(book_id)
+    entry = await get_book_entry(book_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    manages = current is not None and _manages_course_unit(current, entry["course_unit_id"])
+    manages = current is not None and await _manages_course_unit(current, entry["course_unit_id"])
     if not manages:
         if entry["status"] != "published":
             raise HTTPException(status_code=404, detail="Book not found")
         user_id = current.user_id if current else ""
-        if not is_approved_student_of(user_id, entry["course_unit_id"]):
+        if not await is_approved_student_of(user_id, entry["course_unit_id"]):
             raise HTTPException(
                 status_code=403, detail="You are not enrolled in this course unit"
             )

@@ -7,7 +7,6 @@ in, and an admin can do anything.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,9 +20,10 @@ from deeptutor.api.routers.auth import (
 )
 
 from .assignments import (
+    check_attempt_limit,
     count_submissions,
     create_assignment,
-    create_submission,
+    create_submission_checked,
     delete_assignment,
     get_assignment,
     get_latest_submission,
@@ -39,33 +39,6 @@ from .gradebook import build_gradebook, build_gradebook_csv
 from .identity import get_user_by_id
 
 router = APIRouter()
-
-# Per-(assignment_id, user_id) lock to serialize concurrent submissions for the
-# same student+assignment, preventing the race where two near-simultaneous
-# submits both pass the attempt-count check before either writes.
-#
-# Must be ``asyncio.Lock``, not ``threading.Lock``: the submit flow holds this
-# lock across ``await grade_submission(...)`` (a real LLM call for free-text
-# questions). A ``threading.Lock`` blocks the OS thread on contention — and
-# since this app runs one event loop on one thread, a second coroutine
-# blocking on ``threading.Lock.acquire()`` freezes that thread entirely,
-# which means the first coroutine's own pending LLM response can never be
-# delivered to let it finish and release the lock. That's a total, permanent
-# deadlock (confirmed live: the whole backend became unresponsive to even a
-# health check), not just added latency. ``asyncio.Lock`` is itself
-# awaitable, so a contended waiter yields to the event loop instead of
-# blocking it. Dict creation below has no ``await`` in it, so it's safe
-# without a separate guard lock — coroutines only interleave at await points.
-_submit_locks: dict[str, asyncio.Lock] = {}
-
-
-def _get_submit_lock(assignment_id: str, user_id: str) -> asyncio.Lock:
-    key = f"{assignment_id}:{user_id}"
-    lock = _submit_locks.get(key)
-    if lock is None:
-        lock = asyncio.Lock()
-        _submit_locks[key] = lock
-    return lock
 
 
 class QuestionPayload(BaseModel):
@@ -105,19 +78,19 @@ class SubmitPayload(BaseModel):
     answers: list[AnswerPayload] = []
 
 
-def _manages_course_unit(current: TokenPayload, course_unit_id: str) -> bool:
+async def _manages_course_unit(current: TokenPayload, course_unit_id: str) -> bool:
     return current.role == "admin" or (
-        current.role == "instructor" and is_instructor_of(current.user_id, course_unit_id)
+        current.role == "instructor" and await is_instructor_of(current.user_id, course_unit_id)
     )
 
 
-def _require_manage_access(current: TokenPayload, assignment: dict[str, Any]) -> None:
-    if not _manages_course_unit(current, assignment["course_unit_id"]):
+async def _require_manage_access(current: TokenPayload, assignment: dict[str, Any]) -> None:
+    if not await _manages_course_unit(current, assignment["course_unit_id"]):
         raise HTTPException(status_code=403, detail="You do not manage this assignment")
 
 
-def _get_assignment_or_404(assignment_id: str) -> dict[str, Any]:
-    assignment = get_assignment(assignment_id)
+async def _get_assignment_or_404(assignment_id: str) -> dict[str, Any]:
+    assignment = await get_assignment(assignment_id)
     if assignment is None:
         raise HTTPException(status_code=404, detail="Assignment not found")
     return assignment
@@ -146,11 +119,11 @@ async def create_assignment_endpoint(
     payload: AssignmentCreate,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    if get_course_unit(course_unit_id) is None:
+    if await get_course_unit(course_unit_id) is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
-    if not _manages_course_unit(current, course_unit_id):
+    if not await _manages_course_unit(current, course_unit_id):
         raise HTTPException(status_code=403, detail="You do not manage this course unit")
-    record = create_assignment(
+    record = await create_assignment(
         course_unit_id,
         payload.title,
         payload.description,
@@ -168,19 +141,19 @@ async def list_assignments_endpoint(
     course_unit_id: str,
     current: TokenPayload | None = Depends(require_auth),
 ) -> dict[str, Any]:
-    if get_course_unit(course_unit_id) is None:
+    if await get_course_unit(course_unit_id) is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
     payload = current
-    if payload is not None and _manages_course_unit(payload, course_unit_id):
-        assignments = list_assignments_for_course(course_unit_id)
+    if payload is not None and await _manages_course_unit(payload, course_unit_id):
+        assignments = await list_assignments_for_course(course_unit_id)
     else:
         user_id = payload.user_id if payload else ""
-        if not is_approved_student_of(user_id, course_unit_id):
+        if not await is_approved_student_of(user_id, course_unit_id):
             raise HTTPException(
                 status_code=403, detail="You are not enrolled in this course unit"
             )
         assignments = [
-            a for a in list_assignments_for_course(course_unit_id) if a["status"] == "published"
+            a for a in await list_assignments_for_course(course_unit_id) if a["status"] == "published"
         ]
     return {"assignments": [_assignment_summary(a) for a in assignments]}
 
@@ -190,9 +163,9 @@ async def get_assignment_endpoint(
     assignment_id: str,
     current: TokenPayload | None = Depends(require_auth),
 ) -> dict[str, Any]:
-    assignment = _get_assignment_or_404(assignment_id)
+    assignment = await _get_assignment_or_404(assignment_id)
     course_unit_id = assignment["course_unit_id"]
-    manages = current is not None and _manages_course_unit(current, course_unit_id)
+    manages = current is not None and await _manages_course_unit(current, course_unit_id)
 
     if manages:
         return {"assignment": assignment}
@@ -200,15 +173,15 @@ async def get_assignment_endpoint(
     if assignment["status"] != "published":
         raise HTTPException(status_code=404, detail="Assignment not found")
     user_id = current.user_id if current else ""
-    if not is_approved_student_of(user_id, course_unit_id):
+    if not await is_approved_student_of(user_id, course_unit_id):
         raise HTTPException(status_code=403, detail="You are not enrolled in this course unit")
 
     student_view = {
         **_assignment_summary(assignment),
         "questions": [public_question_view(q) for q in assignment.get("questions", [])],
     }
-    latest = get_latest_submission(assignment_id, user_id)
-    student_view["my_attempts"] = count_submissions(assignment_id, user_id)
+    latest = await get_latest_submission(assignment_id, user_id)
+    student_view["my_attempts"] = await count_submissions(assignment_id, user_id)
     student_view["my_latest_submission"] = latest
     return {"assignment": student_view}
 
@@ -219,10 +192,10 @@ async def update_assignment_endpoint(
     payload: AssignmentUpdate,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    assignment = _get_assignment_or_404(assignment_id)
-    _require_manage_access(current, assignment)
+    assignment = await _get_assignment_or_404(assignment_id)
+    await _require_manage_access(current, assignment)
     try:
-        record = update_assignment(
+        record = await update_assignment(
             assignment_id,
             title=payload.title,
             description=payload.description,
@@ -245,11 +218,11 @@ async def publish_assignment_endpoint(
     assignment_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    assignment = _get_assignment_or_404(assignment_id)
-    _require_manage_access(current, assignment)
+    assignment = await _get_assignment_or_404(assignment_id)
+    await _require_manage_access(current, assignment)
     if not assignment.get("questions"):
         raise HTTPException(status_code=400, detail="Add at least one question before publishing")
-    record = publish_assignment(assignment_id)
+    record = await publish_assignment(assignment_id)
     return {"assignment": record}
 
 
@@ -258,9 +231,9 @@ async def delete_assignment_endpoint(
     assignment_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    assignment = _get_assignment_or_404(assignment_id)
-    _require_manage_access(current, assignment)
-    delete_assignment(assignment_id)
+    assignment = await _get_assignment_or_404(assignment_id)
+    await _require_manage_access(current, assignment)
+    await delete_assignment(assignment_id)
     return {"ok": True}
 
 
@@ -270,48 +243,51 @@ async def submit_assignment_endpoint(
     payload: SubmitPayload,
     current: TokenPayload | None = Depends(require_auth),
 ) -> dict[str, Any]:
-    assignment = _get_assignment_or_404(assignment_id)
+    assignment = await _get_assignment_or_404(assignment_id)
     if assignment["status"] != "published":
         raise HTTPException(status_code=400, detail="This assignment is not open for submissions")
     course_unit_id = assignment["course_unit_id"]
     user_id = current.user_id if current else ""
-    if not is_approved_student_of(user_id, course_unit_id):
+    if not await is_approved_student_of(user_id, course_unit_id):
         raise HTTPException(status_code=403, detail="You are not enrolled in this course unit")
 
-    # Hold a per-student+assignment lock across grading + write so two
-    # concurrent submits can't both pass the attempt-count check. The lock is
-    # only held for this student's submission flow — other students' submits
-    # and all unrelated writes proceed independently.
-    submit_lock = _get_submit_lock(assignment_id, user_id)
-    async with submit_lock:
-        already = count_submissions(assignment_id, user_id)
-        if already >= assignment["attempt_limit"]:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Attempt limit reached ({assignment['attempt_limit']}).",
-            )
+    # The submit flow is restructured, not mechanically ported from the old
+    # asyncio.Lock version. The attempt-limit guard is now two short Postgres
+    # transactions with a `pg_advisory_xact_lock` per (assignment, student),
+    # with the LLM grading call BETWEEN them holding no DB resources:
+    #
+    #   txn1: advisory_lock + count → raise if >= limit (fail-fast) → release
+    #   LLM: await grade_submission(...) — no transaction/lock held
+    #   txn2: advisory_lock + re-count + insert → raise if >= limit → release
+    #
+    # This is correct across multiple app processes (the old in-process
+    # `asyncio.Lock` dict was not) and doesn't hold a DB connection across the
+    # 10-60s LLM call (which would exhaust the pool under load). The advisory
+    # lock in txn2 is the real guard: it serializes the count-check + insert
+    # so two concurrent submits can't both pass. See DATABASE_MIGRATION_PLAN.md
+    # "Decision, post-audit" §3 and assignments.py's
+    # `check_attempt_limit`/`create_submission_checked` docstrings.
+    attempt_limit = assignment["attempt_limit"]
+    try:
+        await check_attempt_limit(assignment_id, user_id, attempt_limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        answers = [a.model_dump() for a in payload.answers]
-        question_results, score, max_score = await grade_submission(assignment, answers)
+    answers = [a.model_dump() for a in payload.answers]
+    question_results, score, max_score = await grade_submission(assignment, answers)
 
-        # Re-check after grading: the attempt count can't have changed during
-        # grading since we hold the lock, but this guards against any path that
-        # bypasses the lock (e.g. a future code change or a manual DB write).
-        already_after = count_submissions(assignment_id, user_id)
-        if already_after >= assignment["attempt_limit"]:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Attempt limit reached ({assignment['attempt_limit']}).",
-            )
-
-        record = create_submission(
+    try:
+        record = await create_submission_checked(
             assignment_id,
             user_id,
             answers=answers,
             question_results=question_results,
             score=score,
             max_score=max_score,
+            attempt_limit=attempt_limit,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"submission": record}
 
 
@@ -320,10 +296,10 @@ async def list_submissions_endpoint(
     assignment_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    assignment = _get_assignment_or_404(assignment_id)
-    _require_manage_access(current, assignment)
+    assignment = await _get_assignment_or_404(assignment_id)
+    await _require_manage_access(current, assignment)
     submissions = []
-    for record in list_submissions_for_assignment(assignment_id):
+    for record in await list_submissions_for_assignment(assignment_id):
         user_record = get_user_by_id(record["user_id"])
         username = user_record[0] if user_record else record["user_id"]
         full_name = str(user_record[1].get("full_name") or "") if user_record else ""
@@ -346,17 +322,17 @@ async def get_my_submission_endpoint(
     assignment_id: str,
     current: TokenPayload | None = Depends(require_auth),
 ) -> dict[str, Any]:
-    assignment = _get_assignment_or_404(assignment_id)
+    assignment = await _get_assignment_or_404(assignment_id)
     user_id = current.user_id if current else ""
-    if not is_approved_student_of(user_id, assignment["course_unit_id"]):
+    if not await is_approved_student_of(user_id, assignment["course_unit_id"]):
         raise HTTPException(status_code=403, detail="You are not enrolled in this course unit")
-    return {"submission": get_latest_submission(assignment_id, user_id)}
+    return {"submission": await get_latest_submission(assignment_id, user_id)}
 
 
-def _require_course_unit_manage_access(current: TokenPayload, course_unit_id: str) -> None:
-    if get_course_unit(course_unit_id) is None:
+async def _require_course_unit_manage_access(current: TokenPayload, course_unit_id: str) -> None:
+    if await get_course_unit(course_unit_id) is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
-    if not _manages_course_unit(current, course_unit_id):
+    if not await _manages_course_unit(current, course_unit_id):
         raise HTTPException(status_code=403, detail="You do not manage this course unit")
 
 
@@ -365,8 +341,8 @@ async def get_gradebook_endpoint(
     course_unit_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    _require_course_unit_manage_access(current, course_unit_id)
-    return build_gradebook(course_unit_id)
+    await _require_course_unit_manage_access(current, course_unit_id)
+    return await build_gradebook(course_unit_id)
 
 
 @router.get("/course-units/{course_unit_id}/gradebook/export")
@@ -374,9 +350,9 @@ async def export_gradebook_csv_endpoint(
     course_unit_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> PlainTextResponse:
-    _require_course_unit_manage_access(current, course_unit_id)
-    unit = get_course_unit(course_unit_id)
-    csv_text = build_gradebook_csv(course_unit_id)
+    await _require_course_unit_manage_access(current, course_unit_id)
+    unit = await get_course_unit(course_unit_id)
+    csv_text = await build_gradebook_csv(course_unit_id)
     safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in unit["name"]).strip() or "gradebook"
     return PlainTextResponse(
         content=csv_text,
