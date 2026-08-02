@@ -237,6 +237,62 @@ class AssignmentAccessGrant(Base):
 # ---------------------------------------------------------------------------
 
 
+class Notification(Base):
+    """Lightweight, polling-based per-course activity feed entry. Created
+    when an instructor publishes something new (an assignment or course
+    notes) so approved-enrolled students can see an alert on the platform.
+
+    Deliberately NOT wired via a decorator/middleware — trigger points call
+    `deeptutor.multi_user.notifications.create_notification()` explicitly,
+    matching this codebase's access-control convention of explicit
+    predicate/helper calls rather than framework magic (see
+    ARCHITECTURE_AND_COMPLETED_WORK.md §7).
+
+    Read/unread state is intentionally NOT a column on this table — see
+    `NotificationRead` below.
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: f"notif_{uuid.uuid4().hex}"
+    )
+    course_unit_id: Mapped[str] = mapped_column(
+        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False
+    )
+    # e.g. "assignment_published" | "notes_published"
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    # Short human-readable line, e.g. "New assignment: Pandas Fundamentals Quiz"
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    # NOTE: DateTime(timezone=True) matches the convention used everywhere
+    # else in this file — a prior round's bug was a naive-vs-aware datetime
+    # mismatch from forgetting this on a new column. Don't repeat it.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class NotificationRead(Base):
+    """Join table tracking which users have read which notification. Marking
+    read is a simple insert (idempotent per user+notification via the unique
+    constraint), not a mutation racing across students reading the same
+    notification concurrently."""
+
+    __tablename__ = "notification_reads"
+    __table_args__ = (
+        UniqueConstraint(
+            "notification_id", "user_id", name="uq_notification_read_notification_user"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: f"nread_{uuid.uuid4().hex}"
+    )
+    notification_id: Mapped[str] = mapped_column(
+        ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
 class CourseBookEntry(Base):
     """A Book stays physically stored in its owner's own per-user workspace
     (see ARCHITECTURE_AND_COMPLETED_WORK.md §2.4) — this table is only the
