@@ -1955,3 +1955,128 @@ pass after all three Round 3 tracks merge).
   fully wired end-to-end (storage → router → client → UI).
 
 — Claude
+
+## 2026-08-02 — Claude — Round 3 merge + regression pass complete
+
+**Item**: merge all three Round 3 tracks (assignment UX, notifications,
+archive/leave-request UI) and verify live. This round was dispatched
+differently from prior rounds: instead of handing off to external Cascade/
+Devin sessions, the repo owner asked Claude to run parallel subagents
+directly, each in its own git worktree off `feature-round2-integration`, on
+branches `fix-round3-assignment-ux`, `fix-round3-notifications`, and
+`fix-round3-archive`. Claude designed the file-ownership split, wrote each
+agent's brief, then merged + tested — the actual implementation was still
+done by the three subagents, not written by Claude directly.
+
+**Status**: done.
+
+**What changed**: merged all three branches into a new
+`feature-round3-integration`, cut from `feature-round2-integration`. Three
+merges, three conflicts total — all three in `DEVIN_LOG.md` (each track
+appended its own entry after the same point), resolved by keeping every
+entry in full, same pattern as every round before this one. **Every other
+file merged with zero conflicts** — `deeptutor/services/db/models.py` in
+particular had three separate agents adding to it in parallel (`Assignment`
+columns, a new `Notification`/`NotificationRead` pair, a `CourseUnit`
+column) and none of them touched a line the others did. The file-ownership
+split held completely.
+
+One hand-off patch required manual application (by design — the
+notifications track couldn't safely edit `assignments.py` itself, since
+another track owned that file this round): added the
+`await create_notification(...)` call inside `publish_assignment()`,
+capturing `course_unit_id`/`title` before the `session_scope()` block closes
+and firing the notification in its own transaction after, matching the
+pattern the notifications track had already used for the course-notes
+trigger in `course_books.py`.
+
+**One correction mid-round**: the assignment-UX agent's first pass skipped
+the two original findings this track existed to fix (the missing
+`is_timed` UI toggle, and the error-copy unification) — its own report said
+so plainly rather than silently omitting them. Sent it back with a specific
+follow-up instruction; it closed both on the second pass, verified again by
+static checks (import/`tsc`), before this merge.
+
+**Verified**: rebuilt the Docker image from the fully-merged branch (clean
+build — confirms Python imports and TypeScript compile across the combined
+diff of all three tracks plus the hand-off patch), reset the Postgres
+schema via `scripts/init_db.py` (confirmed via `psql \d` that
+`course_units.is_archived`, `assignments.is_major`/`passing_score`, and the
+new `notifications`/`notification_reads` tables all landed with correct FKs
+and cascades), then ran a full live regression pass via browser + API with
+fresh throwaway accounts (`r3_instr`, `r3_stud_a`, `r3_stud_b`, all deleted
+afterward):
+
+- **Timer toggle (the original A4 gap)** — confirmed live: the admin
+  assignment form now has a "Timed assignment" checkbox revealing a "Time
+  limit (minutes)" field, alongside a "Major assignment (no retakes)"
+  checkbox and a "Require a passing score to stop retakes" checkbox with a
+  70%-default passing-score field. All three render correctly and disable/
+  reveal each other's dependent fields as expected.
+- **Error-copy unification (the original A6 gap)** — not independently
+  re-tested this pass (the fix was a straightforward string-consolidation
+  behind a new shared helper, reviewed by inspection in the agent's own
+  report); low-risk, didn't re-verify live given everything else this round
+  to cover.
+- **Post-submit results page** — confirmed live end-to-end: submitting an
+  assignment (both a fail and a pass, on two separate assignments)
+  navigates to a dedicated results route showing "Submission received,"
+  score, per-question feedback, and "Back to assignments"/"Home" links —
+  not an inline swap on the same page.
+- **Major vs. quiz retake policy** — confirmed live, all three branches:
+  (1) a quiz with `passing_score=70` — student fails first attempt (0%),
+  results page correctly says "you can try again," retry succeeds and
+  passes; (2) a *different* student passes the same quiz on their **first**
+  attempt with attempts still remaining — a second submit is correctly
+  blocked with "You have already passed this assignment," a distinct
+  message from the attempt-limit case; (3) a major assignment created with
+  `attempt_limit=5` — first attempt fails, second attempt is still blocked
+  ("Attempt limit reached (1)") because `is_major` hard-caps the *effective*
+  limit at 1 server-side regardless of the configured value.
+- **Notifications** — confirmed live end-to-end: publishing the quiz above
+  fired a real notification (`GET /notifications` showed it immediately);
+  the bell icon rendered a red "1" unread badge for the enrolled student,
+  the dropdown showed "New assignment: Retake Policy Quiz — 2m ago,"
+  clicking it marked it read and cleared the badge. Admin (no enrollments)
+  correctly saw a clean "No notifications yet" empty state.
+- **Instructor leave-request UI (the original B2 gap)** — confirmed live:
+  a student's leave request now shows up in the instructor's own roster
+  panel under a new "Pending leave requests" section with "Confirm leave"/
+  "Keep enrolled" actions; confirming cleanly removed the student from the
+  roster with no leftover request or orphaned UI state.
+- **Archive feature (the original B6 gap)** — confirmed live end-to-end:
+  archiving a course unit moved it out of the active list into a collapsed
+  "Archived course units (N)" section with an "Unarchive" action; a
+  still-enrolled student was correctly blocked from the archived course's
+  assignments (403 "not enrolled" — the same code path as the existing
+  grace-period expiry, as designed); the course correctly disappeared from
+  the join-request catalog entirely; the instructor kept full roster
+  access throughout; unarchiving restored student access, confirmed before
+  moving on to the K1/C1 checks below.
+- **K1 and C1 re-verified once more** (this round touched `assignments.py`
+  and `course_units.py` again, on top of everything Round 2 already
+  changed there): fired two concurrent submits on a fresh 1-attempt
+  assignment — one succeeded, one correctly rejected, exactly one
+  submission recorded. Deleted a course unit with real submissions across
+  multiple assignments — everything cascaded cleanly, course-unit list
+  updated immediately, no orphan. Both still hold after three full rounds
+  of changes layered on the same tables.
+
+**New findings**: none beyond what the three tracks already logged
+themselves (the `update_course_unit`/`delete_course_unit` admin-only-gating
+inconsistency the archive track flagged as a pre-existing, out-of-scope
+observation — still open, still just a note, not re-investigated this
+pass).
+
+**Left for later / handing back**: the three git worktrees created for this
+round (`C:\Users\ic\OneDrive\Desktop\DeepTutor-fix-assignments`,
+`-notifications`, `-archive`) are still present on disk with their branches
+intact — safe to remove once the repo owner is comfortable this merge is
+final, not removed automatically as part of this pass. All test data (3
+throwaway accounts, 1 course unit, 3 assignments, their submissions) has
+been deleted; verified the system is back to its pre-test state. Branch
+`feature-round3-integration` is merged locally and ready for review — per
+standing instruction, nothing gets pushed to origin until the repo owner
+explicitly says so.
+
+— Claude
