@@ -58,6 +58,13 @@ class CourseUnit(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     term: Mapped[str] = mapped_column(String, nullable=False, default="")
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # B1: Course start/end dates — nullable so existing units aren't forced to
+    # backfill. Stored as date (not datetime) since course boundaries are
+    # day-granular. When end_date is set, student access to assignments/notes
+    # is blocked after end_date + COURSE_END_GRACE_PERIOD_DAYS (see
+    # course_units.py); instructor/admin archival access is never blocked.
+    start_date: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
+    end_date: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     instructors: Mapped[list["CourseUnitInstructor"]] = relationship(

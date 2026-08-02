@@ -21,7 +21,7 @@ import io
 from typing import Any
 
 from .assignments import get_latest_submission, list_assignments_for_course
-from .course_units import list_enrollments_for_course
+from .course_units import list_course_units_for_instructor, list_enrollments_for_course
 from .identity import get_user_by_id
 
 
@@ -115,5 +115,79 @@ async def build_gradebook_csv(course_unit_id: str) -> str:
             line.append(f"{pa['score']:.1f}" if pa and pa["score"] is not None else "")
         line.append(f"{row['final_grade']:.1f}" if row["final_grade"] is not None else "")
         writer.writerow(line)
+
+    return buffer.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# B3: Cross-course per-instructor compiled report
+# ---------------------------------------------------------------------------
+
+
+async def build_instructor_report(instructor_id: str, term: str | None = None) -> dict[str, Any]:
+    """B3: Compile gradebook data across every course unit an instructor
+    teaches, optionally filtered by ``term``. Reuses ``build_gradebook``
+    internally per unit — does NOT re-derive the weighted-average math."""
+    units = await list_course_units_for_instructor(instructor_id)
+    if term:
+        units = [u for u in units if u.get("term", "") == term]
+
+    course_unit_reports: list[dict[str, Any]] = []
+    total_students = 0
+    total_assignments = 0
+
+    for unit in units:
+        gradebook = await build_gradebook(unit["id"])
+        student_count = len(gradebook["rows"])
+        assignment_count = len(gradebook["assignments"])
+        total_students += student_count
+        total_assignments += assignment_count
+        course_unit_reports.append(
+            {
+                "id": unit["id"],
+                "name": unit["name"],
+                "term": unit.get("term", ""),
+                "assignments": gradebook["assignments"],
+                "rows": gradebook["rows"],
+                "student_count": student_count,
+                "assignment_count": assignment_count,
+            }
+        )
+
+    return {
+        "instructor_id": instructor_id,
+        "term": term,
+        "course_units": course_unit_reports,
+        "total_students": total_students,
+        "total_assignments": total_assignments,
+    }
+
+
+async def build_instructor_report_csv(instructor_id: str, term: str | None = None) -> str:
+    """B3: CSV export of the per-instructor compiled report. Per-unit sections,
+    each with its own assignment columns and student rows."""
+    report = await build_instructor_report(instructor_id, term)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+
+    for unit_report in report["course_units"]:
+        writer.writerow([])
+        writer.writerow([f"=== {unit_report['name']} ({unit_report['term'] or 'No term'}) ==="])
+        assignments = unit_report["assignments"]
+        header = ["Username", "Full Name", "Registration Number"]
+        for a in assignments:
+            header.append(f"{a['title']} (/{a['max_points']:.1f})")
+        header.append("Final Grade (%)")
+        writer.writerow(header)
+
+        for row in unit_report["rows"]:
+            by_id = {pa["assignment_id"]: pa for pa in row["assignments"]}
+            line = [row["username"], row["full_name"], row["registration_number"]]
+            for a in assignments:
+                pa = by_id.get(a["id"])
+                line.append(f"{pa['score']:.1f}" if pa and pa["score"] is not None else "")
+            line.append(f"{row['final_grade']:.1f}" if row['final_grade'] is not None else "")
+            writer.writerow(line)
 
     return buffer.getvalue()

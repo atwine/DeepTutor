@@ -914,7 +914,7 @@ async def remove_user(
     # Capture the id before the record disappears so the avatar file can go too.
     info = get_user_info(username)
 
-    removed = delete_user(username)
+    removed = await delete_user(username)
     if not removed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
