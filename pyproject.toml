@@ -68,6 +68,15 @@ dependencies = [
     "pocketbase>=0.12.0",
     "loguru>=0.7.3,<1.0.0",
     "json-repair>=0.57.0,<1.0.0",
+    # Postgres-backed storage for course units/assignments/submissions/course-book
+    # entries (replacing the flat-JSON store under data/system/courses/) — see
+    # devin-handoff/DATABASE_MIGRATION_PLAN.md. SQLAlchemy async engine + asyncpg
+    # driver, matching this codebase's async-first router style. No Alembic yet —
+    # this is a brand-new schema with no production data to migrate around, so
+    # scripts/init_db.py's plain create_all() is enough tooling for now; add
+    # Alembic the first time this schema needs a real migration against live data.
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.29.0",
 ]
 
 [project.scripts]

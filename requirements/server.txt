@@ -29,3 +29,8 @@ loguru>=0.7.3,<1.0.0
 json-repair>=0.57.0,<1.0.0
 # Built-in cron service (chat & partner scheduled tasks)
 croniter>=6.0.0,<7.0.0
+
+# --- Postgres store for course units/assignments/submissions/course-book
+# entries (deeptutor/services/db) — see devin-handoff/DATABASE_MIGRATION_PLAN.md.
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.29.0

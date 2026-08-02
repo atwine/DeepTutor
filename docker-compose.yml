@@ -49,6 +49,45 @@ services:
       start_period: 10s
 
   # ============================================
+  # Postgres — course units / assignments / submissions / course-book index.
+  # Local dev/test only: the production deployment target is Railway, which
+  # provides Postgres as a managed addon and injects DATABASE_URL directly —
+  # this service exists so `deeptutor/services/db` has something to connect
+  # to when running via `docker compose` locally. See
+  # devin-handoff/DATABASE_MIGRATION_PLAN.md.
+  # ============================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: deeptutor-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=deeptutor
+      - POSTGRES_PASSWORD=deeptutor
+      - POSTGRES_DB=deeptutor
+    ports:
+      - "${DEEPTUTOR_DOCKER_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Named volume, not a ./data bind mount like the other sidecars here.
+      # Postgres enforces strict POSIX ownership/permissions (0700) on its
+      # data directory and refuses to run as root; a Windows-host bind mount
+      # can't reliably satisfy that (confirmed live: pg_filenode.map and
+      # pg_logical/snapshots came back "Permission denied" under Docker
+      # Desktop on Windows even though pocketbase's own ./data bind mount
+      # next to this one works fine). A named volume is managed by Docker's
+      # own storage driver instead of the host filesystem, which sidesteps
+      # the problem entirely — standard practice for Postgres specifically,
+      # not a sign the ./data convention is wrong for the other services.
+      - deeptutor-postgres-data:/var/lib/postgresql/data
+    networks:
+      - deeptutor-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deeptutor -d deeptutor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================
   # All-in-One DeepTutor Service
   # ============================================
   deeptutor:
@@ -81,6 +120,12 @@ services:
       # this unset: the app degrades to bwrap (Linux, if installed) or, only when
       # DEEPTUTOR_SANDBOX_ALLOW_SUBPROCESS=1, a restricted subprocess.
       - DEEPTUTOR_SANDBOX_RUNNER_URL=http://sandbox-runner:8900
+      # Course-unit/assignment Postgres store (deeptutor/services/db). On
+      # Railway this is injected automatically by the Postgres addon and this
+      # line is irrelevant there; locally it points at the `postgres` service
+      # above. Matches deeptutor/services/db/engine.py's own local-dev default,
+      # set explicitly here too so it's visible in one place.
+      - DATABASE_URL=postgresql+asyncpg://deeptutor:deeptutor@postgres:5432/deeptutor
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${DEEPTUTOR_DOCKER_BACKEND_PORT:-8001}/"]
@@ -93,6 +138,8 @@ services:
       pocketbase:
         condition: service_healthy
       sandbox-runner:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
     networks:
@@ -173,6 +220,12 @@ services:
 
     networks:
       - deeptutor-network
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  deeptutor-postgres-data:
 
 # ============================================
 # Networks

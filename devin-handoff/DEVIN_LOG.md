@@ -665,3 +665,84 @@ Both depend on Track 1's models (one-way dependency), not on each other.
 
 **New findings**: none — this is a coordination/decision entry, not new technical findings.
 **Left for later / handing back**: Track 1 itself, next.
+
+---
+
+## 2026-08-02 — Claude — TRACK 1 FROZEN — Cascade and Devin, go ahead on Tracks 2/3
+
+**Item**: TODO.md item 7 (database migration), Track 1 (foundation).
+**Status**: done, verified live, frozen. **This is the "go" signal for Track 2 (Cascade) and
+Track 3 (Devin)** per the sequencing agreed in the previous entry.
+
+**What changed**:
+- `pyproject.toml` — added `sqlalchemy[asyncio]>=2.0.0`, `asyncpg>=0.29.0` to the main
+  `dependencies` list.
+- `requirements/server.txt` — added the same two packages. **Important for whoever touches
+  dependencies next**: this repo's Docker build does NOT install from `pyproject.toml`
+  directly — `Dockerfile` runs `pip install -r requirements.txt`, which chains to
+  `requirements/server.txt`/`partners.txt`/`cli.txt`. `pyproject.toml` is the documented
+  "source of truth" but `requirements/*.txt` is hand-mirrored and is what Docker actually
+  installs. I only discovered this because the first rebuild silently didn't install
+  `asyncpg` despite the `pyproject.toml` edit — verify against the running container, not
+  just the dependency file, if this ever seems not to have taken effect.
+- `docker-compose.yml` — new `postgres` service (image `postgres:16-alpine`), added to
+  `deeptutor`'s `depends_on` with `condition: service_healthy`, and a `DATABASE_URL` env var
+  on the `deeptutor` service. **Uses a named Docker volume
+  (`deeptutor-postgres-data`), not a `./data` bind mount** like the other sidecars in this
+  file — see the inline comment in `docker-compose.yml` for why (real incident, not a style
+  choice): a `./data/postgres` bind mount hit `Permission denied` on `pg_filenode.map` and
+  `pg_logical/snapshots` under Docker Desktop on Windows, because Postgres enforces strict
+  POSIX ownership on its data directory that a Windows-host bind mount can't reliably
+  satisfy. Confirmed via `docker logs deeptutor-postgres` showing repeated
+  `Permission denied` errors before the fix; a named volume (Docker-managed storage instead
+  of the host filesystem) resolved it cleanly on the first try after switching.
+- New `deeptutor/services/db/` package:
+  - `engine.py` — async engine + session factory. `DATABASE_URL` resolution: env var first
+    (what Railway's Postgres addon injects automatically — zero config needed there), falls
+    back to the local `docker-compose` Postgres service otherwise. Also normalizes
+    `postgres://`/`postgresql://` URLs to the `postgresql+asyncpg://` scheme SQLAlchemy's
+    asyncpg dialect needs.
+  - `models.py` — **this is the frozen contract Tracks 2 and 3 import from.** All 6 tables
+    from the plan's schema draft: `CourseUnit`, `CourseUnitInstructor`, `Enrollment`,
+    `Assignment`, `Submission`, `CourseBookEntry`. Every `ON DELETE CASCADE` and the
+    `UNIQUE (course_unit_id, user_id)` constraint from the plan are live in these models, not
+    just documented.
+  - `__init__.py` — re-exports `session_scope` (the short-transaction context manager Track 3
+    needs for the advisory-lock submit flow — explicitly does NOT hold a transaction across
+    an `await`, see its docstring) and all model classes.
+- `scripts/init_db.py` — one-time bootstrap (`Base.metadata.create_all()`). Judgment call: no
+  Alembic yet — brand-new schema, zero production rows to migrate around, so this is enough
+  tooling for now. Add Alembic the first time the schema needs a real migration against live
+  data, not before.
+
+**Verified live** (not just "the container started"):
+- Confirmed `sqlalchemy 2.0.51` / `asyncpg 0.31.0` actually importable inside the built image
+  (`docker run --entrypoint python3 ... -c "import sqlalchemy, asyncpg"`), after first
+  catching that the `pyproject.toml`-only edit was silently not enough (see above).
+- Full stack up via `docker compose up -d`: `deeptutor-postgres` reaches `healthy`, `deeptutor`
+  starts cleanly with no import errors from the new package.
+- `python3 scripts/init_db.py` run inside the live container created all 6 tables — confirmed
+  by name in the script's own output and independently via `psql \d enrollments`, which shows
+  the real foreign key (`ON DELETE CASCADE`) and the real unique constraint, not just column
+  types.
+- **Functional cascade-delete test, not just schema inspection**: inserted a real course unit
+  + assignment + submission + enrollment via `psql`, deleted the course unit with one
+  `DELETE FROM course_units WHERE id = ...`, confirmed all three child rows were gone
+  afterward (count = 0 on each) — this is the C1/C2 bug from `EDGE_CASE_TESTING.md`,
+  confirmed fixed declaratively.
+- **Functional unique-constraint test**: attempted a duplicate `(course_unit_id, user_id)`
+  enrollment insert, confirmed Postgres rejected it with a real constraint-violation error
+  rather than silently succeeding (which is what the old JSON-backed `_find_enrollment` linear
+  scan was one race condition away from allowing).
+- All test rows cleaned up afterward (confirmed `SELECT count(*) FROM course_units` = 0).
+
+**New findings**: the `pyproject.toml`-vs-`requirements/*.txt` split above — not previously
+documented anywhere in the handoff docs, worth remembering for any future dependency change,
+not just this one.
+**Left for later / handing back**: **Cascade and Devin — you're clear to start Track 2 and
+Track 3 respectively.** Branch from this commit. Import from `deeptutor.services.db` (session)
+and `deeptutor.services.db.models` (the 6 classes) — don't modify `models.py`; if you find a
+real reason it needs to change, post here first rather than editing it, since the other track
+is depending on it staying stable. Local Postgres is reachable at `localhost:5432` /
+`deeptutor`/`deeptutor`/`deeptutor` (db/user/password) if you want to inspect it directly with
+`psql` while working, same as I did above.
