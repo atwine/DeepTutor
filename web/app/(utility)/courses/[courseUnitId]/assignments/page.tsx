@@ -10,10 +10,10 @@ import {
   submitAssignment,
   type AssignmentSummary,
   type StudentAssignmentView,
-  type Submission,
 } from "@/lib/assignments-api";
-import { ArrowLeft, Check, ClipboardList, Clock, X as XIcon } from "lucide-react";
+import { ArrowLeft, Check, ClipboardList, Clock } from "lucide-react";
 import Link from "next/link";
+import { ResultView } from "@/components/assignments/ResultView";
 
 function QuestionInput({
   question,
@@ -93,42 +93,6 @@ function QuestionInput({
   );
 }
 
-function ResultView({ submission }: { submission: Submission }) {
-  const { t } = useTranslation();
-  return (
-    <div className="mt-3 space-y-3">
-      <div className="rounded-lg bg-[var(--muted)]/40 px-3 py-2 text-sm font-medium text-[var(--foreground)]">
-        {t("Score")}: {submission.score.toFixed(1)} / {submission.max_score.toFixed(1)}
-      </div>
-      {submission.question_results.map((r) => (
-        <div key={r.question_id} className="rounded-lg border border-[var(--border)] p-3 text-sm">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-[var(--foreground)]">{r.question}</p>
-            <span
-              className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                r.is_correct
-                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                  : "bg-red-500/15 text-red-600 dark:text-red-400"
-              }`}
-            >
-              {r.is_correct ? <Check size={11} /> : <XIcon size={11} />}
-              {r.score.toFixed(1)} / {r.max_score.toFixed(1)}
-            </span>
-          </div>
-          <p className="mt-1.5 text-xs text-[var(--muted-foreground)]">
-            {t("Your answer")}: {r.user_answer || t("(no answer)")}
-          </p>
-          {r.feedback && (
-            <p className="mt-1.5 whitespace-pre-wrap text-xs text-[var(--muted-foreground)]">
-              {r.feedback}
-            </p>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export default function StudentAssignmentsPage() {
   const params = useParams<{ courseUnitId: string }>();
   const courseUnitId = params.courseUnitId;
@@ -151,8 +115,13 @@ export default function StudentAssignmentsPage() {
   // A4: timer state for timed assignments
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // A5: submission receipt state
+  // A5: submission receipt state (brief, shown just before navigating to
+  // the dedicated results page — see Round 3 item 1)
   const [showReceipt, setShowReceipt] = useState(false);
+  // Round 3, item 2: when a student has an existing submission and the
+  // retake policy allows another attempt, "Try again" flips this so the
+  // briefing/question flow renders again instead of the last result.
+  const [retaking, setRetaking] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -181,6 +150,7 @@ export default function StudentAssignmentsPage() {
       setExpandedId(null);
       setDetail(null);
       setStarted(false);
+      setRetaking(false);
       setTimeRemaining(null);
       if (timerRef.current) clearInterval(timerRef.current);
       return;
@@ -190,6 +160,7 @@ export default function StudentAssignmentsPage() {
     setAnswers({});
     setSubmitError("");
     setStarted(false);
+    setRetaking(false);
     setShowReceipt(false);
     setTimeRemaining(null);
     if (timerRef.current) clearInterval(timerRef.current);
@@ -229,7 +200,10 @@ export default function StudentAssignmentsPage() {
 
   async function handleSubmit() {
     if (!detail || submitting) return;
-    // Stop timer if running
+    // Stop timer if running — this same function is used for both a manual
+    // "Submit" click and the timer's auto-submit on expiry (see
+    // handleStartAssignment below), so the retake policy and this
+    // navigation apply identically either way.
     if (timerRef.current) clearInterval(timerRef.current);
     setSubmitting(true);
     setSubmitError("");
@@ -238,20 +212,24 @@ export default function StudentAssignmentsPage() {
         question_id: q.question_id,
         answer: answers[q.question_id] ?? "",
       }));
-      const submission = await submitAssignment(detail.id, payload);
-      // A5: Show receipt briefly before results
+      await submitAssignment(detail.id, payload);
+      // Round 3, item 1: brief receipt, then navigate to the dedicated
+      // results page rather than swapping a results block into this page.
       setShowReceipt(true);
       setTimeout(() => {
-        setShowReceipt(false);
-        setDetail((prev) =>
-          prev ? { ...prev, my_attempts: prev.my_attempts + 1, my_latest_submission: submission } : prev,
-        );
-      }, 2000);
+        router.push(`/courses/${encodeURIComponent(courseUnitId)}/assignments/${detail.id}/results`);
+      }, 900);
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : t("Failed to submit"));
-    } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleTryAgain() {
+    setRetaking(true);
+    setStarted(false);
+    setAnswers({});
+    setSubmitError("");
   }
 
   return (
@@ -345,16 +323,43 @@ export default function StudentAssignmentsPage() {
                           {t("Your answers have been recorded. Results loading…")}
                         </p>
                       </div>
-                    ) : detail.my_latest_submission ? (
+                    ) : detail.my_latest_submission && !retaking ? (
+                      /* Revisiting a past attempt from the list (not the
+                         fresh post-submit flow — that navigates to the
+                         dedicated results page instead, see handleSubmit). */
                       <>
                         <ResultView submission={detail.my_latest_submission} />
-                        {detail.my_attempts < detail.attempt_limit && (
+                        {/* Round 3, item 2: distinguish "used up attempts"
+                            from "already passed, no more offered" — same
+                            reason the server computed for this student. */}
+                        {detail.retake_blocked_reason === "attempt_limit" && (
                           <p className="mt-3 text-xs text-[var(--muted-foreground)]">
-                            {t("{{used}} of {{limit}} attempts used.", {
-                              used: detail.my_attempts,
-                              limit: detail.attempt_limit,
-                            })}
+                            {t("You've used all of your attempts for this assignment.")}
                           </p>
+                        )}
+                        {detail.retake_blocked_reason === "already_passed" && (
+                          <p className="mt-3 text-xs text-[var(--muted-foreground)]">
+                            {t(
+                              "You've already passed this assignment (passing score {{score}}%), so no further attempts are offered.",
+                              { score: detail.passing_score },
+                            )}
+                          </p>
+                        )}
+                        {!detail.retake_blocked_reason && (
+                          <div className="mt-3 flex items-center justify-between gap-3">
+                            <p className="text-xs text-[var(--muted-foreground)]">
+                              {t("{{used}} of {{limit}} attempts used.", {
+                                used: detail.my_attempts,
+                                limit: detail.attempt_limit,
+                              })}
+                            </p>
+                            <button
+                              onClick={handleTryAgain}
+                              className="shrink-0 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--foreground)] hover:bg-[var(--background)]/60"
+                            >
+                              {t("Try again")}
+                            </button>
+                          </div>
                         )}
                       </>
                     ) : !started ? (
@@ -388,10 +393,14 @@ export default function StudentAssignmentsPage() {
                                 {t("{{min}} minutes", { min: detail.time_limit_minutes })}
                               </span>
                             )}
+                            {detail.is_major && <span>{t("major (no retakes)")}</span>}
+                            {!detail.is_major && detail.passing_score != null && (
+                              <span>{t("passing score {{score}}%", { score: detail.passing_score })}</span>
+                            )}
                           </div>
                           {detail.is_timed && detail.time_limit_minutes && (
                             <p className="mt-3 text-xs font-medium text-amber-600 dark:text-amber-400">
-                              {t("This is a timed assignment. Once you start, you will have {{min}} minutes to complete it. Your answers will be auto-submitted when time expires.", { min: detail.time_limit_minutes })}
+                              {t("This is a timed assignment. Once you start, you will have {{min}} minutes to complete it. You can submit at any time before the timer ends, and your answers will be auto-submitted when time expires.", { min: detail.time_limit_minutes })}
                             </p>
                           )}
                         </div>

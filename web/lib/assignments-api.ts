@@ -69,6 +69,10 @@ export interface AssignmentSummary {
   due_at: string;
   is_timed: boolean;
   time_limit_minutes: number | null;
+  /** Round 3: major/final assignment — effectively hard-caps retakes at 1. */
+  is_major: boolean;
+  /** Round 3: 0-100 percentage; null means no pass/fail retake gating. */
+  passing_score: number | null;
   question_count: number;
   created_at: string;
 }
@@ -79,11 +83,19 @@ export interface Assignment extends AssignmentSummary {
   created_by: string;
 }
 
-/** Returned to a student: questions have no answer key, plus their own attempt state. */
+/** Retake block reason, computed server-side (assignments.get_retake_block_reason)
+ * so this can never drift from what the submit endpoint will actually enforce. */
+export type RetakeBlockedReason = "attempt_limit" | "already_passed" | null;
+
+/** Returned to a student: questions have no answer key, plus their own attempt state.
+ * `attempt_limit` here is the *effective* limit (is_major hard cap / access-grant
+ * extra attempts already applied) — not necessarily the raw configured value. */
 export interface StudentAssignmentView extends AssignmentSummary {
   questions: PublicQuestion[];
   my_attempts: number;
   my_latest_submission: Submission | null;
+  retake_blocked_reason: RetakeBlockedReason;
+  retake_blocked_message: string | null;
 }
 
 async function unwrap<T>(res: Response, fallback: string): Promise<T> {
@@ -103,6 +115,8 @@ export interface AssignmentDraft {
   due_at?: string;
   is_timed?: boolean;
   time_limit_minutes?: number | null;
+  is_major?: boolean;
+  passing_score?: number | null;
 }
 
 export async function createAssignment(

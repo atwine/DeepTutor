@@ -30,6 +30,7 @@ from .assignments import (
     get_assignment,
     get_effective_attempt_limit,
     get_latest_submission,
+    get_retake_block_reason,
     list_access_grants_for_assignment,
     list_assignments_for_course,
     list_submissions_for_assignment,
@@ -67,6 +68,12 @@ class AssignmentCreate(BaseModel):
     due_at: str = ""
     is_timed: bool = False
     time_limit_minutes: int | None = None
+    # Round 3: retake policy. is_major hard-caps the effective attempt limit
+    # at 1 server-side regardless of attempt_limit (see
+    # assignments.get_effective_attempt_limit). passing_score is a 0-100
+    # percentage; None means no pass/fail gating.
+    is_major: bool = False
+    passing_score: float | None = None
 
 
 class AssignmentUpdate(BaseModel):
@@ -78,6 +85,8 @@ class AssignmentUpdate(BaseModel):
     due_at: str | None = None
     is_timed: bool | None = None
     time_limit_minutes: int | None = None
+    is_major: bool | None = None
+    passing_score: float | None = None
 
 
 class AnswerPayload(BaseModel):
@@ -98,6 +107,22 @@ async def _manages_course_unit(current: TokenPayload, course_unit_id: str) -> bo
 async def _require_manage_access(current: TokenPayload, assignment: dict[str, Any]) -> None:
     if not await _manages_course_unit(current, assignment["course_unit_id"]):
         raise HTTPException(status_code=403, detail="You do not manage this assignment")
+
+
+def _enrollment_error_detail(current: TokenPayload | None) -> str:
+    """The 'you can't see this' message for a non-managing, non-enrolled
+    caller depends on who they are. The gradebook page's equivalent
+    access-denied case correctly reads "You do not manage this course unit"
+    for an instructor/admin who isn't attached to this course unit; the
+    assignments endpoints previously always raised the student-facing
+    "You are not enrolled in this course unit" message even when the caller
+    was an instructor who simply doesn't manage this particular unit —
+    confusing, since "enrollment" isn't even a concept that applies to
+    instructors. Match wording to the caller's role instead of assuming
+    student in every case."""
+    if current is not None and current.role in ("admin", "instructor"):
+        return "You do not manage this course unit"
+    return "You are not enrolled in this course unit"
 
 
 async def _get_assignment_or_404(assignment_id: str) -> dict[str, Any]:
@@ -121,6 +146,8 @@ def _assignment_summary(assignment: dict[str, Any]) -> dict[str, Any]:
         "due_at": assignment["due_at"],
         "is_timed": assignment.get("is_timed", False),
         "time_limit_minutes": assignment.get("time_limit_minutes"),
+        "is_major": assignment.get("is_major", False),
+        "passing_score": assignment.get("passing_score"),
         "question_count": len(assignment.get("questions", [])),
         "created_at": assignment["created_at"],
     }
@@ -147,6 +174,8 @@ async def create_assignment_endpoint(
         created_by=current.user_id,
         is_timed=payload.is_timed,
         time_limit_minutes=payload.time_limit_minutes,
+        is_major=payload.is_major,
+        passing_score=payload.passing_score,
     )
     return {"assignment": record}
 
@@ -165,7 +194,7 @@ async def list_assignments_endpoint(
         user_id = payload.user_id if payload else ""
         if not await is_approved_student_of(user_id, course_unit_id):
             raise HTTPException(
-                status_code=403, detail="You are not enrolled in this course unit"
+                status_code=403, detail=_enrollment_error_detail(payload)
             )
         assignments = [
             a for a in await list_assignments_for_course(course_unit_id) if a["status"] == "published"
@@ -189,15 +218,25 @@ async def get_assignment_endpoint(
         raise HTTPException(status_code=404, detail="Assignment not found")
     user_id = current.user_id if current else ""
     if not await is_approved_student_of(user_id, course_unit_id):
-        raise HTTPException(status_code=403, detail="You are not enrolled in this course unit")
+        raise HTTPException(status_code=403, detail=_enrollment_error_detail(current))
 
+    grant = await get_access_grant(assignment_id, user_id) if user_id else None
+    latest = await get_latest_submission(assignment_id, user_id)
+    attempts_count = await count_submissions(assignment_id, user_id)
+    # Round 3: the raw stored attempt_limit doesn't reflect an is_major hard
+    # cap or a per-student access grant's extra_attempts — show the effective
+    # limit here so a student's own view is never more permissive-looking
+    # than what the submit endpoint will actually allow.
+    block = get_retake_block_reason(assignment, grant, attempts_count, latest)
     student_view = {
         **_assignment_summary(assignment),
         "questions": [public_question_view(q) for q in assignment.get("questions", [])],
+        "attempt_limit": get_effective_attempt_limit(assignment, grant),
     }
-    latest = await get_latest_submission(assignment_id, user_id)
-    student_view["my_attempts"] = await count_submissions(assignment_id, user_id)
+    student_view["my_attempts"] = attempts_count
     student_view["my_latest_submission"] = latest
+    student_view["retake_blocked_reason"] = block[0] if block else None
+    student_view["retake_blocked_message"] = block[1] if block else None
     return {"assignment": student_view}
 
 
@@ -225,6 +264,12 @@ async def update_assignment_endpoint(
             time_limit_minutes=(
                 payload.time_limit_minutes
                 if "time_limit_minutes" in payload.model_fields_set
+                else _UNSET
+            ),
+            is_major=payload.is_major,
+            passing_score=(
+                payload.passing_score
+                if "passing_score" in payload.model_fields_set
                 else _UNSET
             ),
         )
@@ -284,7 +329,7 @@ async def submit_assignment_endpoint(
     course_unit_id = assignment["course_unit_id"]
     user_id = current.user_id if current else ""
     if not await is_approved_student_of(user_id, course_unit_id):
-        raise HTTPException(status_code=403, detail="You are not enrolled in this course unit")
+        raise HTTPException(status_code=403, detail=_enrollment_error_detail(current))
 
     # A2/A3: check per-student access grant for deadline extension and extra
     # attempts before proceeding with the submit flow.
@@ -297,8 +342,24 @@ async def submit_assignment_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # A3: effective attempt limit — base + extra_attempts from grant.
+    # A3: effective attempt limit — base + extra_attempts from grant. Round 3:
+    # also hard-capped at 1 if the assignment is_major, regardless of the
+    # stored attempt_limit value (see get_effective_attempt_limit).
     attempt_limit = get_effective_attempt_limit(assignment, grant)
+
+    # Round 3 retake policy: reject early (before spending LLM tokens on
+    # grading) if the student has exhausted their attempts OR — for a
+    # non-major assignment with a passing_score configured — already cleared
+    # it on a previous submission. This is the same check used to build the
+    # student-facing view (get_assignment_endpoint), so the UI and this
+    # enforcement can't drift apart. This is one shared code path regardless
+    # of whether the request came from a manual "Submit" click or the
+    # client's timer auto-submit — both hit this same endpoint.
+    attempts_count = await count_submissions(assignment_id, user_id)
+    latest_submission = await get_latest_submission(assignment_id, user_id)
+    block = get_retake_block_reason(assignment, grant, attempts_count, latest_submission)
+    if block is not None:
+        raise HTTPException(status_code=400, detail=block[1])
 
     # The submit flow uses two short Postgres transactions with
     # `pg_advisory_xact_lock` per (assignment, student), with the LLM grading
@@ -364,7 +425,7 @@ async def get_my_submission_endpoint(
     assignment = await _get_assignment_or_404(assignment_id)
     user_id = current.user_id if current else ""
     if not await is_approved_student_of(user_id, assignment["course_unit_id"]):
-        raise HTTPException(status_code=403, detail="You are not enrolled in this course unit")
+        raise HTTPException(status_code=403, detail=_enrollment_error_detail(current))
     return {"submission": await get_latest_submission(assignment_id, user_id)}
 
 

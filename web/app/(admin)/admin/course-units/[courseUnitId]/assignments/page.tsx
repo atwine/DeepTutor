@@ -83,6 +83,15 @@ export default function CourseUnitAssignmentsPage() {
   const [attemptLimit, setAttemptLimit] = useState("1");
   const [dueAt, setDueAt] = useState("");
   const [questions, setQuestions] = useState<DraftQuestion[]>([emptyQuestion()]);
+  // Round 3: retake policy fields.
+  const [isMajor, setIsMajor] = useState(false);
+  const [passingScoreEnabled, setPassingScoreEnabled] = useState(false);
+  const [passingScore, setPassingScore] = useState("70");
+  // Round 3: timed-assignment fields — is_timed/time_limit_minutes already
+  // existed on the model and are already read/enforced by the student
+  // briefing screen; this form previously had no way to set them at all.
+  const [isTimed, setIsTimed] = useState(false);
+  const [timeLimitMinutes, setTimeLimitMinutes] = useState("30");
 
   const [deleteTarget, setDeleteTarget] = useState<AssignmentSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -109,7 +118,12 @@ export default function CourseUnitAssignmentsPage() {
       setCanManage(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
-      if (msg.includes("not enrolled") || msg.includes("403")) {
+      // This page is only reached by an admin/instructor (see the role
+      // redirect below), so the only 403 this endpoint can actually raise
+      // here is the instructor-doesn't-manage-this-unit case — matches the
+      // unified error copy from assignments_router.py's
+      // _enrollment_error_detail (see gradebook page for the same wording).
+      if (msg.includes("do not manage") || msg.includes("not enrolled") || msg.includes("403")) {
         setCanManage(false);
       }
       setError(e instanceof Error ? e.message : t("Failed to load assignments"));
@@ -139,6 +153,11 @@ export default function CourseUnitAssignmentsPage() {
     setAttemptLimit("1");
     setDueAt("");
     setQuestions([emptyQuestion()]);
+    setIsMajor(false);
+    setPassingScoreEnabled(false);
+    setPassingScore("70");
+    setIsTimed(false);
+    setTimeLimitMinutes("30");
     setCreateError("");
   }
 
@@ -206,8 +225,15 @@ export default function CourseUnitAssignmentsPage() {
         description: description.trim(),
         questions: cleanedQuestions,
         weight: parseFloat(weight) || 1,
-        attempt_limit: parseInt(attemptLimit, 10) || 1,
+        // Round 3: a major assignment is hard-capped at 1 attempt — force it
+        // here too (not just visually) so the stored value matches what the
+        // server will enforce as the effective limit either way.
+        attempt_limit: isMajor ? 1 : parseInt(attemptLimit, 10) || 1,
         due_at: dueAt,
+        is_major: isMajor,
+        passing_score: !isMajor && passingScoreEnabled ? parseFloat(passingScore) || 0 : null,
+        is_timed: isTimed,
+        time_limit_minutes: isTimed ? parseInt(timeLimitMinutes, 10) || 1 : null,
       };
       await createAssignment(courseUnitId, draft);
       setShowCreate(false);
@@ -367,6 +393,14 @@ export default function CourseUnitAssignmentsPage() {
                           ? t("1 attempt")
                           : t("{{count}} attempts", { count: a.attempt_limit })}
                         {" · "}{t("created {{date}}", { date: formatDate(a.created_at, lang) })}
+                        {a.is_major
+                          ? ` · ${t("major (no retakes)")}`
+                          : a.passing_score != null
+                            ? ` · ${t("passing score {{score}}%", { score: a.passing_score })}`
+                            : ""}
+                        {a.is_timed && a.time_limit_minutes
+                          ? ` · ${t("{{min}} min timed", { min: a.time_limit_minutes })}`
+                          : ""}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
@@ -547,10 +581,11 @@ export default function CourseUnitAssignmentsPage() {
                   <input
                     type="number"
                     min="1"
-                    value={attemptLimit}
+                    value={isMajor ? 1 : attemptLimit}
                     onChange={(e) => setAttemptLimit(e.target.value)}
-                    disabled={creating}
-                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                    disabled={creating || isMajor}
+                    title={isMajor ? t("Major assignments are limited to 1 attempt.") : undefined}
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)] disabled:opacity-50"
                   />
                 </label>
                 <label className="block text-xs text-[var(--muted-foreground)]">
@@ -563,6 +598,91 @@ export default function CourseUnitAssignmentsPage() {
                     className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
                   />
                 </label>
+              </div>
+
+              <div className="mb-4 space-y-2 rounded-lg border border-[var(--border)] p-3">
+                <p className="text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+                  {t("Retake policy")}
+                </p>
+                <label className="flex items-center gap-2 text-sm text-[var(--foreground)]">
+                  <input
+                    type="checkbox"
+                    checked={isMajor}
+                    onChange={(e) => {
+                      setIsMajor(e.target.checked);
+                      if (e.target.checked) setPassingScoreEnabled(false);
+                    }}
+                    disabled={creating}
+                  />
+                  {t("Major assignment (no retakes)")}
+                </label>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  {t("Hard-caps this assignment to 1 attempt, no matter what attempt limit is set above.")}
+                </p>
+
+                {!isMajor && (
+                  <>
+                    <label className="flex items-center gap-2 text-sm text-[var(--foreground)]">
+                      <input
+                        type="checkbox"
+                        checked={passingScoreEnabled}
+                        onChange={(e) => setPassingScoreEnabled(e.target.checked)}
+                        disabled={creating}
+                      />
+                      {t("Require a passing score to stop retakes")}
+                    </label>
+                    {passingScoreEnabled && (
+                      <label className="block text-xs text-[var(--muted-foreground)]">
+                        {t("Passing score (%)")}
+                        <input
+                          type="number"
+                          step="1"
+                          min="0"
+                          max="100"
+                          value={passingScore}
+                          onChange={(e) => setPassingScore(e.target.value)}
+                          disabled={creating}
+                          className="mt-1 w-32 rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                        />
+                        <span className="mt-1 block text-[11px] text-[var(--muted-foreground)]">
+                          {t("Once a student's most recent score meets this, further submissions are blocked even if attempts remain.")}
+                        </span>
+                      </label>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="mb-4 space-y-2 rounded-lg border border-[var(--border)] p-3">
+                <p className="text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+                  {t("Timing")}
+                </p>
+                <label className="flex items-center gap-2 text-sm text-[var(--foreground)]">
+                  <input
+                    type="checkbox"
+                    checked={isTimed}
+                    onChange={(e) => setIsTimed(e.target.checked)}
+                    disabled={creating}
+                  />
+                  {t("Timed assignment")}
+                </label>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  {t("Students see a countdown once they start; answers auto-submit when time runs out.")}
+                </p>
+                {isTimed && (
+                  <label className="block text-xs text-[var(--muted-foreground)]">
+                    {t("Time limit (minutes)")}
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      value={timeLimitMinutes}
+                      onChange={(e) => setTimeLimitMinutes(e.target.value)}
+                      disabled={creating}
+                      className="mt-1 w-32 rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                    />
+                  </label>
+                )}
               </div>
 
               <div className="mb-2 flex items-center justify-between">
