@@ -746,3 +746,60 @@ real reason it needs to change, post here first rather than editing it, since th
 is depending on it staying stable. Local Postgres is reachable at `localhost:5432` /
 `deeptutor`/`deeptutor`/`deeptutor` (db/user/password) if you want to inspect it directly with
 `psql` while working, same as I did above.
+
+---
+
+## Track 2 DONE — Cascade (2026-08-02)
+
+**Branch**: `db-migration-course-units` (commit `98aa2f0`)
+**Files changed**: `course_units.py`, `course_books.py`, `router.py`, `book_access_router.py`, `gradebook.py`
+
+### What was done
+
+1. **`course_units.py`** — complete rewrite. All 15 public functions are now `async def` backed by
+   SQLAlchemy queries against `CourseUnit`, `CourseUnitInstructor`, `Enrollment` models.
+   - `delete_course_unit()` is a single `DELETE` — `ON DELETE CASCADE` handles enrollments,
+     assignments→submissions, and course-book entries. The 40-line manual sweep is gone.
+   - Serialization via `_unit_to_dict` / `_enrollment_to_dict` returns the same dict shapes the
+     old JSON store produced — downstream consumers see no structural change.
+   - `_WRITE_LOCK`, `_read_json`, `_write_json`, `COURSE_UNITS_FILE`, `ENROLLMENTS_FILE` all removed.
+
+2. **`course_books.py`** — complete rewrite. 5 public functions now `async def`.
+   - `assign_book_to_course_unit`: on conflict (re-assignment), updates only `course_unit_id` +
+     `updated_at`, explicitly preserving `status` and `created_at` per the plan's accepted
+     correction.
+   - `_WRITE_LOCK`, `_read_json`, `_write_json`, `COURSE_BOOKS_FILE` all removed.
+
+3. **`router.py`** — mechanical `await` addition at every call site (14 sites). Plus
+   `_require_course_unit_access` → `async def`.
+
+4. **`book_access_router.py`** — mechanical `await` addition (12 sites). Removed the import of
+   `_manages_course_unit` from `assignments_router.py` and replaced it with a local `async def`
+   version to avoid a cross-track dependency (Track 3 will make the original async independently).
+
+5. **`gradebook.py`** — **scope surprise** (documented in file docstring). `build_gradebook` and
+   `build_gradebook_csv` became `async def` because they call `list_enrollments_for_course` (this
+   track) and `list_assignments_for_course` / `get_latest_submission` (Track 3). Logic is identical
+   — only `await` added. Track 3 will need to add `await` at the `assignments_router.py` call
+   sites that invoke these functions.
+
+### What Track 3 (Devin) needs to know
+
+- `is_instructor_of`, `is_approved_student_of`, `get_course_unit` (imported in
+  `assignments_router.py` from `course_units.py`) are all now `async def` — every call site in
+  `assignments_router.py` needs `await`.
+- `_manages_course_unit` in `assignments_router.py` calls `is_instructor_of` — it must become
+  `async def` with `await is_instructor_of(...)`.
+- `build_gradebook` / `build_gradebook_csv` are now `async def` — their call sites in
+  `assignments_router.py` (lines ~369, ~379) need `await`.
+- `list_enrollments_for_course` (from `course_units.py`) is now async — if `assignments_router.py`
+  calls it anywhere, that needs `await` too.
+
+### Not done (out of scope)
+
+- `assignments.py` rewrite (Track 3).
+- `assignments_router.py` `await` additions (Track 3).
+- The advisory-lock submit restructuring (Track 3).
+- Phase G regression pass (Claude, after merge).
+
+— Cascade
