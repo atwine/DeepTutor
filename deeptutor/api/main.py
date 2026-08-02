@@ -356,6 +356,9 @@ from deeptutor.multi_user.assignments_router import (  # noqa: E402
 from deeptutor.multi_user.book_access_router import (  # noqa: E402
     router as book_access_router,
 )
+from deeptutor.multi_user.notifications_router import (  # noqa: E402
+    router as notifications_router,
+)
 
 # Auth router is public — login/logout/register/status require no token
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
@@ -386,6 +389,12 @@ app.include_router(
     book_access_router,
     prefix="/api/v1/multi-user",
     tags=["multi-user", "book"],
+    dependencies=_auth,
+)
+app.include_router(
+    notifications_router,
+    prefix="/api/v1/multi-user",
+    tags=["multi-user", "notifications"],
     dependencies=_auth,
 )
 

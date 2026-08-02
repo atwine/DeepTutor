@@ -1691,4 +1691,127 @@ Reviewed the four call sites and the new helper by inspection. Frontend:
 `npx tsc --noEmit` (exit 0) and `npx eslint` targeted at the admin
 assignments page (zero errors/warnings) after both changes.
 
+## 2026-08-02 — Claude (Track C, Round 3) — Per-course notification/activity feed
+
+**Item**: repo owner's ask — students get an alert when their instructor adds
+something new (assignment, notes), scoped to a lightweight polling-based
+activity feed, not real-time/websocket. Built on branch
+`fix-round3-notifications` off `feature-round2-integration`, as the third of
+three parallel agents this round (the other two own `assignments.py` /
+`assignments_router.py` / `course_units.py` / `router.py` and their own
+frontend pages).
+
+**Status**: done, with two hand-off patches for the repo owner to apply at
+merge time (see below) — both are one-liners in files this agent was told
+not to touch directly.
+
+**What changed**:
+
+- `deeptutor/services/db/models.py` — two new, fully independent classes
+  (no existing class touched): `Notification` (`id`, `course_unit_id` FK
+  `ON DELETE CASCADE`, `kind`, `title`, `created_at` as
+  `DateTime(timezone=True)` — double-checked against the prior round's
+  naive/aware datetime bug) and `NotificationRead` (join table:
+  `notification_id`, `user_id`, `read_at`, unique constraint on the pair) —
+  read state is an insert, not a mutation on `Notification` itself, so
+  concurrent students marking the same notification read can't race.
+- `deeptutor/multi_user/notifications.py` (new) — `create_notification()`,
+  `list_notifications_for_user()` (joins through `Enrollment` and re-checks
+  each candidate course unit via the existing `is_approved_student_of()`
+  predicate — imported, not re-derived — so B1's end-date/grace-period
+  expiry is respected the same way it is for assignments/notes), and
+  `mark_notification_read()` (idempotent insert).
+- `deeptutor/multi_user/notifications_router.py` (new) — `GET
+  /notifications` and `POST /notifications/{id}/read`, any authenticated
+  user (an instructor/admin with no enrollments just gets an empty list).
+  Kept out of `router.py` since another agent owns that file this round.
+- `deeptutor/api/main.py` — registered the new router the same way
+  `multi_user_router`/`assignments_router`/`book_access_router` are
+  registered (import + `app.include_router(..., prefix="/api/v1/multi-user",
+  dependencies=_auth)`). **Conflict risk**: this file is not called out as
+  owned by anyone in `ARCHITECTURE_AND_COMPLETED_WORK.md`, but it's a
+  single shared file every router-adding change touches — if either of the
+  other two agents also added a router this round, this will need a manual
+  merge (all three edits are small, additive, non-overlapping blocks, so
+  it should be a trivial resolve, not a real conflict).
+- `deeptutor/multi_user/course_books.py` — one-line trigger inside
+  `set_book_status()`: when `status == "published"`, calls
+  `create_notification(course_unit_id, "notes_published", "New course notes
+  published")` after the status-flip transaction commits. This file was
+  confirmed not owned by another agent this round, so applied directly
+  rather than handed off.
+- `web/lib/notifications-api.ts` (new) — `listNotifications()`,
+  `markNotificationRead()`, matching `assignments-api.ts`'s `unwrap()`
+  pattern.
+- `web/components/sidebar/NotificationBell.tsx` (new) — bell icon + unread
+  badge, dropdown panel (title + relative time), polls `GET /notifications`
+  every 30s, clicking an unread item optimistically marks it read then
+  confirms with the backend. Self-contained — no props needed.
+- `web/components/sidebar/SidebarShell.tsx` — mounted `<NotificationBell />`
+  in both the collapsed rail (below the logo/toggle header) and the
+  expanded header (next to the collapse button). This file wasn't called
+  out as owned by anyone else this round, so edited directly per the task's
+  own instructions — two small, additive JSX insertions plus one import,
+  no existing logic touched.
+
+**Left as hand-off patches (NOT applied — files owned by the other agent this
+round)**:
+
+1. `deeptutor/multi_user/assignments.py` — add near the top imports:
+   ```python
+   from deeptutor.multi_user.notifications import create_notification
+   ```
+   Then in `publish_assignment()` (currently lines ~224-234), after
+   `record.status = "published"` and the `await session.flush()` but before
+   returning, capture `course_unit_id`/`title` off `record` while still
+   inside the `session_scope()` block, then call the notification helper
+   after that block closes (matches the pattern used in
+   `course_books.py`'s `set_book_status()` — notification creation runs in
+   its own transaction, not nested inside the status-flip transaction):
+   ```python
+   async def publish_assignment(assignment_id: str) -> dict[str, Any] | None:
+       async with session_scope() as session:
+           result = await session.execute(
+               select(Assignment).where(Assignment.id == assignment_id)
+           )
+           record = result.scalar_one_or_none()
+           if record is None:
+               return None
+           record.status = "published"
+           await session.flush()
+           course_unit_id, title = record.course_unit_id, record.title
+           payload = _assignment_to_dict(record)
+       await create_notification(course_unit_id, "assignment_published", f"New assignment: {title}")
+       return payload
+   ```
+
+**Verified**: static checks only, per this round's ground rules (no Docker/
+Postgres stood up — three agents in parallel). `python -c "import ast;
+ast.parse(...)"` on every changed/new Python file; live-imported
+`deeptutor.services.db.models` (confirms both new ORM classes construct and
+their table names resolve), `deeptutor.multi_user.notifications` (confirms
+all three functions import cleanly), `deeptutor.multi_user.notifications_router`
+(confirms both routes register: `/notifications` GET,
+`/notifications/{notification_id}/read` POST), and `deeptutor.api.main`
+itself with `DEEPTUTOR_AUTH_ENABLED=false` (confirms the new router is
+actually mounted on the live FastAPI app — `app.routes` shows both new paths
+under `/api/v1/multi-user/...`). `npm ci` + `npx tsc --noEmit` run under
+`web/` (see follow-up note if not finished by report time — first run in
+this worktree, no `node_modules` existed yet).
+
+**New findings**: none — this was pure new-surface work, no existing bugs
+encountered.
+
+**Left for later / handing back**: the two hand-off patches above
+(`assignments.py`'s one-line hook — the other agent or the repo owner should
+apply it), and the `main.py` conflict-risk note. No live regression pass was
+done (explicitly out of scope this round — the repo owner does the
+Docker-based pass after all three tracks merge). Notification "kind" values
+used so far: `"assignment_published"` (not yet wired, pending the hand-off
+patch) and `"notes_published"` (wired live in `course_books.py`). No
+frontend page renders a *full* notifications history — only the dropdown's
+recent list — if that's wanted later, `listNotifications()` already returns
+everything and a dedicated `/notifications` page would just need to render
+the same data without truncation.
+
 — Claude

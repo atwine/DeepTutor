@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import SessionList from "@/components/SessionList";
+import { NotificationBell } from "@/components/sidebar/NotificationBell";
 import { useSidebarDrawer } from "@/components/layout/AppShell";
 import { useDevice } from "@/hooks/useDevice";
 import type { SessionSummary } from "@/lib/session-api";
@@ -259,6 +260,8 @@ export function SidebarShell({
           </button>
         </div>
 
+        <NotificationBell />
+
         {/* Primary nav */}
         <nav className="mt-1 flex w-full flex-col items-center gap-1 px-1.5">
           {visiblePrimaryNav.map((item) => {
@@ -366,15 +369,18 @@ export function SidebarShell({
             className="h-[22px] w-auto transition-transform duration-200 group-hover:scale-105"
           />
         </Link>
-        {/* The rail is a desktop affordance; in the drawer the scrim and the
-            top-bar toggle already own "make this go away". */}
-        <button
-          onClick={() => setCollapsed(true)}
-          className="rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)] max-md:hidden"
-          aria-label={t("Collapse sidebar")}
-        >
-          <PanelLeftClose size={15} />
-        </button>
+        <div className="flex items-center gap-1">
+          <NotificationBell />
+          {/* The rail is a desktop affordance; in the drawer the scrim and the
+              top-bar toggle already own "make this go away". */}
+          <button
+            onClick={() => setCollapsed(true)}
+            className="rounded-md p-1 text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)] max-md:hidden"
+            aria-label={t("Collapse sidebar")}
+          >
+            <PanelLeftClose size={15} />
+          </button>
+        </div>
       </div>
 
       {/* Primary nav */}
