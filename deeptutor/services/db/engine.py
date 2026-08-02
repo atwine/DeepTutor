@@ -36,17 +36,21 @@ _LOCAL_DEV_DEFAULT = (
 )
 
 
-def _resolve_database_url() -> str:
+def _resolve_database_url() -> tuple[str, bool]:
+    """Returns (url, is_local_default)."""
     raw = os.environ.get("DATABASE_URL", "").strip()
-    if not raw:
-        return _LOCAL_DEV_DEFAULT
+    if not raw or raw == _LOCAL_DEV_DEFAULT:
+        # Covers both: DATABASE_URL unset, and docker-compose.yml setting it
+        # explicitly to this same value (it does, for visibility) — either
+        # way this is the local, TLS-less postgres service, not Railway.
+        return _LOCAL_DEV_DEFAULT, True
     # Railway/Heroku-style URLs use `postgres://` or plain `postgresql://`;
     # the asyncpg dialect needs the driver named explicitly.
     if raw.startswith("postgres://"):
         raw = "postgresql+asyncpg://" + raw[len("postgres://") :]
     elif raw.startswith("postgresql://"):
         raw = "postgresql+asyncpg://" + raw[len("postgresql://") :]
-    return raw
+    return raw, False
 
 
 _engine: AsyncEngine | None = None
@@ -64,7 +68,21 @@ def get_engine() -> AsyncEngine:
     """
     global _engine
     if _engine is None:
-        _engine = create_async_engine(_resolve_database_url(), pool_pre_ping=True)
+        url, is_local_default = _resolve_database_url()
+        connect_args = {}
+        if is_local_default:
+            # The local docker-compose `postgres` service has no TLS
+            # configured at all. Without this, asyncpg still attempts SSL
+            # negotiation, which includes checking for a client cert/key at
+            # a default path (~/.postgresql/postgresql.key) — that check
+            # itself can raise PermissionError in some container setups,
+            # independent of whether the server supports SSL. Railway's
+            # managed Postgres is reached over its own private network, so
+            # this only applies to the local-default branch.
+            connect_args["ssl"] = False
+        _engine = create_async_engine(
+            url, pool_pre_ping=True, connect_args=connect_args
+        )
     return _engine
 
 

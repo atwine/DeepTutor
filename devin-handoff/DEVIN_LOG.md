@@ -963,3 +963,101 @@ a future model addition since SQLAlchemy's default is naive.
 Track 3 is complete from my side.
 
 — Devin
+
+## 2026-08-02 — Claude — Merge + Phase G regression complete
+
+**Item**: DATABASE_MIGRATION_PLAN.md, Phase G (final integration test before push).
+**Status**: done.
+
+**What changed**:
+- Merged `db-migration-course-units` (Track 2) and `db-migration-assignments`
+  (Track 3) into `db-migration-integration`. One conflict, in this file
+  (both tracks appended a "DONE" entry after the same point) — resolved by
+  keeping both in full. Zero conflicts in any application code file.
+- `deeptutor/services/db/engine.py`: fixed a bug found live during this pass,
+  not by either track — see "New findings" below.
+
+**Verified**: full rebuild + redeploy via `docker compose`, schema reset
+(`DROP TABLE ... CASCADE` + re-run `scripts/init_db.py`) to pick up Track 3's
+timezone fix, then a live regression pass against the real running app/API
+(not direct DB inspection) using fresh throwaway accounts (`pg_instr`,
+`pg_instr_b`, `pg_stud_a`, `pg_stud_b`, all deleted afterward, plus the
+course units/assignments they touched):
+- **K1 (attempt-limit race) — now fixed.** Fired two concurrent
+  `POST .../submit` calls for the same student on a 1-attempt, free-text
+  (AI-Judge) assignment — the exact case that broke before. One 200 with a
+  real graded submission, one 400 "Attempt limit reached (1)." Confirmed via
+  `GET .../submissions` afterward: exactly 1 row. The `pg_advisory_xact_lock`
+  approach holds under a real concurrent load, not just in isolation.
+- **C1 (cascade delete) — now fixed.** Built a unit with a published,
+  submitted-to assignment, then deleted the unit as admin. Before: the
+  assignment/submission stayed permanently queryable and the owning
+  instructor got a confusing 403. Now: `GET /assignments/{id}` and
+  `.../submissions` both return a clean 404 "Assignment not found" for
+  admin *and* the former instructor — no orphan, no confusing message.
+  Postgres `ON DELETE CASCADE` does this for free; no application code
+  needed to sweep it.
+- **C2 (book-index cascade)** — not re-run live this pass (would need a
+  real book in a knowledge base as a fixture); relying on the direct-`psql`
+  cascade verification already done during Track 1 (insert unit + book
+  entry + assignment + submission + enrollment, delete unit, confirm 0
+  orphans across all four tables via the same FK mechanism as C1). Same
+  `course_book_entries.course_unit_id` FK, same `ON DELETE CASCADE` — no
+  reason to expect it behaves differently from C1, but flagging that this
+  specific case wasn't independently re-poked through the live API.
+- **R1 (cross-instructor isolation)** — spot-checked with a second
+  instructor account against gradebook/roster/requests on a unit they don't
+  own: 403 on all three, as before.
+- **D1 (published-assignment edit lock)** — spot-checked: `PUT` with a
+  `questions` payload on a published assignment → 400 with the expected
+  message, unchanged.
+- **E2 (empty gradebook)** — spot-checked: fresh unit, zero assignments →
+  `{assignments:[], rows:[]}`, unchanged.
+- R2, R3, C3, C4, E1, E3, D2 not independently re-run this pass — none of
+  their code paths changed shape in this migration (they're read-path
+  access-control checks, not writes into the tables that moved to
+  Postgres), and Track 2/3's own testing already exercised the async
+  rewrites of the underlying calls. Flagging as not re-verified rather than
+  silently marking pass — if anything regresses there it'll be from the
+  `async def` conversion, not from the schema/storage change itself.
+
+**New findings — a bug neither track's own testing caught**:
+`POST /course-units` returned 500 on the very first live write through the
+real app process. Traceback: `asyncpg` → `PermissionError: [Errno 13]
+Permission denied: '/root/.postgresql/postgresql.key'`, from asyncpg's
+default SSL-negotiation path probing for a client cert at
+`$HOME/.postgresql/`. Root cause, in order of discovery:
+1. The container's `ENV HOME=/root` is set at the image level. Supervisord
+   runs the `backend` program as `user=deeptutor` (uid 1000) — see
+   `user=deeptutor` in `/etc/supervisor/conf.d/programs.conf` — but that
+   `user=` directive only changes the process UID, it does **not** reset
+   inherited environment variables. So the backend process runs as uid 1000
+   with `HOME=/root` still set.
+2. `/root` is `drwx------`, owned by root. uid 1000 can't even `stat()`
+   inside it, so asyncpg's harmless "does a client cert exist" check raises
+   `PermissionError` instead of the `FileNotFoundError` it would get from a
+   merely-missing directory it *could* read into.
+3. This is orthogonal to whether the local Postgres even supports/requires
+   SSL — it doesn't (`postgres:16-alpine`, no TLS configured) — the crash
+   happens before any actual SSL negotiation with the server.
+   `docker exec` for ad-hoc debugging runs as root by default, which is why
+   `docker exec deeptutor whoami` → `root` was misleading and initially
+   pointed away from the real cause.
+
+Fix (`deeptutor/services/db/engine.py`): pass `connect_args={"ssl": False}`
+to `create_async_engine()`, but only when resolved to the local docker-compose
+default — added a second bug in the same fix pass, where the "is this the
+local default" check compared against whether `DATABASE_URL` was *unset*,
+but `docker-compose.yml` sets it explicitly (to the same value, for
+visibility, per its own comment) — so the check never fired. Fixed by
+comparing the resolved value against `_LOCAL_DEV_DEFAULT` directly. Railway
+is unaffected either way — it injects its own `DATABASE_URL` pointing at a
+different host, so this branch never applies there.
+
+**Left for later / handing back**: ready to push once the user reviews —
+per standing instruction, nothing gets pushed to origin until they say so.
+C2 and the R2/R3/C3/C4/E1/E3/D2 cases above are the honest gaps in this
+pass; worth a follow-up sweep if time allows before Railway deployment, but
+none of them touch code this migration changed.
+
+— Claude
