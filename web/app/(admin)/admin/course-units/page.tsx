@@ -44,6 +44,11 @@ interface FormState {
   term: string;
   description: string;
   instructorIds: string[];
+  startDate: string;
+  endDate: string;
+  /** B6: Usernames of the instructors assigned when the edit form was opened,
+   * shown as a "previously taught by" note when reassigning. Empty for create. */
+  previousInstructorNames: string[];
 }
 
 const EMPTY_FORM: FormState = {
@@ -52,6 +57,9 @@ const EMPTY_FORM: FormState = {
   term: "",
   description: "",
   instructorIds: [],
+  startDate: "",
+  endDate: "",
+  previousInstructorNames: [],
 };
 
 export default function CourseUnitsPage() {
@@ -127,6 +135,9 @@ export default function CourseUnitsPage() {
       term: unit.term,
       description: unit.description,
       instructorIds: [...unit.instructor_ids],
+      startDate: unit.start_date || "",
+      endDate: unit.end_date || "",
+      previousInstructorNames: [...unit.instructor_usernames],
     });
     setFormError("");
   }
@@ -166,6 +177,8 @@ export default function CourseUnitsPage() {
           term: form.term.trim(),
           description: form.description.trim(),
           instructor_ids: form.instructorIds,
+          start_date: form.startDate.trim(),
+          end_date: form.endDate.trim(),
         });
       } else {
         await createCourseUnit(
@@ -173,6 +186,8 @@ export default function CourseUnitsPage() {
           form.term.trim(),
           form.instructorIds,
           form.description.trim(),
+          form.startDate.trim(),
+          form.endDate.trim(),
         );
       }
       setForm(null);
@@ -233,17 +248,15 @@ export default function CourseUnitsPage() {
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              {isAdmin && (
-                <button
-                  onClick={openCreate}
-                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
-                             border border-[var(--border)] text-[var(--foreground)]
-                             hover:bg-[var(--card)] transition-colors"
-                >
-                  <Plus size={14} />
-                  {t("New course unit")}
-                </button>
-              )}
+              <button
+                onClick={openCreate}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
+                           border border-[var(--border)] text-[var(--foreground)]
+                           hover:bg-[var(--card)] transition-colors"
+              >
+                <Plus size={14} />
+                {t("New course unit")}
+              </button>
               <button
                 onClick={() => load(isAdmin)}
                 disabled={loading}
@@ -290,19 +303,17 @@ export default function CourseUnitsPage() {
               <p className="mt-1 text-sm text-[var(--muted-foreground)]">
                 {isAdmin
                   ? t("Create one to get started.")
-                  : t("Units you're assigned to will appear here.")}
+                  : t("Create one or check back for units you're assigned to.")}
               </p>
-              {isAdmin && (
-                <button
-                  onClick={openCreate}
-                  className="mt-4 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
-                             border border-[var(--border)] text-[var(--foreground)]
-                             hover:bg-[var(--background)]/60 transition-colors"
+              <button
+                onClick={openCreate}
+                className="mt-4 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
+                           border border-[var(--border)] text-[var(--foreground)]
+                           hover:bg-[var(--background)]/60 transition-colors"
                 >
                   <Plus size={14} />
                   {t("New course unit")}
                 </button>
-              )}
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -422,12 +433,17 @@ export default function CourseUnitsPage() {
         onCancel={() => setDeleteTarget(null)}
       >
         {deleteTarget && (
-          <p>
-            {t(
-              "This permanently removes “{{name}}” and its enrollments. This cannot be undone.",
-              { name: deleteTarget.name },
-            )}
-          </p>
+          <div className="space-y-2">
+            <p>
+              {t(
+                "This permanently removes “{{name}}” along with all its enrollments, assignments, and student submissions. This cannot be undone.",
+                { name: deleteTarget.name },
+              )}
+            </p>
+            <p className="text-xs text-[var(--muted-foreground)]">
+              {t("Consider archiving instead if you need to keep the grade history.")}
+            </p>
+          </div>
         )}
       </ConfirmDialog>
 
@@ -494,15 +510,39 @@ export default function CourseUnitsPage() {
               />
             </label>
 
+            <div className="mb-3 flex gap-3">
+              <label className="flex-1 block text-xs text-[var(--muted-foreground)]">
+                {t("Start date")}
+                <input
+                  type="date"
+                  value={form.startDate}
+                  onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                  disabled={formSubmitting}
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                />
+              </label>
+              <label className="flex-1 block text-xs text-[var(--muted-foreground)]">
+                {t("End date")}
+                <input
+                  type="date"
+                  value={form.endDate}
+                  onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                  disabled={formSubmitting}
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                />
+              </label>
+            </div>
+
             <div className="mb-4">
               <p className="mb-1.5 text-xs text-[var(--muted-foreground)]">
                 {t("Instructor(s)")}
               </p>
-              {instructors.length === 0 ? (
-                <p className="text-xs text-[var(--muted-foreground)]">
-                  {t("No instructor accounts yet — promote a user to instructor first.")}
-                </p>
-              ) : (
+              {isAdmin ? (
+                instructors.length === 0 ? (
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    {t("No instructor accounts yet — promote a user to instructor first.")}
+                  </p>
+                ) : (
                 <div className="max-h-36 space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] p-2">
                   {instructors.map((instructor) => (
                     <label
@@ -519,6 +559,18 @@ export default function CourseUnitsPage() {
                     </label>
                   ))}
                 </div>
+                )
+              ) : (
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  {t("You will be automatically added as the instructor for this course unit.")}
+                </p>
+              )}
+              {form.id && form.previousInstructorNames.length > 0 && (
+                <p className="mt-1.5 text-xs text-[var(--muted-foreground)]">
+                  {t("Previously taught by: {{names}}", {
+                    names: form.previousInstructorNames.join(", "),
+                  })}
+                </p>
               )}
             </div>
 

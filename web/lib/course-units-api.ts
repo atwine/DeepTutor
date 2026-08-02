@@ -10,13 +10,16 @@ export interface CourseUnit {
    * non-admin instructor see a co-instructor's name without needing the
    * admin-only user list. */
   instructor_usernames: string[];
+  /** B1: Course start/end dates (ISO date string "YYYY-MM-DD" or empty). */
+  start_date: string;
+  end_date: string;
   created_at: string;
 }
 
 /** A course unit as shown in the student-facing catalog: `my_status` is the
  * caller's own enrollment status for it (null/"pending"/"approved"). */
 export interface CatalogCourseUnit extends CourseUnit {
-  my_status: "pending" | "approved" | null;
+  my_status: "pending" | "approved" | "leave_requested" | null;
 }
 
 export interface RosterEntry {
@@ -69,6 +72,8 @@ export async function createCourseUnit(
   term: string,
   instructorIds: string[],
   description: string = "",
+  startDate: string = "",
+  endDate: string = "",
 ): Promise<CourseUnit> {
   const res = await apiFetch(apiUrl("/api/v1/multi-user/course-units"), {
     method: "POST",
@@ -78,6 +83,8 @@ export async function createCourseUnit(
       term,
       description,
       instructor_ids: instructorIds,
+      start_date: startDate,
+      end_date: endDate,
     }),
   });
   const data = await unwrap<{ course_unit: CourseUnit }>(
@@ -90,7 +97,7 @@ export async function createCourseUnit(
 export async function updateCourseUnit(
   courseUnitId: string,
   updates: Partial<
-    Pick<CourseUnit, "name" | "term" | "description" | "instructor_ids">
+    Pick<CourseUnit, "name" | "term" | "description" | "instructor_ids" | "start_date" | "end_date">
   >,
 ): Promise<CourseUnit> {
   const res = await apiFetch(
@@ -232,4 +239,61 @@ export async function requestEnrollment(courseUnitId: string): Promise<void> {
     { method: "POST" },
   );
   await unwrap<{ enrollment: unknown }>(res, "Failed to request enrollment");
+}
+
+// B2: Student-initiated leave/unenroll with instructor confirmation.
+
+/** Student requests to leave (unenroll from) a course unit. */
+export async function requestLeave(courseUnitId: string): Promise<void> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/leave-requests`,
+    ),
+    { method: "POST" },
+  );
+  await unwrap<{ enrollment: unknown }>(res, "Failed to request leave");
+}
+
+/** Leave requests awaiting instructor confirmation for this course unit. */
+export async function getLeaveRequests(
+  courseUnitId: string,
+): Promise<RosterEntry[]> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/leave-requests`,
+    ),
+  );
+  const data = await unwrap<{ requests: RosterEntry[] }>(
+    res,
+    "Failed to fetch leave requests",
+  );
+  return data.requests;
+}
+
+/** Instructor confirms a leave request — removes the student from the roster. */
+export async function approveLeaveRequest(
+  courseUnitId: string,
+  userId: string,
+): Promise<void> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/leave-requests/${encodeURIComponent(userId)}/approve`,
+    ),
+    { method: "POST" },
+  );
+  await unwrap<{ ok: boolean }>(res, "Failed to approve leave request");
+}
+
+/** Instructor rejects a leave request — student stays enrolled. */
+export async function rejectLeaveRequest(
+  courseUnitId: string,
+  userId: string,
+): Promise<void> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/leave-requests/${encodeURIComponent(userId)}/reject`,
+    ),
+    { method: "POST" },
+  );
+  await unwrap<{ enrollment: unknown }>(res, "Failed to reject leave request");
 }

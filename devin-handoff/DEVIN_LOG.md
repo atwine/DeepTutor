@@ -1061,3 +1061,105 @@ pass; worth a follow-up sweep if time allows before Railway deployment, but
 none of them touch code this migration changed.
 
 â€” Claude
+
+
+## 2026-07-31 — Devin — Feature Round 2, Track B done (B1-B6)
+
+**Item**: Feature Round 2, Track B (B1-B6) — course-management gaps.
+**Status**: done.
+**Branch**: `feature-course-mgmt-devin` (worktree off `main` at `1cd9c7c`).
+
+**What changed** (files touched, one line each on the "why"):
+
+- `deeptutor/services/db/models.py` — B1: added nullable `start_date`/`end_date`
+  String columns to `CourseUnit` (date-granular, ISO "YYYY-MM-DD" format).
+- `deeptutor/multi_user/course_units.py` — B1: `COURSE_END_GRACE_PERIOD_DAYS=7`
+  constant, `_is_student_access_expired()` helper (fail-open on unparseable
+  date), `is_approved_student_of()` now blocks expired students (instructor/
+  admin archival access never blocked via `is_instructor_of`/admin role),
+  `create_course_unit`/`update_course_unit` accept `start_date`/`end_date`,
+  `_unit_to_dict` includes the new fields. B2: `request_leave`/
+  `approve_leave`/`reject_leave`/`list_leave_requests_for_course` — new
+  `leave_requested` enrollment status, idempotent request, approve removes
+  Enrollment row but keeps Submission rows for audit. B5: `delete_user_data`
+  sweeps Enrollment + Submission rows for a deleted user (those tables have
+  no FK to users on purpose — identity stays in JSON).
+- `deeptutor/multi_user/identity.py` — B5: `delete_user` is now `async def`
+  and calls `course_units.delete_user_data(user_id)` after removing the JSON
+  record, sweeping orphaned DB rows.
+- `deeptutor/services/auth.py` — B5: `delete_user` wrapper made async to
+  match the new identity.delete_user signature.
+- `deeptutor/api/routers/auth.py` — B5: `await` added to the
+  `delete_user(username)` call in the admin delete-user endpoint.
+- `deeptutor/multi_user/router.py` — B1: `CourseUnitCreate`/`CourseUnitUpdate`
+  Pydantic models gained `start_date`/`end_date`, passed through to storage.
+  B4: `POST /course-units` changed from `require_admin` to
+  `require_instructor_or_admin`; instructor creating a course is auto-added
+  to `instructor_ids` (can't assign to someone else without being on it);
+  admin keeps unrestricted assignment. B2: leave-request endpoints
+  (`POST /course-units/{id}/leave-requests`, `GET .../leave-requests`,
+  `POST .../leave-requests/{user_id}/approve`, `POST .../reject`). B3:
+  `GET /instructor/report` and `GET /instructor/report/export` (CSV) —
+  compiled gradebook across an instructor's units, optional `term` filter,
+  admins can query any instructor via `instructor_id` query param.
+- `deeptutor/multi_user/gradebook.py` — B3: `build_instructor_report
+  (instructor_id, term=None)` reuses `build_gradebook` per unit (no math
+  re-derivation), returns per-unit summaries + totals;
+  `build_instructor_report_csv` exports per-unit sections.
+- `web/lib/course-units-api.ts` — B1: `CourseUnit` type gained
+  `start_date`/`end_date`; `createCourseUnit` accepts/sends them;
+  `updateCourseUnit` type includes them. B2: `requestLeave`/
+  `getLeaveRequests`/`approveLeaveRequest`/`rejectLeaveRequest` client
+  functions; `CatalogCourseUnit.my_status` includes `"leave_requested"`.
+- `web/app/(admin)/admin/course-units/page.tsx` — B1: date inputs in the
+  create/edit form. B4: "New course unit" button shown to instructors (not
+  just admins); instructor form shows auto-add note instead of the admin
+  instructor picker. B6: delete dialog copy now mentions assignments +
+  submissions are also removed (cascade) + archive suggestion; edit form
+  shows "Previously taught by: …" note when reassigning instructors.
+- `web/app/(utility)/courses/page.tsx` — B1: course cards show start/end
+  dates. B2: enrolled students see a "Request to leave" button;
+  "Leave requested" badge shown while awaiting instructor confirmation.
+
+**DB migration**: `ALTER TABLE course_units ADD COLUMN start_date VARCHAR NULL;
+  ALTER TABLE course_units ADD COLUMN end_date VARCHAR NULL;` — run against
+  the live local Postgres. `create_all()` in `scripts/init_db.py` only creates
+  missing tables, so this ALTER was needed for the new B1 columns. Fresh
+  deployments via `init_db.py` will get the columns from the model definition.
+
+**Verified**: ran a throwaway integration test (`tmp_test_track_b.py`, deleted
+  after) against the live local Postgres (`deeptutor-postgres` container,
+  `localhost:5432`) covering B1/B2/B3/B5:
+  - B1: end_date stored; expired student (30 days past end) blocked; active
+    student (1 day before end) has access; no-end-date unit never expires;
+    update_course_unit end_date blocks expired student.
+  - B2: leave requested (status=leave_requested); listed; re-request
+    idempotent; reject reverts to approved; approve removes enrollment.
+  - B3: report has correct units for instructor (excludes other instructors'
+    units); term filter works; gradebook data (students + assignments)
+    included; CSV export contains both units + student data.
+  - B5: enrollment + submission exist before sweep; both gone after
+    `delete_user_data`.
+  Router imports cleanly (26 routes). Frontend `tsc --noEmit` passes with
+  zero errors. B4 and B6 are frontend/route-config changes verified by
+  import + typecheck (no new storage logic to integration-test).
+
+**New findings**: None that change ARCHITECTURE_AND_COMPLETED_WORK.md. The
+  `init_db.py` comment ("Add Alembic the first time this schema needs a real
+  migration against live data") is now relevant — B1's two new columns are
+  the first schema change since the initial `create_all`. Alembic wasn't
+  added in this track (the ALTER was run manually for local dev); a follow-up
+  should add Alembic before the next schema change, especially if there are
+  multiple deployment environments to keep in sync.
+
+**Left for later / handing back**:
+- Alembic migration tooling (see "New findings" above).
+- B2 leave-request UI on the instructor side (roster/requests page) — the
+  backend endpoints + API client functions exist, but the instructor-facing
+  leave-request list/approve/reject UI wasn't built (the student-side
+  "Request to leave" button + "Leave requested" badge are in place).
+- B3 instructor-report frontend page — the backend endpoints + CSV export
+  exist, but no dedicated UI page was built to surface them.
+- The B1 grace-period check is application-level only (no DB-level constraint
+  or scheduled job); a student whose end_date passes mid-session is blocked
+  on their next `is_approved_student_of` check, not proactively.

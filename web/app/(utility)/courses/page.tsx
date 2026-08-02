@@ -7,9 +7,10 @@ import { fetchAuthStatus } from "@/lib/auth";
 import {
   getCourseCatalog,
   requestEnrollment,
+  requestLeave,
   type CatalogCourseUnit,
 } from "@/lib/course-units-api";
-import { ArrowLeft, BookOpen, Check, Clock, RefreshCw, Send } from "lucide-react";
+import { ArrowLeft, BookOpen, Calendar, Check, Clock, LogOut, RefreshCw, Send } from "lucide-react";
 import Link from "next/link";
 
 export default function CourseCatalogPage() {
@@ -55,6 +56,23 @@ export default function CourseCatalogPage() {
     } catch (e) {
       setActionError(
         e instanceof Error ? e.message : t("Failed to request enrollment"),
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleLeave(unit: CatalogCourseUnit) {
+    setBusyId(unit.id);
+    setActionError("");
+    try {
+      await requestLeave(unit.id);
+      setUnits((prev) =>
+        prev.map((u) => (u.id === unit.id ? { ...u, my_status: "leave_requested" } : u)),
+      );
+    } catch (e) {
+      setActionError(
+        e instanceof Error ? e.message : t("Failed to request leave"),
       );
     } finally {
       setBusyId(null);
@@ -145,6 +163,12 @@ export default function CourseCatalogPage() {
                         ? ` · ${unit.instructor_usernames.join(", ")}`
                         : ""}
                     </p>
+                    {(unit.start_date || unit.end_date) && (
+                      <p className="mt-0.5 flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
+                        <Calendar size={11} strokeWidth={1.5} />
+                        {unit.start_date || "—"} → {unit.end_date || "—"}
+                      </p>
+                    )}
                     {unit.description && (
                       <p className="mt-2 text-sm text-[var(--muted-foreground)]">
                         {unit.description}
@@ -170,7 +194,23 @@ export default function CourseCatalogPage() {
                         >
                           {t("Notes")} →
                         </Link>
+                        <button
+                          onClick={() => void handleLeave(unit)}
+                          disabled={busyId === unit.id}
+                          className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs
+                                     border border-[var(--border)] text-[var(--muted-foreground)]
+                                     hover:text-red-500 hover:border-red-500/30
+                                     disabled:opacity-50 transition-colors"
+                        >
+                          <LogOut size={11} />
+                          {t("Request to leave")}
+                        </button>
                       </>
+                    ) : unit.my_status === "leave_requested" ? (
+                      <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-400">
+                        <Clock size={12} strokeWidth={2} />
+                        {t("Leave requested")}
+                      </span>
                     ) : unit.my_status === "pending" ? (
                       <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-400">
                         <Clock size={12} strokeWidth={2} />

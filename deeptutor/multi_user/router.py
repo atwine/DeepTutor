@@ -6,6 +6,7 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from deeptutor.api.routers.auth import (
@@ -21,6 +22,7 @@ from deeptutor.services.skill.service import SkillService
 from .audit import log_admin_action
 from .course_units import (
     approve_enrollment,
+    approve_leave,
     create_course_unit,
     delete_course_unit,
     enroll_student,
@@ -31,11 +33,15 @@ from .course_units import (
     list_course_units_for_student,
     list_enrollments_for_course,
     list_enrollments_for_student,
+    list_leave_requests_for_course,
+    reject_leave,
     request_enrollment,
+    request_leave,
     unenroll_student,
     update_course_unit,
 )
 from .grants import load_grant, save_grant
+from .gradebook import build_instructor_report, build_instructor_report_csv
 from .identity import get_user_by_id, list_user_info, search_enrollable_users
 from .knowledge_access import admin_kb_base_dir
 from .model_access import is_owner_bound
@@ -261,6 +267,8 @@ class CourseUnitCreate(BaseModel):
     term: str = ""
     description: str = ""
     instructor_ids: list[str] = []
+    start_date: str = ""
+    end_date: str = ""
 
 
 class CourseUnitUpdate(BaseModel):
@@ -268,6 +276,8 @@ class CourseUnitUpdate(BaseModel):
     term: str | None = None
     description: str | None = None
     instructor_ids: list[str] | None = None
+    start_date: str | None = None
+    end_date: str | None = None
 
 
 class EnrollmentPayload(BaseModel):
@@ -302,10 +312,23 @@ def _with_instructor_names(unit: dict[str, Any]) -> dict[str, Any]:
 @router.post("/course-units")
 async def create_course_unit_endpoint(
     payload: CourseUnitCreate,
-    _: TokenPayload = Depends(require_admin),
+    current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
+    # B4: Instructors can now create their own course units (previously
+    # admin-only). An instructor creating a course is automatically included
+    # in instructor_ids — they can't create a course and assign it to someone
+    # else without also being on it themselves. Admins keep the ability to
+    # create for/assign anyone (no auto-add).
+    instructor_ids = payload.instructor_ids
+    if current.role == "instructor" and current.user_id not in instructor_ids:
+        instructor_ids = [*instructor_ids, current.user_id]
     record = await create_course_unit(
-        payload.name, payload.term, payload.instructor_ids, payload.description
+        payload.name,
+        payload.term,
+        instructor_ids,
+        payload.description,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
     )
     log_admin_action(
         "course_unit_create",
@@ -391,6 +414,8 @@ async def update_course_unit_endpoint(
         term=payload.term,
         description=payload.description,
         instructor_ids=payload.instructor_ids,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
@@ -527,6 +552,117 @@ async def request_enrollment_endpoint(
     if record is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
     return {"enrollment": record}
+
+
+# ---------------------------------------------------------------------------
+# Leave requests (B2) — student-initiated unenroll with instructor confirmation
+# ---------------------------------------------------------------------------
+
+
+@router.post("/course-units/{course_unit_id}/leave-requests")
+async def request_leave_endpoint(
+    course_unit_id: str,
+    current: TokenPayload | None = Depends(require_auth),
+) -> dict[str, Any]:
+    """B2: Student-initiated: request to leave (unenroll from) a course unit.
+    Creates a ``leave_requested`` status on the student's approved enrollment
+    for the instructor to confirm or reject. The student is NOT unenrolled
+    until the instructor confirms — the repo owner's note was explicit that
+    the instructor confirms, not auto-removed on request alone."""
+    from deeptutor.multi_user.models import LOCAL_ADMIN_ID
+
+    user_id = current.user_id if current else LOCAL_ADMIN_ID
+    record = await request_leave(course_unit_id, user_id)
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No approved enrollment found for this student in this course unit",
+        )
+    return {"enrollment": record}
+
+
+@router.get("/course-units/{course_unit_id}/leave-requests")
+async def list_leave_requests_endpoint(
+    course_unit_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """B2: Leave requests awaiting instructor confirmation for this course unit."""
+    await _require_course_unit_access(current, course_unit_id)
+    requests = [
+        info
+        for enrollment in await list_leave_requests_for_course(course_unit_id)
+        if (info := _enrollment_with_student_info(enrollment)) is not None
+    ]
+    return {"requests": requests}
+
+
+@router.post("/course-units/{course_unit_id}/leave-requests/{user_id}/approve")
+async def approve_leave_request_endpoint(
+    course_unit_id: str,
+    user_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """B2: Instructor confirms a leave request — removes the Enrollment row.
+    The student's existing Submission rows are NOT deleted (kept for grading
+    history/audit integrity)."""
+    await _require_course_unit_access(current, course_unit_id)
+    removed = await approve_leave(course_unit_id, user_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="No leave request found for this student")
+    return {"ok": True}
+
+
+@router.post("/course-units/{course_unit_id}/leave-requests/{user_id}/reject")
+async def reject_leave_request_endpoint(
+    course_unit_id: str,
+    user_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """B2: Instructor rejects a leave request — reverts enrollment status
+    back to ``approved``."""
+    await _require_course_unit_access(current, course_unit_id)
+    record = await reject_leave(course_unit_id, user_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No leave request found for this student")
+    return {"enrollment": record}
+
+
+# ---------------------------------------------------------------------------
+# B3: Cross-course per-instructor compiled report
+# ---------------------------------------------------------------------------
+
+
+@router.get("/instructor/report")
+async def instructor_report_endpoint(
+    term: str = "",
+    instructor_id: str = "",
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """B3: Compiled gradebook data across every course unit the calling
+    instructor teaches, optionally filtered by ``term``. Admins can query
+    any instructor's report by passing ``instructor_id`` as a query param;
+    instructors automatically get their own. Reuses ``build_gradebook``
+    per unit — does NOT re-derive the weighted-average math."""
+    target_id = instructor_id.strip() if current.role == "admin" and instructor_id.strip() else current.user_id
+    term_filter = term.strip() or None
+    return await build_instructor_report(target_id, term_filter)
+
+
+@router.get("/instructor/report/export")
+async def export_instructor_report_csv_endpoint(
+    term: str = "",
+    instructor_id: str = "",
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> PlainTextResponse:
+    """B3: CSV export of the per-instructor compiled report."""
+    target_id = instructor_id.strip() if current.role == "admin" and instructor_id.strip() else current.user_id
+    term_filter = term.strip() or None
+    csv_text = await build_instructor_report_csv(target_id, term_filter)
+    return PlainTextResponse(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="instructor_report.csv"'},
+    )
 
 
 @router.get("/students/search")
