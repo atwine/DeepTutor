@@ -274,13 +274,13 @@ class EnrollmentPayload(BaseModel):
     user_id: str
 
 
-def _require_course_unit_access(payload: TokenPayload, course_unit_id: str) -> dict[str, Any]:
-    unit = get_course_unit(course_unit_id)
+async def _require_course_unit_access(payload: TokenPayload, course_unit_id: str) -> dict[str, Any]:
+    unit = await get_course_unit(course_unit_id)
     if unit is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
     if payload.role == "admin":
         return unit
-    if payload.role == "instructor" and is_instructor_of(payload.user_id, course_unit_id):
+    if payload.role == "instructor" and await is_instructor_of(payload.user_id, course_unit_id):
         return unit
     raise HTTPException(status_code=403, detail="You do not manage this course unit")
 
@@ -304,7 +304,7 @@ async def create_course_unit_endpoint(
     payload: CourseUnitCreate,
     _: TokenPayload = Depends(require_admin),
 ) -> dict[str, Any]:
-    record = create_course_unit(
+    record = await create_course_unit(
         payload.name, payload.term, payload.instructor_ids, payload.description
     )
     log_admin_action(
@@ -321,9 +321,9 @@ async def list_course_units_endpoint(
     """Management view: admins see every course unit, instructors see only
     the ones they're attached to."""
     if current.role == "admin":
-        units = list_course_units()
+        units = await list_course_units()
     else:
-        units = list_course_units_for_instructor(current.user_id)
+        units = await list_course_units_for_instructor(current.user_id)
     return {"course_units": [_with_instructor_names(u) for u in units]}
 
 
@@ -345,11 +345,11 @@ async def course_unit_catalog_endpoint(
     user_id = current.user_id if current else ""
     status_by_unit = {
         rec["course_unit_id"]: rec.get("status", "approved")
-        for rec in list_enrollments_for_student(user_id)
+        for rec in await list_enrollments_for_student(user_id)
     }
     catalog = [
         {**_with_instructor_names(unit), "my_status": status_by_unit.get(unit["id"])}
-        for unit in list_course_units()
+        for unit in await list_course_units()
     ]
     return {"course_units": catalog}
 
@@ -362,11 +362,11 @@ async def my_course_units_endpoint(
     instructors see the units they teach, students see the units they're
     enrolled in."""
     if current is None or current.role == "admin":
-        units = list_course_units()
+        units = await list_course_units()
     elif current.role == "instructor":
-        units = list_course_units_for_instructor(current.user_id)
+        units = await list_course_units_for_instructor(current.user_id)
     else:
-        units = list_course_units_for_student(current.user_id)
+        units = await list_course_units_for_student(current.user_id)
     return {"course_units": [_with_instructor_names(u) for u in units]}
 
 
@@ -375,7 +375,7 @@ async def get_course_unit_endpoint(
     course_unit_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    unit = _require_course_unit_access(current, course_unit_id)
+    unit = await _require_course_unit_access(current, course_unit_id)
     return {"course_unit": _with_instructor_names(unit)}
 
 
@@ -385,7 +385,7 @@ async def update_course_unit_endpoint(
     payload: CourseUnitUpdate,
     _: TokenPayload = Depends(require_admin),
 ) -> dict[str, Any]:
-    record = update_course_unit(
+    record = await update_course_unit(
         course_unit_id,
         name=payload.name,
         term=payload.term,
@@ -403,7 +403,7 @@ async def delete_course_unit_endpoint(
     course_unit_id: str,
     _: TokenPayload = Depends(require_admin),
 ) -> dict[str, Any]:
-    removed = delete_course_unit(course_unit_id)
+    removed = await delete_course_unit(course_unit_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Course unit not found")
     log_admin_action("course_unit_delete", summary={"course_unit_id": course_unit_id})
@@ -416,10 +416,10 @@ async def enroll_student_endpoint(
     payload: EnrollmentPayload,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    _require_course_unit_access(current, course_unit_id)
+    await _require_course_unit_access(current, course_unit_id)
     if get_user_by_id(payload.user_id) is None:
         raise HTTPException(status_code=404, detail="User not found")
-    record = enroll_student(course_unit_id, payload.user_id)
+    record = await enroll_student(course_unit_id, payload.user_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
     return {"enrollment": record}
@@ -431,8 +431,8 @@ async def unenroll_student_endpoint(
     user_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    _require_course_unit_access(current, course_unit_id)
-    removed = unenroll_student(course_unit_id, user_id)
+    await _require_course_unit_access(current, course_unit_id)
+    removed = await unenroll_student(course_unit_id, user_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Enrollment not found")
     return {"ok": True}
@@ -461,10 +461,10 @@ async def course_unit_roster_endpoint(
 ) -> dict[str, Any]:
     """Approved enrollments only — a pending request belongs on the
     /requests endpoint until an instructor decides on it."""
-    _require_course_unit_access(current, course_unit_id)
+    await _require_course_unit_access(current, course_unit_id)
     roster = [
         info
-        for enrollment in list_enrollments_for_course(course_unit_id)
+        for enrollment in await list_enrollments_for_course(course_unit_id)
         if enrollment.get("status", "approved") == "approved"
         and (info := _enrollment_with_student_info(enrollment)) is not None
     ]
@@ -477,10 +477,10 @@ async def course_unit_requests_endpoint(
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
     """Pending enrollment requests awaiting this course unit's instructor(s)."""
-    _require_course_unit_access(current, course_unit_id)
+    await _require_course_unit_access(current, course_unit_id)
     requests = [
         info
-        for enrollment in list_enrollments_for_course(course_unit_id)
+        for enrollment in await list_enrollments_for_course(course_unit_id)
         if enrollment.get("status", "approved") == "pending"
         and (info := _enrollment_with_student_info(enrollment)) is not None
     ]
@@ -493,8 +493,8 @@ async def approve_enrollment_request_endpoint(
     user_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    _require_course_unit_access(current, course_unit_id)
-    record = approve_enrollment(course_unit_id, user_id)
+    await _require_course_unit_access(current, course_unit_id)
+    record = await approve_enrollment(course_unit_id, user_id)
     if record is None:
         raise HTTPException(status_code=404, detail="No pending request for this student")
     return {"enrollment": record}
@@ -506,8 +506,8 @@ async def reject_enrollment_request_endpoint(
     user_id: str,
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
-    _require_course_unit_access(current, course_unit_id)
-    removed = unenroll_student(course_unit_id, user_id)
+    await _require_course_unit_access(current, course_unit_id)
+    removed = await unenroll_student(course_unit_id, user_id)
     if not removed:
         raise HTTPException(status_code=404, detail="No request found for this student")
     return {"ok": True}
@@ -523,7 +523,7 @@ async def request_enrollment_endpoint(
     from deeptutor.multi_user.models import LOCAL_ADMIN_ID
 
     user_id = current.user_id if current else LOCAL_ADMIN_ID
-    record = request_enrollment(course_unit_id, user_id)
+    record = await request_enrollment(course_unit_id, user_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
     return {"enrollment": record}

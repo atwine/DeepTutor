@@ -6,6 +6,12 @@ Pure aggregation over existing records (course_units.py's roster,
 assignments.py's Assignment/Submission) — no storage of its own. A
 student's *latest* submission to an assignment is what counts (matches what
 the student's own results page already shows them).
+
+NOTE: functions are now ``async def`` because the storage functions they
+call (``list_enrollments_for_course``, ``list_assignments_for_course``,
+``get_latest_submission``) became async as part of the DB migration.
+This is a scope surprise flagged per DATABASE_MIGRATION_PLAN.md §3 —
+the logic is identical, only ``await`` was added.
 """
 
 from __future__ import annotations
@@ -23,13 +29,13 @@ def assignment_max_points(assignment: dict[str, Any]) -> float:
     return sum(float(q.get("points") or 1.0) for q in assignment.get("questions", []))
 
 
-def build_gradebook(course_unit_id: str) -> dict[str, Any]:
+async def build_gradebook(course_unit_id: str) -> dict[str, Any]:
     assignments = [
-        a for a in list_assignments_for_course(course_unit_id) if a["status"] == "published"
+        a for a in await list_assignments_for_course(course_unit_id) if a["status"] == "published"
     ]
     enrollments = [
         e
-        for e in list_enrollments_for_course(course_unit_id)
+        for e in await list_enrollments_for_course(course_unit_id)
         if e.get("status", "approved") == "approved"
     ]
 
@@ -57,7 +63,7 @@ def build_gradebook(course_unit_id: str) -> dict[str, Any]:
         weighted_sum = 0.0
         weight_total = 0.0
         for assignment in assignments:
-            submission = get_latest_submission(assignment["id"], user_id)
+            submission = await get_latest_submission(assignment["id"], user_id)
             max_points = assignment_max_points(assignment)
             score = submission["score"] if submission else None
             percentage = (score / max_points * 100) if submission and max_points else None
@@ -88,8 +94,8 @@ def build_gradebook(course_unit_id: str) -> dict[str, Any]:
     return {"assignments": assignment_summaries, "rows": rows}
 
 
-def build_gradebook_csv(course_unit_id: str) -> str:
-    data = build_gradebook(course_unit_id)
+async def build_gradebook_csv(course_unit_id: str) -> str:
+    data = await build_gradebook(course_unit_id)
     assignments = data["assignments"]
 
     buffer = io.StringIO()
