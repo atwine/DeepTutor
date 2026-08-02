@@ -87,6 +87,11 @@ export default function CourseUnitAssignmentsPage() {
   const [isMajor, setIsMajor] = useState(false);
   const [passingScoreEnabled, setPassingScoreEnabled] = useState(false);
   const [passingScore, setPassingScore] = useState("70");
+  // Round 3: timed-assignment fields — is_timed/time_limit_minutes already
+  // existed on the model and are already read/enforced by the student
+  // briefing screen; this form previously had no way to set them at all.
+  const [isTimed, setIsTimed] = useState(false);
+  const [timeLimitMinutes, setTimeLimitMinutes] = useState("30");
 
   const [deleteTarget, setDeleteTarget] = useState<AssignmentSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -113,7 +118,12 @@ export default function CourseUnitAssignmentsPage() {
       setCanManage(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
-      if (msg.includes("not enrolled") || msg.includes("403")) {
+      // This page is only reached by an admin/instructor (see the role
+      // redirect below), so the only 403 this endpoint can actually raise
+      // here is the instructor-doesn't-manage-this-unit case — matches the
+      // unified error copy from assignments_router.py's
+      // _enrollment_error_detail (see gradebook page for the same wording).
+      if (msg.includes("do not manage") || msg.includes("not enrolled") || msg.includes("403")) {
         setCanManage(false);
       }
       setError(e instanceof Error ? e.message : t("Failed to load assignments"));
@@ -146,6 +156,8 @@ export default function CourseUnitAssignmentsPage() {
     setIsMajor(false);
     setPassingScoreEnabled(false);
     setPassingScore("70");
+    setIsTimed(false);
+    setTimeLimitMinutes("30");
     setCreateError("");
   }
 
@@ -220,6 +232,8 @@ export default function CourseUnitAssignmentsPage() {
         due_at: dueAt,
         is_major: isMajor,
         passing_score: !isMajor && passingScoreEnabled ? parseFloat(passingScore) || 0 : null,
+        is_timed: isTimed,
+        time_limit_minutes: isTimed ? parseInt(timeLimitMinutes, 10) || 1 : null,
       };
       await createAssignment(courseUnitId, draft);
       setShowCreate(false);
@@ -384,6 +398,9 @@ export default function CourseUnitAssignmentsPage() {
                           : a.passing_score != null
                             ? ` · ${t("passing score {{score}}%", { score: a.passing_score })}`
                             : ""}
+                        {a.is_timed && a.time_limit_minutes
+                          ? ` · ${t("{{min}} min timed", { min: a.time_limit_minutes })}`
+                          : ""}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
@@ -633,6 +650,38 @@ export default function CourseUnitAssignmentsPage() {
                       </label>
                     )}
                   </>
+                )}
+              </div>
+
+              <div className="mb-4 space-y-2 rounded-lg border border-[var(--border)] p-3">
+                <p className="text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+                  {t("Timing")}
+                </p>
+                <label className="flex items-center gap-2 text-sm text-[var(--foreground)]">
+                  <input
+                    type="checkbox"
+                    checked={isTimed}
+                    onChange={(e) => setIsTimed(e.target.checked)}
+                    disabled={creating}
+                  />
+                  {t("Timed assignment")}
+                </label>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  {t("Students see a countdown once they start; answers auto-submit when time runs out.")}
+                </p>
+                {isTimed && (
+                  <label className="block text-xs text-[var(--muted-foreground)]">
+                    {t("Time limit (minutes)")}
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      value={timeLimitMinutes}
+                      onChange={(e) => setTimeLimitMinutes(e.target.value)}
+                      disabled={creating}
+                      className="mt-1 w-32 rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                    />
+                  </label>
                 )}
               </div>
 

@@ -1634,11 +1634,61 @@ checks only):
   again" button, gated on the same `retake_blocked_reason` the server
   computes.
 
-**Left for later / handing back**: the two Round 2 QA gaps noted as
-background context at the top of this entry (no `is_timed` checkbox in the
-creation form; assignments-page vs. gradebook-page error-copy mismatch) —
-neither was in this track's explicit scope, both still open. Live
-Docker-based regression testing of everything in this entry is still
-needed (per this track's constraint, only static checks were run here).
+**Left for later / handing back**: live Docker-based regression testing of
+everything in this entry is still needed (per this track's constraint, only
+static checks were run here). See the addendum immediately below — the two
+Round 2 QA gaps mentioned above as "left out of scope" were in fact the
+actual point of this track and have now been fixed; that note was wrong to
+leave as a permanent status and is being corrected here rather than left
+stale.
+
+### Addendum — 2026-08-02 — Claude — the two items above are now done
+
+The coordinator flagged that this track was created specifically to close
+the two Round 2 QA gaps this entry had originally described as background
+context and left untouched. Both are now fixed, same branch, same
+file-ownership rules (only `assignments.py`, `assignments_router.py`,
+`models.py`'s `Assignment` class, and the two assignment page components):
+
+1. **`is_timed`/`time_limit_minutes` UI added to the admin assignment
+   creation form** (there is no separate edit form in this file — creation
+   is the only form that exists, confirmed by grepping for `updateAssignment`
+   usage in `web/app/(admin)/.../assignments/page.tsx`, which found none).
+   Added a "Timing" section — a "Timed assignment" checkbox and, shown only
+   when checked, a "Time limit (minutes)" number field — following the same
+   visual/state pattern as the "Major assignment" retake-policy section
+   added earlier in this track. Both fields are wired into the create
+   payload (`is_timed`, `time_limit_minutes: isTimed ? ... : null`). Also
+   added a "N min timed" fragment to the assignment row's caption line, for
+   parity with the existing major/passing-score captions. The backend
+   (`is_timed`/`time_limit_minutes` columns, `create_assignment`/
+   `update_assignment` params, student briefing screen) already existed
+   from Round 2 and needed no changes — this was purely a missing-UI gap.
+
+2. **Unified the blocked-instructor error copy.** Added
+   `_enrollment_error_detail(current)` to `assignments_router.py`: returns
+   "You do not manage this course unit" (matching the gradebook page's
+   wording exactly) when the caller's role is `admin`/`instructor`, and the
+   previous student-facing "You are not enrolled in this course unit"
+   otherwise. Replaced all four call sites in this file that previously
+   hardcoded the student-facing string regardless of caller role —
+   `list_assignments_endpoint`, `get_assignment_endpoint`,
+   `submit_assignment_endpoint`, and `get_my_submission_endpoint` — with
+   calls to this one helper, so the wording can't drift between endpoints
+   again. Also updated the admin assignments page's A6 "can this user
+   manage this course unit" 403-message sniffing (`load()`'s catch block)
+   to recognize the new "do not manage" substring alongside the old "not
+   enrolled" one it was checking for — that heuristic would otherwise have
+   silently broken (kept showing "New assignment" to a non-managing
+   instructor) the moment the error copy changed underneath it.
+
+**Verified**: `deeptutor/multi_user/assignments_router.py` parses
+(`ast.parse`) cleanly; still doesn't fully `import` in this static
+environment for the same pre-existing, unrelated `main.yaml` config reason
+documented above (reconfirmed unchanged by this addendum's edits — the
+import failure occurs before reaching any of the lines touched here).
+Reviewed the four call sites and the new helper by inspection. Frontend:
+`npx tsc --noEmit` (exit 0) and `npx eslint` targeted at the admin
+assignments page (zero errors/warnings) after both changes.
 
 — Claude

@@ -109,6 +109,22 @@ async def _require_manage_access(current: TokenPayload, assignment: dict[str, An
         raise HTTPException(status_code=403, detail="You do not manage this assignment")
 
 
+def _enrollment_error_detail(current: TokenPayload | None) -> str:
+    """The 'you can't see this' message for a non-managing, non-enrolled
+    caller depends on who they are. The gradebook page's equivalent
+    access-denied case correctly reads "You do not manage this course unit"
+    for an instructor/admin who isn't attached to this course unit; the
+    assignments endpoints previously always raised the student-facing
+    "You are not enrolled in this course unit" message even when the caller
+    was an instructor who simply doesn't manage this particular unit —
+    confusing, since "enrollment" isn't even a concept that applies to
+    instructors. Match wording to the caller's role instead of assuming
+    student in every case."""
+    if current is not None and current.role in ("admin", "instructor"):
+        return "You do not manage this course unit"
+    return "You are not enrolled in this course unit"
+
+
 async def _get_assignment_or_404(assignment_id: str) -> dict[str, Any]:
     assignment = await get_assignment(assignment_id)
     if assignment is None:
@@ -178,7 +194,7 @@ async def list_assignments_endpoint(
         user_id = payload.user_id if payload else ""
         if not await is_approved_student_of(user_id, course_unit_id):
             raise HTTPException(
-                status_code=403, detail="You are not enrolled in this course unit"
+                status_code=403, detail=_enrollment_error_detail(payload)
             )
         assignments = [
             a for a in await list_assignments_for_course(course_unit_id) if a["status"] == "published"
@@ -202,7 +218,7 @@ async def get_assignment_endpoint(
         raise HTTPException(status_code=404, detail="Assignment not found")
     user_id = current.user_id if current else ""
     if not await is_approved_student_of(user_id, course_unit_id):
-        raise HTTPException(status_code=403, detail="You are not enrolled in this course unit")
+        raise HTTPException(status_code=403, detail=_enrollment_error_detail(current))
 
     grant = await get_access_grant(assignment_id, user_id) if user_id else None
     latest = await get_latest_submission(assignment_id, user_id)
@@ -313,7 +329,7 @@ async def submit_assignment_endpoint(
     course_unit_id = assignment["course_unit_id"]
     user_id = current.user_id if current else ""
     if not await is_approved_student_of(user_id, course_unit_id):
-        raise HTTPException(status_code=403, detail="You are not enrolled in this course unit")
+        raise HTTPException(status_code=403, detail=_enrollment_error_detail(current))
 
     # A2/A3: check per-student access grant for deadline extension and extra
     # attempts before proceeding with the submit flow.
@@ -409,7 +425,7 @@ async def get_my_submission_endpoint(
     assignment = await _get_assignment_or_404(assignment_id)
     user_id = current.user_id if current else ""
     if not await is_approved_student_of(user_id, assignment["course_unit_id"]):
-        raise HTTPException(status_code=403, detail="You are not enrolled in this course unit")
+        raise HTTPException(status_code=403, detail=_enrollment_error_detail(current))
     return {"submission": await get_latest_submission(assignment_id, user_id)}
 
 
