@@ -237,7 +237,24 @@ both bigger, separate-surface efforts).
 
 ---
 
-## 10. Phase 10 wrap-up
+## 10. Loose ends from Rounds 2/3 (Devin only — no Cascade this round)
+
+**Ready to pick up. Three tasks, full detail + citations in `DEVIN_LOG.md`'s latest entry.** Going
+forward this project is Devin-only — no Cascade split this time. Devin decides how to sequence/
+divide these three (they don't have the same "must be file-disjoint for parallel work" constraint
+the two-agent rounds needed, since there's only one agent now) and logs that decision before
+starting, same as every round before this one logs its plan.
+
+1. Verify (and fix if broken) that deleting a course unit cascades to its book/notes index the
+   same way it already does for assignments — never independently proven live.
+2. Resolve the instructor/admin permission inconsistency on course-unit edit/delete (currently
+   stricter than every other course-unit action).
+3. Add real Alembic migration tooling — three rounds of schema changes have gone by on the
+   drop-and-recreate dev workflow, flagged as a follow-up each time and still not done.
+
+---
+
+## 11. Phase 10 wrap-up
 
 **Small, low-urgency, do last.**
 

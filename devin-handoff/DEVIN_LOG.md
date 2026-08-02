@@ -2080,3 +2080,142 @@ standing instruction, nothing gets pushed to origin until the repo owner
 explicitly says so.
 
 — Claude
+
+## 2026-08-02 — Claude — Round 3 merged to `main` and pushed; Round 4 handoff (Devin only)
+
+**Item**: not a build item — status update plus the next handoff.
+
+**Status**: `feature-round3-integration` has been merged into `main` locally
+(commit `c4e6233`). **Not yet pushed to `origin/main`** — the repo owner
+will push once this round's results are back, not before. Everything
+logged in this file up through the previous entry is on `main` locally;
+confirm with the repo owner which commit is actually live on `origin/main`
+before assuming `c4e6233` is there yet.
+
+**Going forward, this project is Devin-only — no Cascade.** The repo owner
+asked for the next batch of work to go entirely through Devin, and
+explicitly asked that these three tasks be broken down **in parallel**, the
+same file-disjoint-branches discipline as every round before this one —
+not done sequentially in one long session. Spin up three separate work
+streams (however that's structured on your end — three branches is the
+pattern this log has used throughout), one per task below, cut from the
+same base commit. The three tasks below look reasonably disjoint by file
+already (spelled out per-task), but **you decide the final split and log it
+here before starting** — if you find real overlap between two of them,
+say so and adjust rather than guessing silently.
+
+Branch from `main` at `c4e6233`. Three tasks, all loose ends from the last
+two rounds of live QA — none of them were things anyone got wrong, they're
+things nobody independently checked or a decision that got deferred:
+
+### Task 1 — Verify (and fix if needed) the course-notes cascade delete
+
+**Current state, confirmed by reading the code**: `CourseBookEntry.course_unit_id`
+(`deeptutor/services/db/models.py`) has `ForeignKey("course_units.id",
+ondelete="CASCADE")` — the identical mechanism already proven live for
+`Assignment`/`Submission` (deleting a course unit with real, graded
+submissions in it cascades cleanly, re-confirmed three separate times across
+the DB migration, Round 2, and Round 3 regression passes). There is every
+reason to expect `CourseBookEntry` behaves the same way, since it's the same
+FK/cascade primitive — but this specific case has never actually been poked
+live through the real API/UI, because doing so needs a real book in a real
+knowledge base as a fixture, which none of the live QA passes so far have
+set up.
+
+**Do this**: set up a real course-unit + a real Book assigned as its notes
+(published) + a real course-book-entry row, delete the course unit through
+the actual admin UI (not a raw SQL check), and confirm the book-index entry
+is gone afterward — `GET /books/{id}/course-content` (or whatever the
+current read endpoint is, check `book_access_router.py`) should 404 cleanly,
+not still resolve to a dead `course_unit_id`. If it turns out this doesn't
+cascade correctly for some reason (e.g. a caching layer, a soft-delete path
+that bypasses the FK), fix it — but going in, the expectation is this
+already works and just needs the live proof, not a code change.
+
+**Likely files** (for the parallel split): `deeptutor/multi_user/course_books.py`,
+`deeptutor/multi_user/book_access_router.py` — should not need to touch
+`router.py` or `deeptutor/multi_user/course_units.py`'s delete function at
+all if the FK is doing its job, which is the whole point of checking.
+
+### Task 2 — Resolve the course-unit edit/delete permission inconsistency
+
+**Current state, confirmed by reading the code**: in `deeptutor/multi_user/router.py`,
+`update_course_unit_endpoint` and `delete_course_unit_endpoint` are both
+gated `Depends(require_admin)` — admin-only, no exception for an instructor
+managing their own unit. Every other course-unit action added across Rounds
+2 and 3 (`archive_course_unit_endpoint`/`unarchive`, the assignment/roster/
+gradebook/notes endpoints, and — since Round 2 — even *creating* a course
+unit via `POST /course-units`) is gated `Depends(require_instructor_or_admin)`,
+with the instructor's own ownership checked separately where it matters
+(`is_instructor_of`). This was flagged as an inconsistency by the archive
+track during Round 3 but deliberately left alone as out of scope for that
+task.
+
+**Do this**: decide, and clearly document the reasoning in your log entry,
+whether edit/delete should also become instructor-or-admin (with an
+`is_instructor_of` ownership check added, matching the pattern every other
+endpoint in this file already uses), or whether admin-only is the correct,
+intentional restriction specifically for these two higher-blast-radius
+actions (an instructor being able to unilaterally *delete* a course unit —
+which cascades away all its assignments/submissions/book links — is a
+meaningfully bigger risk than an instructor archiving one, which is fully
+reversible). Either answer is defensible; just make the call explicitly
+rather than leaving it an unexamined inconsistency. If you open it up to
+instructors, reuse the existing `is_instructor_of`/`_manages_course_unit`
+predicates already used elsewhere in this file — don't write a new
+ownership check from scratch.
+
+**Likely files**: `deeptutor/multi_user/router.py` only (the two endpoint
+decorators + whatever ownership check gets added inline) — should not
+require touching `course_units.py`'s own storage functions, since
+`is_instructor_of` already exists there to import.
+
+### Task 3 — Add real Alembic migration tooling
+
+**Current state, confirmed by reading the code and this file's history**:
+`scripts/init_db.py` still bootstraps the schema via a plain
+`Base.metadata.create_all()`, explicitly documented in that script's own
+docstring as acceptable "for this initial rollout... add Alembic the first
+time this schema needs a real migration against live data, not before."
+That moment has now passed three times over — Round 2 (Devin) added
+`start_date`/`end_date` to `CourseUnit` via a manually-run `ALTER TABLE`
+(logged, not scripted), the database-migration round shipped one raw
+`.sql` file (`deeptutor/services/db/migrations/002_track_a_assignment_lifecycle.sql`,
+which nothing actually runs automatically — Claude ran the DDL by hand at
+merge time), and Round 3 added `is_archived`/`is_major`/`passing_score`/the
+two new `Notification` tables the same manual way. Every round's own log
+entry has flagged "no Alembic yet" as a known gap and deferred it again.
+
+**Do this**: initialize Alembic against the existing models (`alembic init`,
+point its `env.py` at this project's `Base`/engine setup in
+`deeptutor/services/db/models.py` / `engine.py`), generate an initial
+migration that matches the *current* live schema exactly (so applying it to
+a fresh database produces the same result `scripts/init_db.py` does today —
+verify this by diffing a fresh `create_all()` database against one built by
+running the Alembic migration), then update `scripts/init_db.py` (or
+whatever the deploy/init path becomes) to run `alembic upgrade head` instead
+of `create_all()` directly. Going forward, any schema change (including
+undoing the three manual ones above, if you want to fold them into proper
+migration files instead of leaving them as one-off DDL nobody re-runs) should
+ship as a new Alembic revision, not another manual `ALTER`/drop-and-recreate.
+This is infrastructure, not a feature — no user-facing behavior should
+change; the test is that the resulting schema is identical to today's, and
+that a second developer's fresh checkout can now reach the current schema
+by running one command instead of hand-running SQL.
+
+**Likely files**: new `alembic/` directory + `alembic.ini` (net-new, zero
+conflict risk with the other two tasks by construction), `scripts/init_db.py`.
+This is the most self-contained of the three and the safest to run fully
+in parallel with the other two — it doesn't touch `router.py` or
+`course_books.py`/`book_access_router.py` at all.
+
+**Coordination rules (same as always)**: three parallel work streams, one
+per task, cut from the same base commit — log the split you actually used
+here before starting. Log start and completion per task in this file, in
+the usual format (Item/Status/What changed/Verified/New findings/Left for
+later). If Task 2's decision has any implications for how you approach
+Task 1's fix (unlikely, but flag it if so). Claude merges + runs the live
+regression pass once all three report done, and — per standing instruction
+— nothing gets pushed to origin until the repo owner explicitly says so.
+
+— Claude
