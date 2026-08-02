@@ -21,8 +21,10 @@ from deeptutor.services.skill.service import SkillService
 
 from .audit import log_admin_action
 from .course_units import (
+    CourseUnitArchivedError,
     approve_enrollment,
     approve_leave,
+    archive_course_unit,
     create_course_unit,
     delete_course_unit,
     enroll_student,
@@ -37,6 +39,7 @@ from .course_units import (
     reject_leave,
     request_enrollment,
     request_leave,
+    unarchive_course_unit,
     unenroll_student,
     update_course_unit,
 )
@@ -370,9 +373,16 @@ async def course_unit_catalog_endpoint(
         rec["course_unit_id"]: rec.get("status", "approved")
         for rec in await list_enrollments_for_student(user_id)
     }
+    # Round 3: an archived unit shouldn't be discoverable as joinable by
+    # someone with no existing relationship to it — but a student who's
+    # already enrolled/pending/leave_requested on it still sees it here
+    # (their access itself reads as blocked via _is_student_access_expired,
+    # same as an expired course past its grace period; no special-case
+    # needed beyond not surfacing it as a *new* thing to join).
     catalog = [
         {**_with_instructor_names(unit), "my_status": status_by_unit.get(unit["id"])}
         for unit in await list_course_units()
+        if not unit.get("is_archived") or unit["id"] in status_by_unit
     ]
     return {"course_units": catalog}
 
@@ -433,6 +443,39 @@ async def delete_course_unit_endpoint(
         raise HTTPException(status_code=404, detail="Course unit not found")
     log_admin_action("course_unit_delete", summary={"course_unit_id": course_unit_id})
     return {"ok": True}
+
+
+@router.post("/course-units/{course_unit_id}/archive")
+async def archive_course_unit_endpoint(
+    course_unit_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """Round 3: Archive a course unit — instructor-of-that-unit or admin,
+    same gating as the rest of this router's course-unit-scoped endpoints
+    (``_require_course_unit_access``). Students immediately read as blocked
+    from new actions on it (``_is_student_access_expired`` now also checks
+    ``is_archived``); instructor/admin roster/gradebook/submission access is
+    unaffected."""
+    await _require_course_unit_access(current, course_unit_id)
+    record = await archive_course_unit(course_unit_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Course unit not found")
+    log_admin_action("course_unit_archive", summary={"course_unit_id": course_unit_id})
+    return {"course_unit": _with_instructor_names(record)}
+
+
+@router.post("/course-units/{course_unit_id}/unarchive")
+async def unarchive_course_unit_endpoint(
+    course_unit_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """Round 3: Reverse of the archive endpoint above — same gating."""
+    await _require_course_unit_access(current, course_unit_id)
+    record = await unarchive_course_unit(course_unit_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Course unit not found")
+    log_admin_action("course_unit_unarchive", summary={"course_unit_id": course_unit_id})
+    return {"course_unit": _with_instructor_names(record)}
 
 
 @router.post("/course-units/{course_unit_id}/enrollments")
@@ -548,7 +591,13 @@ async def request_enrollment_endpoint(
     from deeptutor.multi_user.models import LOCAL_ADMIN_ID
 
     user_id = current.user_id if current else LOCAL_ADMIN_ID
-    record = await request_enrollment(course_unit_id, user_id)
+    try:
+        record = await request_enrollment(course_unit_id, user_id)
+    except CourseUnitArchivedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="This course unit is archived and not accepting new enrollment requests",
+        ) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
     return {"enrollment": record}

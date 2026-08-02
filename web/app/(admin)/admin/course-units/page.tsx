@@ -10,11 +10,15 @@ import {
   createCourseUnit,
   updateCourseUnit,
   deleteCourseUnit,
+  archiveCourseUnit,
+  unarchiveCourseUnit,
   type CourseUnit,
 } from "@/lib/course-units-api";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { RosterEditor } from "./RosterEditor";
 import {
+  Archive,
+  ArchiveRestore,
   BookOpen,
   ClipboardList,
   GraduationCap,
@@ -80,6 +84,8 @@ export default function CourseUnitsPage() {
   const [deleteTarget, setDeleteTarget] = useState<CourseUnit | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [expandedUnitId, setExpandedUnitId] = useState<string | null>(null);
+  const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   const load = useCallback(async (admin: boolean) => {
     setLoading(true);
@@ -199,6 +205,26 @@ export default function CourseUnitsPage() {
     }
   }
 
+  async function handleToggleArchive(unit: CourseUnit) {
+    if (archiveBusyId) return;
+    setArchiveBusyId(unit.id);
+    setActionError("");
+    try {
+      const updated = unit.is_archived
+        ? await unarchiveCourseUnit(unit.id)
+        : await archiveCourseUnit(unit.id);
+      setUnits((prev) => prev.map((u) => (u.id === unit.id ? updated : u)));
+    } catch (e) {
+      setActionError(
+        e instanceof Error
+          ? e.message
+          : t(unit.is_archived ? "Failed to unarchive course unit" : "Failed to archive course unit"),
+      );
+    } finally {
+      setArchiveBusyId(null);
+    }
+  }
+
   async function handleDeleteConfirm() {
     if (!deleteTarget || deleteBusy) return;
     setDeleteBusy(true);
@@ -213,6 +239,122 @@ export default function CourseUnitsPage() {
     } finally {
       setDeleteBusy(false);
     }
+  }
+
+  const activeUnits = units.filter((u) => !u.is_archived);
+  const archivedUnits = units.filter((u) => u.is_archived);
+
+  function renderUnitRow(unit: CourseUnit) {
+    return (
+      <Fragment key={unit.id}>
+        <tr
+          className={`hover:bg-[var(--background)]/50 transition-colors ${
+            unit.is_archived ? "opacity-60" : ""
+          }`}
+        >
+          <td className="px-5 py-3 font-medium text-[var(--foreground)]">
+            <div className="flex items-center gap-2">
+              {unit.name}
+              {unit.is_archived && (
+                <span className="rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-[var(--muted-foreground)]">
+                  {t("Archived")}
+                </span>
+              )}
+            </div>
+          </td>
+          <td className="px-5 py-3 text-[var(--muted-foreground)]">
+            {unit.term || "—"}
+          </td>
+          <td className="px-5 py-3 text-[var(--muted-foreground)]">
+            {instructorNames(unit)}
+          </td>
+          <td className="px-5 py-3 text-[var(--muted-foreground)]">
+            {formatDate(unit.created_at, lang)}
+          </td>
+          <td className="px-5 py-3.5">
+            <div className="flex items-center justify-end gap-1.5">
+              <button
+                onClick={() =>
+                  setExpandedUnitId((current) =>
+                    current === unit.id ? null : unit.id,
+                  )
+                }
+                title={t("Manage roster")}
+                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                         hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
+              >
+                <Users size={15} />
+              </button>
+              <Link
+                href={`/admin/course-units/${unit.id}/assignments`}
+                title={t("Assignments")}
+                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                         hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
+              >
+                <ClipboardList size={15} />
+              </Link>
+              <Link
+                href={`/admin/course-units/${unit.id}/gradebook`}
+                title={t("Gradebook")}
+                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                         hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
+              >
+                <GraduationCap size={15} />
+              </Link>
+              <Link
+                href={`/admin/course-units/${unit.id}/notes`}
+                title={t("Course Notes")}
+                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                         hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
+              >
+                <BookOpen size={15} />
+              </Link>
+              <button
+                onClick={() => void handleToggleArchive(unit)}
+                disabled={archiveBusyId === unit.id}
+                title={unit.is_archived ? t("Unarchive") : t("Archive")}
+                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                         hover:bg-[var(--background)] hover:text-[var(--foreground)]
+                         disabled:opacity-40 transition-colors"
+              >
+                {unit.is_archived ? (
+                  <ArchiveRestore size={15} />
+                ) : (
+                  <Archive size={15} />
+                )}
+              </button>
+              {isAdmin && (
+                <>
+                  <button
+                    onClick={() => openEdit(unit)}
+                    title={t("Edit")}
+                    className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                             hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <button
+                    onClick={() => setDeleteTarget(unit)}
+                    title={t("Delete")}
+                    className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                             hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </>
+              )}
+            </div>
+          </td>
+        </tr>
+        {expandedUnitId === unit.id && (
+          <tr>
+            <td colSpan={5} className="p-0">
+              <RosterEditor courseUnitId={unit.id} />
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
   }
 
   return (
@@ -315,6 +457,16 @@ export default function CourseUnitsPage() {
                   {t("New course unit")}
                 </button>
             </div>
+          ) : activeUnits.length === 0 ? (
+            <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+              <Archive size={28} strokeWidth={1.5} className="text-[var(--muted-foreground)]/50" />
+              <p className="mt-3 text-sm font-medium text-[var(--foreground)]">
+                {t("No active course units")}
+              </p>
+              <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+                {t("Every course unit here is archived — see the archived section below.")}
+              </p>
+            </div>
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -327,95 +479,43 @@ export default function CourseUnitsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
-                {units.map((unit) => (
-                  <Fragment key={unit.id}>
-                    <tr className="hover:bg-[var(--background)]/50 transition-colors">
-                      <td className="px-5 py-3 font-medium text-[var(--foreground)]">
-                        {unit.name}
-                      </td>
-                      <td className="px-5 py-3 text-[var(--muted-foreground)]">
-                        {unit.term || "—"}
-                      </td>
-                      <td className="px-5 py-3 text-[var(--muted-foreground)]">
-                        {instructorNames(unit)}
-                      </td>
-                      <td className="px-5 py-3 text-[var(--muted-foreground)]">
-                        {formatDate(unit.created_at, lang)}
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() =>
-                              setExpandedUnitId((current) =>
-                                current === unit.id ? null : unit.id,
-                              )
-                            }
-                            title={t("Manage roster")}
-                            className="rounded-lg p-1.5 text-[var(--muted-foreground)]
-                                     hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
-                          >
-                            <Users size={15} />
-                          </button>
-                          <Link
-                            href={`/admin/course-units/${unit.id}/assignments`}
-                            title={t("Assignments")}
-                            className="rounded-lg p-1.5 text-[var(--muted-foreground)]
-                                     hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
-                          >
-                            <ClipboardList size={15} />
-                          </Link>
-                          <Link
-                            href={`/admin/course-units/${unit.id}/gradebook`}
-                            title={t("Gradebook")}
-                            className="rounded-lg p-1.5 text-[var(--muted-foreground)]
-                                     hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
-                          >
-                            <GraduationCap size={15} />
-                          </Link>
-                          <Link
-                            href={`/admin/course-units/${unit.id}/notes`}
-                            title={t("Course Notes")}
-                            className="rounded-lg p-1.5 text-[var(--muted-foreground)]
-                                     hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
-                          >
-                            <BookOpen size={15} />
-                          </Link>
-                          {isAdmin && (
-                            <>
-                              <button
-                                onClick={() => openEdit(unit)}
-                                title={t("Edit")}
-                                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
-                                         hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
-                              >
-                                <Pencil size={15} />
-                              </button>
-                              <button
-                                onClick={() => setDeleteTarget(unit)}
-                                title={t("Delete")}
-                                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
-                                         hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                              >
-                                <Trash2 size={15} />
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                    {expandedUnitId === unit.id && (
-                      <tr>
-                        <td colSpan={5} className="p-0">
-                          <RosterEditor courseUnitId={unit.id} />
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
+                {activeUnits.map((unit) => renderUnitRow(unit))}
               </tbody>
             </table>
           )}
         </div>
+
+        {archivedUnits.length > 0 && (
+          <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">
+            <button
+              onClick={() => setShowArchived((v) => !v)}
+              className="flex w-full items-center justify-between gap-2 px-5 py-3 text-left text-sm
+                         text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <Archive size={14} />
+                {t("Archived course units ({{count}})", { count: archivedUnits.length })}
+              </span>
+              <span className="text-xs">{showArchived ? t("Hide") : t("Show")}</span>
+            </button>
+            {showArchived && (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-y border-[var(--border)] text-left text-xs text-[var(--muted-foreground)] uppercase tracking-wider">
+                    <th className="px-5 py-3 font-medium">{t("Name")}</th>
+                    <th className="px-5 py-3 font-medium">{t("Term")}</th>
+                    <th className="px-5 py-3 font-medium">{t("Instructor(s)")}</th>
+                    <th className="px-5 py-3 font-medium">{t("Created")}</th>
+                    <th className="px-5 py-3 font-medium text-right">{t("Actions")}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]">
+                  {archivedUnits.map((unit) => renderUnitRow(unit))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
 
         <p className="mt-8 text-center text-xs text-[var(--muted-foreground)]">
           {t("DeepTutor Admin · Course Units")}

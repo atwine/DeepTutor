@@ -56,6 +56,7 @@ def _unit_to_dict(unit: CourseUnit) -> dict[str, Any]:
         "description": unit.description,
         "start_date": unit.start_date or "",
         "end_date": unit.end_date or "",
+        "is_archived": bool(unit.is_archived),
         "instructor_ids": [i.instructor_id for i in unit.instructors],
         "created_at": unit.created_at.isoformat() if unit.created_at else "",
     }
@@ -182,6 +183,35 @@ async def delete_course_unit(course_unit_id: str) -> bool:
     return True
 
 
+async def archive_course_unit(course_unit_id: str) -> dict[str, Any] | None:
+    """Round 3: Mark a course unit archived. Does not touch enrollments,
+    assignments, or submissions — this is a pure flag flip. Student access
+    blocking is derived from the flag by ``_is_student_access_expired``
+    (see below), not stored redundantly anywhere else. Returns None if the
+    course unit doesn't exist."""
+    async with session_scope() as session:
+        unit = await session.get(CourseUnit, course_unit_id)
+        if unit is None:
+            return None
+        unit.is_archived = True
+        await session.flush()
+        await session.refresh(unit, ["instructors"])
+    return _unit_to_dict(unit)
+
+
+async def unarchive_course_unit(course_unit_id: str) -> dict[str, Any] | None:
+    """Round 3: Reverse of ``archive_course_unit``. Returns None if the
+    course unit doesn't exist."""
+    async with session_scope() as session:
+        unit = await session.get(CourseUnit, course_unit_id)
+        if unit is None:
+            return None
+        unit.is_archived = False
+        await session.flush()
+        await session.refresh(unit, ["instructors"])
+    return _unit_to_dict(unit)
+
+
 async def is_instructor_of(user_id: str, course_unit_id: str) -> bool:
     async with session_scope() as session:
         result = await session.execute(
@@ -194,19 +224,31 @@ async def is_instructor_of(user_id: str, course_unit_id: str) -> bool:
 
 
 def _is_student_access_expired(unit: CourseUnit) -> bool:
-    """B1: Check whether student access to this course unit has expired.
+    """B1/Round 3: Check whether student access to this course unit has
+    expired.
 
-    Returns True if ``end_date`` is set and the current UTC date is past
-    ``end_date + COURSE_END_GRACE_PERIOD_DAYS``. Returns False if
-    ``end_date`` is not set (no expiry configured) or we're still within
-    the grace period. Instructors/admins are never blocked — this check is
-    only applied to students via ``is_approved_student_of``.
+    Returns True if either:
+    - the unit is archived (Round 3) — an archived course always reads as
+      blocked-for-students regardless of dates, the same way an expired
+      course reads as blocked past its grace period. Reusing this single
+      check (rather than a second parallel "am I blocked" predicate) keeps
+      the "archival access never disappears for the people who need the
+      record" guarantee identical for both cases: instructors/admins call
+      ``is_instructor_of``/admin-role checks instead of this function, so
+      they're never affected by either condition.
+    - ``end_date`` is set and the current UTC date is past
+      ``end_date + COURSE_END_GRACE_PERIOD_DAYS``.
+
+    Returns False if the unit isn't archived and ``end_date`` is not set
+    (no expiry configured) or we're still within the grace period.
 
     ``end_date`` is stored as a string (e.g. "2026-12-31") to match the
     frontend date input format; we parse it with ``datetime.strptime`` for
     the comparison. An unparseable ``end_date`` is treated as "not expired"
     (fail-open) so a malformed date doesn't lock students out.
     """
+    if unit.is_archived:
+        return True
     end_str = unit.end_date
     if not end_str:
         return False
@@ -226,12 +268,13 @@ async def is_approved_student_of(user_id: str, course_unit_id: str) -> bool:
     grants access to the course units list.
 
     B1: Also returns False if the course unit's ``end_date`` +
-    ``COURSE_END_GRACE_PERIOD_DAYS`` has passed — student access to
-    assignments/notes is blocked after the grace period, while
-    instructor/admin archival access (via ``is_instructor_of``/admin role)
-    is never blocked. The student still sees the course in their
-    ``list_course_units_for_student`` (that function doesn't call this
-    check) — they just can't take new actions on it."""
+    ``COURSE_END_GRACE_PERIOD_DAYS`` has passed, or (Round 3) if the course
+    unit is archived — student access to assignments/notes is blocked in
+    both cases, while instructor/admin archival access (via
+    ``is_instructor_of``/admin role) is never blocked. The student still
+    sees the course in their ``list_course_units_for_student`` (that
+    function doesn't call this check) — they just can't take new actions
+    on it."""
     async with session_scope() as session:
         result = await session.execute(
             select(Enrollment).where(
@@ -325,12 +368,23 @@ async def enroll_student(course_unit_id: str, user_id: str) -> dict[str, Any] | 
     return _enrollment_to_dict(enrollment)
 
 
+class CourseUnitArchivedError(Exception):
+    """Round 3: raised by ``request_enrollment`` when a student with no
+    existing enrollment tries to join an archived course unit. An existing
+    enrollment (any status) is left alone — this only blocks *new* joins,
+    matching the "archived courses aren't joinable, already-enrolled access
+    reads like an expired course" access model documented in DEVIN_LOG.md."""
+
+
 async def request_enrollment(course_unit_id: str, user_id: str) -> dict[str, Any] | None:
     """Student-initiated: creates a ``pending`` enrollment for the instructor
     to approve or reject. Idempotent — an existing enrollment of either
     status (already pending, or already approved) is returned unchanged, so
     re-requesting can't downgrade an approved student back to pending.
-    Returns None if the course unit doesn't exist."""
+    Returns None if the course unit doesn't exist. Raises
+    ``CourseUnitArchivedError`` (Round 3) if the unit is archived and the
+    student has no existing enrollment to fall back on — an archived course
+    shouldn't be joinable by someone new."""
     now = datetime.now(timezone.utc)
     async with session_scope() as session:
         unit = await session.get(CourseUnit, course_unit_id)
@@ -345,6 +399,8 @@ async def request_enrollment(course_unit_id: str, user_id: str) -> dict[str, Any
         existing = result.scalar_one_or_none()
         if existing is not None:
             return _enrollment_to_dict(existing)
+        if unit.is_archived:
+            raise CourseUnitArchivedError(course_unit_id)
         enrollment = Enrollment(
             id=new_enrollment_id(),
             course_unit_id=course_unit_id,
