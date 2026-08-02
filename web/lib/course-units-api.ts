@@ -13,6 +13,10 @@ export interface CourseUnit {
   /** B1: Course start/end dates (ISO date string "YYYY-MM-DD" or empty). */
   start_date: string;
   end_date: string;
+  /** Round 3: archived course units block student access the same way an
+   * expired (past grace period) course does, and are excluded from the
+   * student join-catalog for anyone not already enrolled/pending on it. */
+  is_archived: boolean;
   created_at: string;
 }
 
@@ -121,6 +125,33 @@ export async function deleteCourseUnit(courseUnitId: string): Promise<void> {
     { method: "DELETE" },
   );
   await unwrap<{ ok: boolean }>(res, "Failed to delete course unit");
+}
+
+/** Round 3: archive a course unit — blocks students the same way an
+ * expired course does, while instructor/admin access is unaffected. */
+export async function archiveCourseUnit(courseUnitId: string): Promise<CourseUnit> {
+  const res = await apiFetch(
+    apiUrl(`/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/archive`),
+    { method: "POST" },
+  );
+  const data = await unwrap<{ course_unit: CourseUnit }>(
+    res,
+    "Failed to archive course unit",
+  );
+  return data.course_unit;
+}
+
+/** Round 3: reverse of `archiveCourseUnit`. */
+export async function unarchiveCourseUnit(courseUnitId: string): Promise<CourseUnit> {
+  const res = await apiFetch(
+    apiUrl(`/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/unarchive`),
+    { method: "POST" },
+  );
+  const data = await unwrap<{ course_unit: CourseUnit }>(
+    res,
+    "Failed to unarchive course unit",
+  );
+  return data.course_unit;
 }
 
 export async function enrollStudent(

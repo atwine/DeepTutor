@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -65,6 +66,14 @@ class CourseUnit(Base):
     # course_units.py); instructor/admin archival access is never blocked.
     start_date: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     end_date: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
+    # Round 3: archival. An archived course unit behaves like an expired
+    # course past its grace period for students (blocked from new actions —
+    # see course_units.py's _is_student_access_expired, which now also
+    # checks this flag) while instructor/admin read/manage access is never
+    # blocked, same "archival access never disappears" principle as the
+    # existing grace-period case. Also excludes the unit from a student's
+    # join-a-new-course catalog (see router.py's catalog endpoint).
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     instructors: Mapped[list["CourseUnitInstructor"]] = relationship(

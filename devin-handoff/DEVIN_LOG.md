@@ -1473,3 +1473,145 @@ standing instruction, nothing gets pushed to origin until the repo owner
 explicitly says so.
 
 — Claude
+
+## 2026-08-02 — Claude — Round 3: instructor leave-request UI + real archive feature
+
+**Item**: Close the two live-QA gaps found at the end of the Round 2 merge
+pass — (1) B2's leave-request UI genuinely doesn't exist on the instructor
+side, and (2) B6's delete-dialog copy references an "archiving" feature
+that doesn't exist anywhere in the codebase. Branch `fix-round3-archive`,
+cut from `feature-round2-integration`. Scope: `deeptutor/multi_user/
+course_units.py`, `deeptutor/multi_user/router.py`, `deeptutor/services/
+db/models.py` (`CourseUnit` only), `web/app/(admin)/admin/course-units/
+page.tsx` (+ `RosterEditor.tsx`), `web/lib/course-units-api.ts`.
+
+**Status**: both gaps closed.
+
+**Gap 1 — instructor leave-request UI**: the backend
+(`request_leave`/`list_leave_requests_for_course`/`approve_leave`/
+`reject_leave` in `course_units.py`, endpoints already wired in
+`router.py`) and the client functions (`getLeaveRequests`/
+`approveLeaveRequest`/`rejectLeaveRequest` in `course-units-api.ts`) all
+already existed from Round 2 — confirmed by reading the code before
+starting, nothing needed adding on that side. Added a "Pending leave
+requests" section to `RosterEditor.tsx` (same visual pattern as the
+existing "Pending requests" join-approval block, distinct amber→orange
+color to tell the two apart at a glance), loaded alongside the roster and
+join-requests in the same `loadAll()` call. "Confirm leave" calls
+`approveLeaveRequest` (removes the enrollment — matches the existing
+backend semantics, submissions kept for audit); "Keep enrolled" calls
+`rejectLeaveRequest` (reverts status to `approved`).
+
+**Gap 2 — archive feature (new this round)**:
+
+1. `deeptutor/services/db/models.py`: added `CourseUnit.is_archived:
+   Mapped[bool]` (`nullable=False, default=False`) — the only column
+   touched in this file this round, per the 3-way parallel-agent split
+   (two other agents added `Assignment` columns and a new
+   `Notification`/`NotificationRead` pair in the same file, in parallel,
+   on sibling worktrees — confirmed disjoint by only ever touching the
+   `CourseUnit` class).
+2. `course_units.py`: added `archive_course_unit(course_unit_id)` /
+   `unarchive_course_unit(course_unit_id)` — plain flag flips, no cascade
+   to enrollments/assignments/submissions.
+3. **Access-model decision (as instructed, following the repo owner's
+   recommended default unless a strong reason not to — no strong reason
+   found)**: an archived course unit behaves exactly like an existing
+   grace-period-expired course unit for students — blocked from taking new
+   actions (assignments, notes), while instructor/admin roster/gradebook/
+   submission access is never blocked, forever. Implemented by extending
+   the *existing* `_is_student_access_expired()` predicate to also return
+   `True` when `unit.is_archived` is set, rather than writing a second
+   parallel "am I blocked" check — every existing caller of
+   `is_approved_student_of()` (which calls `_is_student_access_expired`
+   internally) picks this up automatically with no call-site changes.
+   Confirmed by reading every caller of `is_approved_student_of` in
+   `assignments.py`/`assignments_router.py`/`book_access_router.py` before
+   relying on this — none of them special-case the grace-period block, so
+   none needed a special case for archival either.
+4. **Catalog / new-enrollment exclusion**: a brand-new
+   `CourseUnitArchivedError` is raised by `request_enrollment()` when a
+   student with *no existing enrollment row* tries to join an archived
+   unit — an existing enrollment (any status: pending/approved/
+   leave_requested) is left untouched and still returned idempotently, so
+   this only blocks genuinely new joins, never disrupts someone already
+   on the roster. `router.py`'s `/enrollment-requests` endpoint catches it
+   and returns 409. Separately, `/course-units/catalog` (the student
+   browse-to-join view) now excludes archived units *unless* the calling
+   student already has some enrollment status on them — so an
+   already-enrolled/pending/leave-requested student still sees the course
+   in their catalog (reading as blocked via the access-model decision
+   above, exactly like an expired course does today), but it's not
+   surfaced as something new to join. This is two independent layers
+   (list-filter + join-time guard) deliberately, in case anything ever
+   calls `request_enrollment` directly without going through the catalog.
+5. `router.py`: `POST /course-units/{id}/archive` and
+   `POST /course-units/{id}/unarchive`, both gated via the existing
+   `_require_course_unit_access` helper (instructor-of-that-unit or
+   admin) — the same predicate the majority of this router's
+   course-unit-scoped endpoints already use. **Note**: this is *not* the
+   same gating `update_course_unit_endpoint`/`delete_course_unit_endpoint`
+   actually use today — those two are hard-coded to `require_admin` only,
+   with no `is_instructor_of` check, which looks like a pre-existing
+   inconsistency against the architecture doc's stated permission model
+   ("Course Units management: instructor — own units only"). Not fixed as
+   part of this round (out of scope, and changing who can edit/delete a
+   course unit is a bigger call than adding a new endpoint) — flagged here
+   in case it's a deliberate restriction rather than an oversight; if it's
+   the latter, this file's new archive endpoints are the template to copy
+   from once it's fixed.
+6. `web/app/(admin)/admin/course-units/page.tsx`: an Archive/Unarchive
+   icon button (lucide `Archive`/`ArchiveRestore`) next to the roster/
+   assignments/gradebook/notes icons on every row — shown to everyone who
+   can see the row at all (admins see every unit; instructors already only
+   ever see their own units in this list via `list_course_units_for_instructor`,
+   so no extra per-row ownership check was needed client-side). The list
+   is split into an always-visible "active" table and a collapsed-by-
+   default "Archived course units (N)" section below it that expands on
+   click — satisfies "clearly discoverable, not hidden" without
+   permanently cluttering the main list. Extracted the row markup into a
+   shared `renderUnitRow()` helper used by both tables instead of
+   duplicating it, since the two tables are otherwise identical apart from
+   which unit list they iterate. The delete-confirmation dialog's copy
+   ("Consider archiving instead…") was left exactly as-is, per the
+   instructions — it's now true.
+7. `web/lib/course-units-api.ts`: `CourseUnit.is_archived: boolean` added
+   to the type; `archiveCourseUnit`/`unarchiveCourseUnit` client functions
+   added. `getLeaveRequests`/`approveLeaveRequest`/`rejectLeaveRequest`
+   were already present from Round 2, confirmed and reused as-is, nothing
+   added there.
+
+**Verified**: `python -c "import ast; ast.parse(...)"` on all three touched
+Python files (syntax-clean), then `python -c "import
+deeptutor.multi_user.router"` — imports cleanly, route count went from 26
+to 28 (the two new archive/unarchive endpoints), confirming no import-time
+errors from the new `CourseUnitArchivedError` import or the `Boolean`
+SQLAlchemy import in `models.py`. Frontend: `npm ci` + `npx tsc --noEmit`
+under `web/` — see result below this entry's timestamp in the actual PR
+notes / commit message; no live Docker/Postgres testing was done, per this
+round's explicit instructions (the repo owner does the live regression
+pass after all three Round 3 tracks merge).
+
+**New findings**:
+- The `update_course_unit_endpoint`/`delete_course_unit_endpoint` gating
+  inconsistency described in item 5 above — worth a real look in a future
+  round, it's a genuine permission-model mismatch against the documented
+  architecture, not something introduced by this round.
+- No Alembic migration added for `is_archived` (matches this round's
+  explicit instructions — `create_all()` will pick up the new column when
+  the schema is reset at merge time, same as prior rounds' new columns).
+
+**Left for later / handing back**:
+- Live Docker/Postgres regression pass (repo owner's explicit call, not
+  done here): create a course unit, archive it, confirm a non-enrolled
+  student can't see/join it via the catalog, confirm an already-enrolled
+  student on it reads as blocked the same way an expired course does,
+  confirm instructor/admin still see full roster/gradebook/submissions,
+  unarchive and confirm access returns.
+- The `update_course_unit`/`delete_course_unit` admin-only gating
+  inconsistency (item 5 above) — not fixed, flagged for a follow-up
+  decision.
+- Nothing else known-incomplete from this round's two gaps — both are
+  fully wired end-to-end (storage → router → client → UI).
+
+— Claude
