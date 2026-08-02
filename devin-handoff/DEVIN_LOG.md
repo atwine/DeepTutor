@@ -431,3 +431,76 @@ Log your findings here the same way this file's other entries work — new dated
 edit this one or the plan file's content directly for disagreements, write them up so both can
 be compared side by side. Once both perspectives are on the table, the repo owner decides how
 to proceed — this is explicitly not a "whoever finishes first wins" race.
+
+---
+
+## 2026-08-02 — Cascade — Audit of DATABASE_MIGRATION_PLAN.md
+
+**Item**: TODO.md item 7 (database migration) — audit only, no code changes.
+**Status**: done. This is my independent technical review, not an implementation.
+**What changed**: nothing in code.
+
+### 1. Technical claims — verified against actual code
+
+**Claim: `_write_json`/`_read_json` do full read/parse/rewrite with no caching or partial access.**
+**Confirmed.** `course_units.py:45-58` and `assignments.py:54-67` — `_read_json` does `path.read_text()` → `json.loads()` → returns the whole dict. `_write_json` does `json.dumps()` → `path.write_text()`. No caching, no partial access, no append. Every function that reads (e.g. `list_assignments_for_course`, `count_submissions`, `get_latest_submission`) calls `_load_*()` which calls `_read_json()` — a full file parse every time.
+
+**Claim: writes aren't atomic (no temp-file-then-rename).**
+**Confirmed.** `path.write_text(...)` at `course_units.py:58` and `assignments.py:67` — a direct overwrite. If the process crashes between `json.dumps()` completing and `write_text()` finishing, the file is left truncated/corrupt. No `tempfile` + `os.rename` pattern anywhere in these modules.
+
+**Claim: the `threading.Lock` / multi-process concern is real.**
+**Confirmed.** `_WRITE_LOCK = threading.Lock()` at `course_units.py:27` and `assignments.py:29`. These are in-process locks — two Railway replicas would each have their own lock instance, providing zero cross-process protection. `identity.py:24` even documents this explicitly: "Single-process FastAPI deployments are fully covered; multi-worker deployments still race."
+
+**Claim: every read is O(total records system-wide).**
+**Confirmed.** `list_assignments_for_course` (`assignments.py:149-152`) iterates every assignment in the system to filter by `course_unit_id`. `count_submissions` (`assignments.py:229-236`) iterates every submission in the system to filter by `assignment_id` + `user_id`. `get_latest_submission` (`assignments.py:273-281`) does the same, plus a `max()` over the matches. `gradebook.py:26-88` is the worst case: for each enrolled student × each assignment, it calls `get_latest_submission` — which is a full submissions file scan each time. With N students × M assignments, that's N×M full-file parses.
+
+**Claim: the C1/C2 cascade-delete manually sweeps three files.**
+**Confirmed.** My own code at `course_units.py:148-173` — it imports `_load_assignments`, `_load_submissions`, `_load_course_books` and iterates each dict to filter by `course_unit_id` / `assignment_id`. This is exactly what `ON DELETE CASCADE` would do declaratively.
+
+### 2. Target design — my own opinion vs. the plan's
+
+**The plan picks Postgres. I think SQLite (single shared file, not per-course) is worth serious consideration as the primary target, and I'll lay out why.**
+
+The plan's reasoning for Postgres is: "Railway offers it as a one-click managed addon." But `ARCHITECTURE_AND_COMPLETED_WORK.md:14` says the deployment target is "`docker compose` deployment (`docker-compose.yml`, production target)" — self-hosted over an institution VPN, not Railway. The word "Railway" appears nowhere in the architecture doc or the docker-compose file. The plan may be reasoning about a future deployment target that hasn't been confirmed yet. **This is worth confirming with the repo owner before committing to Postgres.**
+
+If the deployment is self-hosted `docker compose` (which the evidence says it is), then:
+
+- **SQLite (single shared file, WAL mode)** gets most of the correctness benefits the plan is after: atomic writes (WAL provides crash-safe commits), real transactions, `ON DELETE CASCADE` via foreign keys, indexed lookups instead of full scans, and a `UNIQUE` constraint on `(course_unit_id, user_id)` for enrollments. It requires **zero external dependencies** — no new container, no connection pooling, no asyncpg, no SQLAlchemy engine management. The existing `docker-compose.yml` doesn't need to change at all.
+- **The multi-process concern** (the plan's problem #2) is real for Postgres but **also solvable with SQLite in WAL mode** — WAL allows concurrent readers + one writer across multiple processes, and `BEGIN IMMEDIATE` transactions serialize writers correctly. The "single in-process lock" problem goes away because the database file itself is the lock, not a Python `threading.Lock`.
+- **SQLite's limitation** is write throughput under heavy concurrent write load. For a course platform with ~10 instructors and maybe hundreds of students, this is unlikely to be a bottleneck — submissions are not high-frequency writes. If it ever becomes one, migrating from SQLite to Postgres is a much smaller jump than the current JSON→Postgres migration, because the schema and query patterns are already SQL.
+- **The async concern**: the plan says "the rest of this codebase is async-first, so the DB layer should be too." `aiosqlite` exists and works. But even synchronous SQLite calls are fast enough (microseconds for indexed lookups on a local file) that blocking the event loop briefly is acceptable — the existing `_WRITE_LOCK` critical sections are already synchronous. The real async bottleneck was the LLM call inside the submit flow, not the storage layer.
+
+**My recommendation**: Start with SQLite (single shared file, WAL mode) unless the repo owner confirms Railway is the actual deployment target. If Railway is confirmed, Postgres is the right call. Either way, **Phase A should be "stand up the DB and confirm connectivity"** — for SQLite that's even simpler (no new container, just `aiosqlite` in `pyproject.toml` and a connection setup module).
+
+**Where I agree with the plan**: SQLAlchemy 2.0 async is the right access layer regardless of which DB. Keeping function names/signatures unchanged is the right constraint. The schema draft is sound — the `JSONB` for `questions`/`answers`/`question_results` is the right call (decomposing those into relational tables would add complexity for no benefit yet). The `ON DELETE CASCADE` design is correct. The phased approach is well-structured.
+
+### 3. Phasing and scope boundary — does the "unchanged signatures" constraint hold?
+
+**Mostly yes, with one leak the plan didn't anticipate.**
+
+The plan says "every public function keeps its exact existing name and signature, so the routers don't need to change." I checked every caller of the three in-scope modules:
+
+- `router.py` imports only public functions from `course_units.py` (`create_course_unit`, `delete_course_unit`, `approve_enrollment`, etc.) — no direct access to `_load_*` internals. ✅
+- `assignments_router.py` imports only public functions from `assignments.py` (`count_submissions`, `create_submission`, etc.) — no direct access to `_load_*`. ✅
+- `book_access_router.py` imports only public functions from `course_books.py` (`assign_book_to_course_unit`, `get_book_entry`, `list_entries_for_course_unit`). ✅
+- `gradebook.py` imports only public functions (`list_assignments_for_course`, `get_latest_submission`, `list_enrollments_for_course`). ✅
+
+**The one leak**: my own C1/C2 fix in `course_units.py:148-149` directly imports `_load_assignments`, `_load_submissions`, `_load_course_books`, `ASSIGNMENTS_FILE`, `SUBMISSIONS_FILE`, `COURSE_BOOKS_FILE` from `assignments.py` and `course_books.py`. When those modules are rewritten to use a database, these private functions and module-level path constants won't exist anymore. **The cascade-delete code in `delete_course_unit()` will need to be rewritten as part of Phase C, not just "automatically simplified to `DELETE FROM course_units`" as the plan suggests** — because the current implementation reaches into the other modules' internals, not their public API. This isn't a showstopper (the rewrite is straightforward), but it means Phase C has a dependency on Phase D/E's schema being in place, not just "rewrite `course_units.py` in isolation."
+
+**Dict-iteration order**: The current code relies on dict insertion order (Python 3.7+ guarantee) in a few places — e.g. `get_latest_submission` uses `max(matches, key=...)` which doesn't depend on order, but `list_course_units()` returns `list(_load_course_units().values())` which does preserve insertion order. If any frontend or gradebook logic depends on a stable ordering (e.g. "assignments appear in creation order"), the DB-backed version needs an explicit `ORDER BY created_at` to match. **Worth flagging but not a blocker** — the current behavior is "insertion order" which maps naturally to `ORDER BY created_at` or `ORDER BY id`.
+
+### 4. Scope boundary — should anything be in that's currently out?
+
+**`identity.py` — agree it's out of scope for now.** The plan's reasoning is correct: `users.json` scales with account count, not activity. The `_USERS_WRITE_LOCK` comment at `identity.py:19-23` already acknowledges the multi-process limitation and says "multi-worker deployments must rely on an external user store (e.g. PocketBase)." So `identity.py` already has a planned migration path (PocketBase) that's separate from this effort. Including it here would conflict with that existing decision.
+
+**`grants.py` — agree it's out of scope.** Confirmed: `grant_path(user_id)` returns `GRANTS_DIR / f"{user_id}.json"` — one small file per user, no shared lock, no cross-user contention. `save_grant` at `grants.py:100-112` does a direct `path.write_text()` with no lock at all, which is fine because no two requests write the same user's grant file concurrently (and even if they did, last-write-wins is acceptable for grants). The non-atomic write concern technically applies, but the blast radius is one user's grant file, not the whole system. Correct to defer.
+
+**Chat/session storage — agree it's out of scope.** Already SQLite, already per-user. The admin feedback review limitation (admin only sees their own workspace's feedback) is a known issue but it's an access-control problem, not a storage-engine problem. Correct to leave out.
+
+**One thing I'd flag that the plan doesn't mention**: the `_submit_locks` dict in `assignments_router.py` (added by the K1 fix, now `asyncio.Lock`) is an in-process data structure that won't survive a migration to multi-process deployment. If the app ever runs as two replicas, two requests for the same student+assignment can hit different processes, each with its own `_submit_locks` dict. The plan correctly notes that Postgres transactions solve this (via `SELECT FOR UPDATE` or a unique constraint), but it doesn't explicitly call out that the current `asyncio.Lock` fix in the router layer will need to be removed as part of the migration, not just left in place. **Minor, but worth a line item in Phase D.**
+
+### Summary
+
+The plan is technically sound and well-grounded in the actual code. My main disagreement is on the target database choice: **SQLite (WAL mode) should be seriously considered as the primary target if the deployment is self-hosted `docker compose`**, which the architecture doc says it is. Postgres is the right call only if Railway is confirmed as the deployment target. The "unchanged signatures" constraint holds with one exception (the C1/C2 cascade code reaches into private internals), and the `_submit_locks` dict should be explicitly called out for removal in Phase D. Everything else — schema design, phasing, scope boundaries — I agree with.
+
+— Cascade
