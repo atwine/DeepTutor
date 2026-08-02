@@ -67,6 +67,12 @@ export interface AssignmentSummary {
   weight: number;
   attempt_limit: number;
   due_at: string;
+  is_timed: boolean;
+  time_limit_minutes: number | null;
+  /** Round 3: major/final assignment — effectively hard-caps retakes at 1. */
+  is_major: boolean;
+  /** Round 3: 0-100 percentage; null means no pass/fail retake gating. */
+  passing_score: number | null;
   question_count: number;
   created_at: string;
 }
@@ -77,11 +83,19 @@ export interface Assignment extends AssignmentSummary {
   created_by: string;
 }
 
-/** Returned to a student: questions have no answer key, plus their own attempt state. */
+/** Retake block reason, computed server-side (assignments.get_retake_block_reason)
+ * so this can never drift from what the submit endpoint will actually enforce. */
+export type RetakeBlockedReason = "attempt_limit" | "already_passed" | null;
+
+/** Returned to a student: questions have no answer key, plus their own attempt state.
+ * `attempt_limit` here is the *effective* limit (is_major hard cap / access-grant
+ * extra attempts already applied) — not necessarily the raw configured value. */
 export interface StudentAssignmentView extends AssignmentSummary {
   questions: PublicQuestion[];
   my_attempts: number;
   my_latest_submission: Submission | null;
+  retake_blocked_reason: RetakeBlockedReason;
+  retake_blocked_message: string | null;
 }
 
 async function unwrap<T>(res: Response, fallback: string): Promise<T> {
@@ -99,6 +113,10 @@ export interface AssignmentDraft {
   weight?: number;
   attempt_limit?: number;
   due_at?: string;
+  is_timed?: boolean;
+  time_limit_minutes?: number | null;
+  is_major?: boolean;
+  passing_score?: number | null;
 }
 
 export async function createAssignment(
@@ -169,6 +187,15 @@ export async function publishAssignment(assignmentId: string): Promise<Assignmen
   return data.assignment;
 }
 
+export async function unpublishAssignment(assignmentId: string): Promise<Assignment> {
+  const res = await apiFetch(
+    apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/unpublish`),
+    { method: "POST" },
+  );
+  const data = await unwrap<{ assignment: Assignment }>(res, "Failed to unpublish assignment");
+  return data.assignment;
+}
+
 export async function deleteAssignment(assignmentId: string): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}`),
@@ -215,4 +242,55 @@ export async function getMySubmission(assignmentId: string): Promise<Submission 
     "Failed to load your submission",
   );
   return data.submission;
+}
+
+// ---------------------------------------------------------------------------
+// Access grants (A3) — per-student exception/emergency access
+// ---------------------------------------------------------------------------
+
+export interface AccessGrant {
+  id: string;
+  assignment_id: string;
+  user_id: string;
+  extra_attempts: number | null;
+  extended_due_at: string | null;
+  granted_by: string;
+  granted_at: string;
+}
+
+export async function listAccessGrants(assignmentId: string): Promise<AccessGrant[]> {
+  const res = await apiFetch(
+    apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/access-grants`),
+  );
+  const data = await unwrap<{ grants: AccessGrant[] }>(res, "Failed to load access grants");
+  return data.grants;
+}
+
+export async function createAccessGrant(
+  assignmentId: string,
+  payload: { user_id: string; extra_attempts?: number | null; extended_due_at?: string | null },
+): Promise<AccessGrant> {
+  const res = await apiFetch(
+    apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/access-grants`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await unwrap<{ grant: AccessGrant }>(res, "Failed to create access grant");
+  return data.grant;
+}
+
+export async function revokeAccessGrant(
+  assignmentId: string,
+  userId: string,
+): Promise<void> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/access-grants/${encodeURIComponent(userId)}`,
+    ),
+    { method: "DELETE" },
+  );
+  await unwrap<{ ok: boolean }>(res, "Failed to revoke access grant");
 }

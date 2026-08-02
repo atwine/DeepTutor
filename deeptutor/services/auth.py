@@ -159,14 +159,16 @@ def list_users() -> list[dict]:
     return list_user_info(AUTH_USERNAME, AUTH_PASSWORD_HASH)
 
 
-def delete_user(username: str) -> bool:
+async def delete_user(username: str) -> bool:
     """
     Remove a user from the store. Returns True if the user existed.
 
+    Now async because ``identity.delete_user`` sweeps Postgres rows
+    (Enrollment/Submission) for the deleted user — see B5.
     """
     from deeptutor.multi_user.identity import delete_user as _delete_user
 
-    if not _delete_user(username):
+    if not await _delete_user(username):
         return False
     logger.info("User '%s' deleted", username)
     return True

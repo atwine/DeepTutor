@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -58,6 +59,21 @@ class CourseUnit(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     term: Mapped[str] = mapped_column(String, nullable=False, default="")
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # B1: Course start/end dates — nullable so existing units aren't forced to
+    # backfill. Stored as date (not datetime) since course boundaries are
+    # day-granular. When end_date is set, student access to assignments/notes
+    # is blocked after end_date + COURSE_END_GRACE_PERIOD_DAYS (see
+    # course_units.py); instructor/admin archival access is never blocked.
+    start_date: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
+    end_date: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
+    # Round 3: archival. An archived course unit behaves like an expired
+    # course past its grace period for students (blocked from new actions —
+    # see course_units.py's _is_student_access_expired, which now also
+    # checks this flag) while instructor/admin read/manage access is never
+    # blocked, same "archival access never disappears" principle as the
+    # existing grace-period case. Also excludes the unit from a student's
+    # join-a-new-course catalog (see router.py's catalog endpoint).
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     instructors: Mapped[list["CourseUnitInstructor"]] = relationship(
@@ -151,9 +167,24 @@ class Assignment(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
     created_by: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    # A4: timed assignment support — optional countdown for "major" assignments.
+    is_timed: Mapped[bool] = mapped_column(nullable=False, default=False)
+    time_limit_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Round 3: retake policy tied to major/quiz + pass/fail, not just a raw
+    # attempt counter (see assignments.py's get_effective_attempt_limit /
+    # get_retake_block_reason). is_major hard-caps the *effective* attempt
+    # limit at 1 regardless of the stored attempt_limit value — nullable=False
+    # with a default since every assignment needs a definite answer here.
+    # passing_score is a 0-100 percentage; NULL means no pass/fail gating
+    # (current behavior: attempt_limit is the only gate).
+    is_major: Mapped[bool] = mapped_column(nullable=False, default=False)
+    passing_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="assignments")
     submissions: Mapped[list["Submission"]] = relationship(
+        back_populates="assignment", cascade="all, delete-orphan"
+    )
+    access_grants: Mapped[list["AssignmentAccessGrant"]] = relationship(
         back_populates="assignment", cascade="all, delete-orphan"
     )
 
@@ -183,8 +214,101 @@ class Submission(Base):
 
 
 # ---------------------------------------------------------------------------
+# Track A (Round 2) — per-student exception/emergency access
+# ---------------------------------------------------------------------------
+
+
+class AssignmentAccessGrant(Base):
+    """Per-student override for attempt limits and/or due dates on a specific
+    assignment. Created by an instructor when a student has an emergency or
+    needs accommodation — the submit flow checks this grant in addition to
+    the assignment's own limits."""
+
+    __tablename__ = "assignment_access_grants"
+    __table_args__ = (
+        UniqueConstraint(
+            "assignment_id", "user_id", name="uq_access_grant_assignment_user"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: f"aag_{uuid.uuid4().hex}"
+    )
+    assignment_id: Mapped[str] = mapped_column(
+        ForeignKey("assignments.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    # If set, the student gets this many *extra* attempts on top of the
+    # assignment's base attempt_limit. NULL means no extra attempts granted.
+    extra_attempts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # If set, this student's personal deadline (overrides assignment.due_at).
+    # NULL means the assignment's own due_at applies as normal.
+    extended_due_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    granted_by: Mapped[str] = mapped_column(String, nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    assignment: Mapped[Assignment] = relationship(back_populates="access_grants")
+
+
+# ---------------------------------------------------------------------------
 # Track 2 — course_books.py
 # ---------------------------------------------------------------------------
+
+
+class Notification(Base):
+    """Lightweight, polling-based per-course activity feed entry. Created
+    when an instructor publishes something new (an assignment or course
+    notes) so approved-enrolled students can see an alert on the platform.
+
+    Deliberately NOT wired via a decorator/middleware — trigger points call
+    `deeptutor.multi_user.notifications.create_notification()` explicitly,
+    matching this codebase's access-control convention of explicit
+    predicate/helper calls rather than framework magic (see
+    ARCHITECTURE_AND_COMPLETED_WORK.md §7).
+
+    Read/unread state is intentionally NOT a column on this table — see
+    `NotificationRead` below.
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: f"notif_{uuid.uuid4().hex}"
+    )
+    course_unit_id: Mapped[str] = mapped_column(
+        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False
+    )
+    # e.g. "assignment_published" | "notes_published"
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    # Short human-readable line, e.g. "New assignment: Pandas Fundamentals Quiz"
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    # NOTE: DateTime(timezone=True) matches the convention used everywhere
+    # else in this file — a prior round's bug was a naive-vs-aware datetime
+    # mismatch from forgetting this on a new column. Don't repeat it.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class NotificationRead(Base):
+    """Join table tracking which users have read which notification. Marking
+    read is a simple insert (idempotent per user+notification via the unique
+    constraint), not a mutation racing across students reading the same
+    notification concurrently."""
+
+    __tablename__ = "notification_reads"
+    __table_args__ = (
+        UniqueConstraint(
+            "notification_id", "user_id", name="uq_notification_read_notification_user"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: f"nread_{uuid.uuid4().hex}"
+    )
+    notification_id: Mapped[str] = mapped_column(
+        ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
 
 class CourseBookEntry(Base):

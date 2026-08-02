@@ -1199,3 +1199,884 @@ and tests once both are done, and — per standing instruction — nothing gets
 pushed to origin until the repo owner explicitly says so.
 
 — Claude
+
+---
+
+## Track A (Cascade) — Feature Round 2: Assignment Lifecycle & Integrity
+
+**Branch**: `feature-course-mgmt-cascade`  
+**Commit**: `a4c7312`  
+
+### Completed Items
+
+| ID | Feature | Files Changed |
+|----|---------|--------------|
+| A1 | Un-publish assignment (`POST /assignments/{id}/unpublish`) | `assignments.py`, `assignments_router.py`, admin page |
+| A2 | `due_at` enforcement in submit endpoint | `assignments.py` (`check_due_at()`), `assignments_router.py` |
+| A3 | Per-student exception/emergency access | `models.py` (`AssignmentAccessGrant`), `assignments.py` (CRUD + `get_effective_attempt_limit`), `assignments_router.py` (3 new endpoints), `__init__.py` |
+| A4 | Pre-assignment briefing screen + optional timer | `models.py` (`is_timed`, `time_limit_minutes`), student page, `assignments-api.ts` |
+| A5 | Submission confirmation/receipt state | Student page (2s receipt animation before results) |
+| A6 | Small polish (pluralization, button hide, error copy) | Admin page, student page |
+
+### Architecture Decisions
+
+1. **A1 (unpublish)**: Option (a) from plan — existing submissions preserved, no new ones while in draft. Enables question-edit then re-publish flow.
+2. **A2 (due_at)**: Parsed as ISO 8601 via `datetime.fromisoformat()`. Unparseable or empty = no deadline. Timezone-naive input assumed UTC.
+3. **A3 (access grants)**: `AssignmentAccessGrant` table with `(assignment_id, user_id)` unique constraint. `extra_attempts` adds on top of base limit; `extended_due_at` overrides assignment's `due_at`. Upsert semantics via SELECT+UPDATE/INSERT.
+4. **A4 (timer)**: Client-side `setInterval`-based countdown. Auto-submits on expiry. Timer state resets on collapse. Server does not enforce time limit (client-only UX).
+5. **A5 (receipt)**: 2-second green checkmark animation after successful submit, then reveals results.
+6. **A6 (button hide)**: Conditional on `canManage` state inferred from whether the list endpoint returns a 403 error.
+
+### Migration Required
+
+Run `deeptutor/services/db/migrations/002_track_a_assignment_lifecycle.sql` against Postgres before deploying. It is idempotent (`IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`).
+
+### For Track B / Claude (coordination notes)
+
+- `models.py` now has `AssignmentAccessGrant` class + two new columns on `Assignment` (`is_timed`, `time_limit_minutes`). These are purely additive — no existing columns changed.
+- `assignments.py` gained ~150 lines of new functions at the bottom (access grant CRUD + due_at check). The `_UNSET` sentinel and `update_assignment` signature gained `is_timed` and `time_limit_minutes` params.
+- `assignments_router.py` gained 5 new endpoints (unpublish, 3 access-grant CRUD, and the submit flow now calls `check_due_at` + `get_effective_attempt_limit` before the existing attempt-limit logic).
+- Frontend `assignments-api.ts` has new type fields and functions. Both page components have significant additions but no structural breaks.
+
+— Cascade
+
+## 2026-07-31 — Devin — Feature Round 2, Track B done (B1-B6)
+
+**Item**: Feature Round 2, Track B (B1-B6) — course-management gaps.
+**Status**: done.
+**Branch**: `feature-course-mgmt-devin` (worktree off `main` at `1cd9c7c`).
+
+**What changed** (files touched, one line each on the "why"):
+
+- `deeptutor/services/db/models.py` — B1: added nullable `start_date`/`end_date`
+  String columns to `CourseUnit` (date-granular, ISO "YYYY-MM-DD" format).
+- `deeptutor/multi_user/course_units.py` — B1: `COURSE_END_GRACE_PERIOD_DAYS=7`
+  constant, `_is_student_access_expired()` helper (fail-open on unparseable
+  date), `is_approved_student_of()` now blocks expired students (instructor/
+  admin archival access never blocked via `is_instructor_of`/admin role),
+  `create_course_unit`/`update_course_unit` accept `start_date`/`end_date`,
+  `_unit_to_dict` includes the new fields. B2: `request_leave`/
+  `approve_leave`/`reject_leave`/`list_leave_requests_for_course` — new
+  `leave_requested` enrollment status, idempotent request, approve removes
+  Enrollment row but keeps Submission rows for audit. B5: `delete_user_data`
+  sweeps Enrollment + Submission rows for a deleted user (those tables have
+  no FK to users on purpose — identity stays in JSON).
+- `deeptutor/multi_user/identity.py` — B5: `delete_user` is now `async def`
+  and calls `course_units.delete_user_data(user_id)` after removing the JSON
+  record, sweeping orphaned DB rows.
+- `deeptutor/services/auth.py` — B5: `delete_user` wrapper made async to
+  match the new identity.delete_user signature.
+- `deeptutor/api/routers/auth.py` — B5: `await` added to the
+  `delete_user(username)` call in the admin delete-user endpoint.
+- `deeptutor/multi_user/router.py` — B1: `CourseUnitCreate`/`CourseUnitUpdate`
+  Pydantic models gained `start_date`/`end_date`, passed through to storage.
+  B4: `POST /course-units` changed from `require_admin` to
+  `require_instructor_or_admin`; instructor creating a course is auto-added
+  to `instructor_ids` (can't assign to someone else without being on it);
+  admin keeps unrestricted assignment. B2: leave-request endpoints
+  (`POST /course-units/{id}/leave-requests`, `GET .../leave-requests`,
+  `POST .../leave-requests/{user_id}/approve`, `POST .../reject`). B3:
+  `GET /instructor/report` and `GET /instructor/report/export` (CSV) —
+  compiled gradebook across an instructor's units, optional `term` filter,
+  admins can query any instructor via `instructor_id` query param.
+- `deeptutor/multi_user/gradebook.py` — B3: `build_instructor_report
+  (instructor_id, term=None)` reuses `build_gradebook` per unit (no math
+  re-derivation), returns per-unit summaries + totals;
+  `build_instructor_report_csv` exports per-unit sections.
+- `web/lib/course-units-api.ts` — B1: `CourseUnit` type gained
+  `start_date`/`end_date`; `createCourseUnit` accepts/sends them;
+  `updateCourseUnit` type includes them. B2: `requestLeave`/
+  `getLeaveRequests`/`approveLeaveRequest`/`rejectLeaveRequest` client
+  functions; `CatalogCourseUnit.my_status` includes `"leave_requested"`.
+- `web/app/(admin)/admin/course-units/page.tsx` — B1: date inputs in the
+  create/edit form. B4: "New course unit" button shown to instructors (not
+  just admins); instructor form shows auto-add note instead of the admin
+  instructor picker. B6: delete dialog copy now mentions assignments +
+  submissions are also removed (cascade) + archive suggestion; edit form
+  shows "Previously taught by: …" note when reassigning instructors.
+- `web/app/(utility)/courses/page.tsx` — B1: course cards show start/end
+  dates. B2: enrolled students see a "Request to leave" button;
+  "Leave requested" badge shown while awaiting instructor confirmation.
+
+**DB migration**: `ALTER TABLE course_units ADD COLUMN start_date VARCHAR NULL;
+  ALTER TABLE course_units ADD COLUMN end_date VARCHAR NULL;` — run against
+  the live local Postgres. `create_all()` in `scripts/init_db.py` only creates
+  missing tables, so this ALTER was needed for the new B1 columns. Fresh
+  deployments via `init_db.py` will get the columns from the model definition.
+
+**Verified**: ran a throwaway integration test (`tmp_test_track_b.py`, deleted
+  after) against the live local Postgres (`deeptutor-postgres` container,
+  `localhost:5432`) covering B1/B2/B3/B5:
+  - B1: end_date stored; expired student (30 days past end) blocked; active
+    student (1 day before end) has access; no-end-date unit never expires;
+    update_course_unit end_date blocks expired student.
+  - B2: leave requested (status=leave_requested); listed; re-request
+    idempotent; reject reverts to approved; approve removes enrollment.
+  - B3: report has correct units for instructor (excludes other instructors'
+    units); term filter works; gradebook data (students + assignments)
+    included; CSV export contains both units + student data.
+  - B5: enrollment + submission exist before sweep; both gone after
+    `delete_user_data`.
+  Router imports cleanly (26 routes). Frontend `tsc --noEmit` passes with
+  zero errors. B4 and B6 are frontend/route-config changes verified by
+  import + typecheck (no new storage logic to integration-test).
+
+**New findings**: None that change ARCHITECTURE_AND_COMPLETED_WORK.md. The
+  `init_db.py` comment ("Add Alembic the first time this schema needs a real
+  migration against live data") is now relevant — B1's two new columns are
+  the first schema change since the initial `create_all`. Alembic wasn't
+  added in this track (the ALTER was run manually for local dev); a follow-up
+  should add Alembic before the next schema change, especially if there are
+  multiple deployment environments to keep in sync.
+
+**Left for later / handing back**:
+- Alembic migration tooling (see "New findings" above).
+- B2 leave-request UI on the instructor side (roster/requests page) — the
+  backend endpoints + API client functions exist, but the instructor-facing
+  leave-request list/approve/reject UI wasn't built (the student-side
+  "Request to leave" button + "Leave requested" badge are in place).
+- B3 instructor-report frontend page — the backend endpoints + CSV export
+  exist, but no dedicated UI page was built to surface them.
+- The B1 grace-period check is application-level only (no DB-level constraint
+  or scheduled job); a student whose end_date passes mid-session is blocked
+  on their next `is_approved_student_of` check, not proactively.
+
+## 2026-08-02 — Claude — Round 2 merge + regression pass complete
+
+**Item**: `FEATURE_ROUND2_PLAN.md` — merge Track A + Track B, verify live,
+report results. Per the round's explicit ground rules, this is planning +
+merge + test only; all of A1–A6 and B1–B6 above were built by Cascade and
+Devin, not Claude.
+
+**Status**: done.
+
+**What changed**: merged `feature-course-mgmt-cascade` and
+`feature-course-mgmt-devin` into `feature-round2-integration`, both cut from
+`main` at `1cd9c7c`. Two conflicts total, both in this file (both tracks
+appended a "DONE" entry after the same point, same pattern as every prior
+round) — resolved by keeping both entries in full, also fixing an em-dash
+mojibake encoding issue in Devin's entry while resolving. `models.py`
+auto-merged with **zero conflicts** — Track A's `Assignment` additions and
+Track B's `CourseUnit` additions landed in genuinely disjoint sections,
+confirming the file-ownership split in the plan doc held up under a real
+merge, same as the database migration round.
+
+**Verified**: rebuilt the Docker image from the merged branch (clean build,
+confirms both `tsc` and Python imports pass across the combined diff), reset
+the Postgres schema via `scripts/init_db.py` (confirmed the new
+`assignment_access_grants` table and the `is_timed`/`time_limit_minutes`/
+`start_date`/`end_date` columns all landed correctly via `psql \d`), then
+ran a full live regression pass via the browser and direct API calls using
+fresh throwaway accounts (`r2_instr`, `r2_instr_b`, `r2_stud_a`, `r2_stud_b`,
+`r2_throwaway`, all deleted afterward):
+
+- **A1 (unpublish)** — confirmed live in the browser: Publish → Unpublish
+  correctly reverts `published` → `draft` and back, submissions preserved.
+- **A2 (due_at enforcement)** — confirmed via API: a published assignment
+  with a past `due_at` correctly rejects submission (400 "past its due
+  date").
+- **A3 (per-student access grant)** — confirmed via API: the same student
+  blocked by A2 above was unblocked after an instructor granted them an
+  `extended_due_at`; a second, ungranted student on the same assignment
+  stayed correctly blocked (control check).
+- **A4 (pre-assignment briefing + timer)** — confirmed live in the browser
+  end-to-end: briefing screen shows title/weight/attempts/time-limit and an
+  explicit warning, nothing loads until "Start assignment" is clicked, the
+  countdown renders and updates in real time, and it correctly auto-submits
+  (scored 0.0, "no answer" recorded) when the clock hit zero.
+- **A5 (submission receipt)** — confirmed functionally: grading and
+  feedback render correctly after submit; the 2-second receipt animation
+  itself is too fast to reliably catch in a screenshot, not independently
+  re-verified frame-by-frame, but the underlying flow works.
+- **A6 (polish)** — pluralization fix confirmed ("1 question", not "1
+  questions"); the "New assignment" button-hide fix confirmed (an
+  unauthorized instructor viewing another instructor's course no longer
+  sees the button at all). The error-copy unification was **not** done —
+  see New findings below.
+- **B1 (start/end dates + grace period)** — confirmed live: dates render on
+  the student catalog card; a course unit with an `end_date` in
+  2025-06-01 (well past the 7-day grace period) correctly 403s a student
+  ("not enrolled") while the instructor retained full roster access
+  (archival access never blocked, as designed).
+- **B2 (student-initiated leave)** — confirmed via API: student's leave
+  request correctly flips `Enrollment.status` to `leave_requested`, and
+  `GET .../leave-requests` correctly lists it for the instructor. **The
+  instructor-side UI to see/act on it does not exist** — see New findings.
+- **B3 (cross-course report)** — confirmed via API: `GET
+  /instructor/report` correctly compiles both the instructor's active and
+  expired course units, with per-assignment scores and a weighted final
+  grade, excludes other instructors' units. **No frontend page exists** —
+  matches Devin's own log entry, not a new finding.
+- **B4 (instructor self-service course creation)** — confirmed live: a
+  freshly-created instructor has a working "New course unit" button (admin
+  previously had exclusive access to this), and the creating instructor is
+  auto-added to `instructor_ids`.
+- **B5 (user-deletion cascade)** — confirmed via API: created a throwaway
+  student, enrolled them, had them submit an assignment, deleted the
+  account — their `Enrollment` and `Submission` rows were both gone from
+  the roster/submissions views immediately after, no orphaning. This closes
+  the one item in this round closest to an actual pre-existing bug.
+- **B6 (delete-dialog copy)** — confirmed live: the course-unit delete
+  confirmation now correctly mentions assignments/submissions, not just
+  enrollments — see New findings for one side effect of the new copy.
+- **K1 and C1 re-verified on the merged code** (both tracks touched
+  `assignments.py`/`course_units.py` substantially, worth re-confirming
+  these didn't regress): fired two concurrent submits on a fresh 1-attempt
+  free-text assignment — one succeeded, one correctly rejected, exactly one
+  submission recorded (K1 holds). Deleted a course unit with real,
+  graded submissions in it — assignment/submission both cleanly 404 after,
+  instructor's course-unit list stopped showing it immediately, no orphan
+  (C1 holds).
+
+**New findings — four real gaps, none blocking, worth a follow-up pass**:
+1. **A4's timer has no toggle anywhere in the instructor-facing creation
+   form.** `is_timed`/`time_limit_minutes` exist on the model and the
+   student-facing briefing screen correctly renders and enforces them
+   client-side — but there is no checkbox/field in
+   `web/app/(admin)/admin/course-units/[courseUnitId]/assignments/page.tsx`
+   to actually set them. Confirmed by inspecting the live creation dialog
+   (title/description/weight/attempt-limit/due-date/questions only) — the
+   only way to make an assignment timed today is a direct API `PUT` call.
+   This is the most consequential of the four findings — the feature is
+   real and works, it's just unreachable from the UI it was built for.
+2. **A6's error-copy unification wasn't done.** The plan asked for the
+   assignments page's blocked-instructor message to match the gradebook
+   page's "You do not manage this course unit" — confirmed live, the
+   assignments page still says "You are not enrolled in this course unit"
+   (the student-facing message) for the identical blocked-instructor case.
+   Cosmetic, not a security issue — the underlying access control is
+   correct either way.
+3. **B2's instructor-side leave-request UI genuinely doesn't exist**, not
+   just "not yet built" as a caveat — confirmed live by opening the exact
+   roster panel a leave request would need to appear in: it shows the
+   enrolled roster and pending join-requests, with zero mention of the
+   pending leave request that was sitting in the database at the time.
+   Right now a student can request to leave and there is no way for an
+   instructor to discover that request short of an API call — worth
+   prioritizing this specific piece before this ships, since the feature
+   is otherwise invisible/dead from the instructor's side.
+4. **B6's new delete-dialog copy references a feature that doesn't exist.**
+   It now suggests "Consider archiving instead if you need to keep the
+   grade history" — but no archive mechanism exists anywhere in this
+   codebase (confirmed: not mentioned in either track's build notes, no
+   archive-related endpoint or status field anywhere). Minor, but worth
+   either removing that sentence or actually scoping an archive feature
+   before the copy references one.
+
+**Left for later / handing back**: the four findings above, plus everything
+Cascade and Devin already flagged as left for later in their own entries
+(Alembic tooling, B3's frontend page). All test data (5 throwaway accounts,
+3 course units, 6 assignments, their submissions/grants) has been deleted;
+verified the system is back to its pre-test state. Branch
+`feature-round2-integration` is merged locally and ready for review — per
+standing instruction, nothing gets pushed to origin until the repo owner
+explicitly says so.
+
+— Claude
+
+## 2026-08-02 — Claude (Round 3 track) — Assignment UX: results page, retake policy, timer submit
+
+**Item**: Round 3 ask (three items) — a dedicated post-submit results
+page/route, a major/quiz + pass/fail retake policy, and confirming a timed
+assignment's manual "Submit" stays available before the countdown expires.
+Branch: `fix-round3-assignment-ux` (worktree off `feature-round2-integration`).
+Scope was explicitly the three items below — did not touch the two
+separately-logged Round 2 QA gaps mentioned as background context (the
+missing `is_timed` checkbox in the creation form, and the assignments-page
+vs. gradebook-page blocked-instructor error-copy mismatch); both are still
+open, left for whoever picks up that specific follow-up.
+
+**Status**: done.
+
+**What changed**:
+
+1. **Dedicated results page** (new route,
+   `web/app/(utility)/courses/[courseUnitId]/assignments/[assignmentId]/results/page.tsx`):
+   fetches the assignment via the existing `getAssignment` endpoint (which
+   already returns `my_latest_submission` for a student), renders the score
+   plus the same per-question feedback the old inline result showed, plus
+   "Back to assignments" and "Home" links. Extracted the per-question
+   feedback block into a shared `web/components/assignments/ResultView.tsx`
+   (was previously a local function, now used by both this new page and the
+   list page's "revisit a past attempt" view).
+   `web/app/(utility)/courses/[courseUnitId]/assignments/page.tsx`'s
+   `handleSubmit` now does a brief (900ms) receipt flash, then
+   `router.push`'s to the results route instead of swapping a results block
+   into the same page — this applies identically to a manual "Submit" click
+   and the timer's auto-submit on expiry, since both call the same
+   `handleSubmit` (single shared code path, per the item 3 requirement).
+
+2. **Retake policy** (`is_major` / `passing_score`):
+   - `deeptutor/services/db/models.py` — added `is_major: bool` (default
+     `False`) and `passing_score: float | None` (nullable) to the
+     `Assignment` class only, as pure additions near the other Round 2
+     `is_timed`/`time_limit_minutes` columns. No other class in this file
+     touched.
+   - `deeptutor/multi_user/assignments.py` — `create_assignment`/
+     `update_assignment` gained the two params (`passing_score` uses the
+     existing `_UNSET` sentinel pattern, same as `time_limit_minutes`, so
+     `None` can be explicitly set to clear it via PUT).
+     `get_effective_attempt_limit` now hard-caps the effective limit at 1
+     when `is_major` is true, regardless of the stored `attempt_limit`
+     value — deliberately not mutating the stored column, so toggling
+     `is_major` off later doesn't lose whatever attempt count the
+     instructor had configured. New `get_retake_block_reason(assignment,
+     grant, attempts_count, latest_submission)` is the single source of
+     truth for whether a student can submit again, returning `None` or a
+     `(reason_code, message)` tuple with `reason_code` in
+     `{"attempt_limit", "already_passed"}` — used by both the submit
+     endpoint (to reject) and the student-facing assignment view (to
+     explain in advance), so enforcement and UI messaging can't drift
+     apart.
+   - `deeptutor/multi_user/assignments_router.py` — `AssignmentCreate`/
+     `AssignmentUpdate` gained `is_major`/`passing_score`;
+     `create_assignment_endpoint`/`update_assignment_endpoint` pass them
+     through. `_assignment_summary` includes both fields.
+     `get_assignment_endpoint`'s student view now returns the effective
+     `attempt_limit` (via `get_effective_attempt_limit`, folding in the
+     `is_major` cap and any access-grant `extra_attempts`) instead of the
+     raw stored value, plus `retake_blocked_reason` /
+     `retake_blocked_message`. `submit_assignment_endpoint` now calls
+     `get_retake_block_reason` right after computing the effective attempt
+     limit (fail-fast, before the LLM grading call) and rejects with 400 if
+     blocked — this sits alongside (doesn't replace) the existing
+     advisory-lock-guarded `check_attempt_limit`/`create_submission_checked`
+     pair, which remains the concurrency-safe backstop for the plain
+     attempt-limit case (same message text either way, so no user-visible
+     difference — just redundant-but-harmless double-checking under a race).
+   - `web/lib/assignments-api.ts` — `AssignmentSummary`/`AssignmentDraft`
+     gained `is_major`/`passing_score`; `StudentAssignmentView` gained
+     `retake_blocked_reason` (typed `"attempt_limit" | "already_passed" |
+     null`) and `retake_blocked_message`.
+   - `web/app/(admin)/.../assignments/page.tsx` (create form): added a
+     "Retake policy" section — a "Major assignment (no retakes)" checkbox
+     that disables and visually forces the attempt-limit field to 1 (and
+     the submit payload actually sends `attempt_limit: 1` when checked, not
+     just a greyed-out display, so the stored value matches the effective
+     one), and, when not major, a second checkbox to enable a 0-100
+     "Passing score (%)" field. Row captions in the list now show "major
+     (no retakes)" or "passing score N%" alongside the existing question
+     count/weight/attempts caption.
+   - `web/app/(utility)/.../assignments/page.tsx` (student list): revisiting
+     a past attempt now shows the specific block reason
+     (`retake_blocked_reason`) instead of a generic attempts-used line, and
+     — when not blocked — a "Try again" button that resets local state and
+     re-runs the briefing/question flow (this button didn't exist before at
+     all; the previous code always rendered the last result with no way to
+     manually trigger a further attempt through the UI, even when
+     `attempt_limit` was configured above 1 — a pre-existing gap this fix
+     incidentally closes, not something I was told to look for but needed
+     for the new retake policy to be reachable from the UI at all). The
+     pre-assignment briefing screen also now shows "major (no retakes)" or
+     "passing score N%" alongside the existing question-count/weight/
+     attempts/timer info.
+
+3. **Timer + manual submit**: confirmed (no code change needed) that the
+   manual "Submit" button was already rendered unconditionally alongside the
+   countdown display once `started` is true — only `submitting` (mid-request)
+   disables it, never the timer state. Reworded the timed-assignment warning
+   on the briefing screen to say explicitly "You can submit at any time
+   before the timer ends" so this is stated to the student, not just true
+   in the implementation. Auto-submit-on-expiry (`handleStartAssignment`'s
+   `setInterval` calling `void handleSubmit()` at zero) is unchanged and now
+   benefits from the same results-page navigation and retake-policy check as
+   a manual submit, since it's the identical function.
+
+**Verified** (per this track's constraint — no Docker/Postgres, static
+checks only):
+- `deeptutor/services/db/models.py` imports cleanly standalone;
+  `Assignment.__table__.columns.keys()` confirms `is_major`/`passing_score`
+  are present alongside all pre-existing columns, nothing else on the table
+  changed.
+- `deeptutor/multi_user/assignments.py` imports cleanly; manually exercised
+  `get_effective_attempt_limit` and `get_retake_block_reason` with
+  representative dict inputs (is_major cap forces 1 regardless of a higher
+  configured attempt_limit; extra_attempts grant adds correctly for a
+  non-major assignment; passing_score block triggers only when the latest
+  score meets the threshold and is_major is false; attempt_limit block
+  still fires when exhausted) — all four cases returned the expected
+  result.
+- `deeptutor/multi_user/assignments_router.py` does not import cleanly in
+  this static environment — confirmed via `git stash` that this is
+  pre-existing and unrelated to this track's changes: `grading.py` ->
+  `quiz_judge.py` requires a runtime config file (`main.yaml` under
+  `data/user/settings`) that isn't present outside a running deployment;
+  the identical `FileNotFoundError` reproduces on the pre-change file too.
+  Reviewed the router diff by inspection instead (function signatures,
+  sentinel handling, HTTPException paths).
+- Frontend: `npm ci` (no `node_modules` existed in this worktree — installed
+  fresh from the existing `package-lock.json`), then `npx tsc --noEmit`
+  (exit 0, zero errors) and `npx eslint` targeted at all five changed/added
+  frontend files (zero warnings/errors).
+
+**New findings / design calls beyond the explicit spec**:
+- Chose to hard-cap the effective attempt limit for `is_major` rather than
+  overwriting the stored `attempt_limit` column server-side, to avoid
+  silently discarding an instructor's configured value if they later
+  uncheck "Major assignment." The creation-form UI still sends
+  `attempt_limit: 1` on create when the box is checked (so what's stored
+  matches what's effective in the common case), but the server-side
+  `get_effective_attempt_limit` hard cap is the actual guarantee against "no
+  matter what value was configured," including a direct API call that
+  bypasses the form.
+- Deliberately did not let a per-student access-grant's `extra_attempts`
+  override the `is_major` cap — a major/final exam's whole point is "no
+  retakes," and an instructor's own emergency-grant workflow (A3) is a
+  separate, explicit mechanism; silently reopening a major exam via a
+  generic grant felt like the wrong default. Not explicitly specified either
+  way — flagging in case the product owner wants the opposite.
+- Found and fixed, as a necessary complement to the retake-policy work (not
+  separately requested, but the policy would otherwise have no UI-reachable
+  effect for `attempt_limit > 1` cases): the student assignments list page
+  had no "try again" affordance at all before this change — once
+  `my_latest_submission` existed, the UI always rendered that result with no
+  path back to another attempt, even when attempts remained. Added a "Try
+  again" button, gated on the same `retake_blocked_reason` the server
+  computes.
+
+**Left for later / handing back**: live Docker-based regression testing of
+everything in this entry is still needed (per this track's constraint, only
+static checks were run here). See the addendum immediately below — the two
+Round 2 QA gaps mentioned above as "left out of scope" were in fact the
+actual point of this track and have now been fixed; that note was wrong to
+leave as a permanent status and is being corrected here rather than left
+stale.
+
+### Addendum — 2026-08-02 — Claude — the two items above are now done
+
+The coordinator flagged that this track was created specifically to close
+the two Round 2 QA gaps this entry had originally described as background
+context and left untouched. Both are now fixed, same branch, same
+file-ownership rules (only `assignments.py`, `assignments_router.py`,
+`models.py`'s `Assignment` class, and the two assignment page components):
+
+1. **`is_timed`/`time_limit_minutes` UI added to the admin assignment
+   creation form** (there is no separate edit form in this file — creation
+   is the only form that exists, confirmed by grepping for `updateAssignment`
+   usage in `web/app/(admin)/.../assignments/page.tsx`, which found none).
+   Added a "Timing" section — a "Timed assignment" checkbox and, shown only
+   when checked, a "Time limit (minutes)" number field — following the same
+   visual/state pattern as the "Major assignment" retake-policy section
+   added earlier in this track. Both fields are wired into the create
+   payload (`is_timed`, `time_limit_minutes: isTimed ? ... : null`). Also
+   added a "N min timed" fragment to the assignment row's caption line, for
+   parity with the existing major/passing-score captions. The backend
+   (`is_timed`/`time_limit_minutes` columns, `create_assignment`/
+   `update_assignment` params, student briefing screen) already existed
+   from Round 2 and needed no changes — this was purely a missing-UI gap.
+
+2. **Unified the blocked-instructor error copy.** Added
+   `_enrollment_error_detail(current)` to `assignments_router.py`: returns
+   "You do not manage this course unit" (matching the gradebook page's
+   wording exactly) when the caller's role is `admin`/`instructor`, and the
+   previous student-facing "You are not enrolled in this course unit"
+   otherwise. Replaced all four call sites in this file that previously
+   hardcoded the student-facing string regardless of caller role —
+   `list_assignments_endpoint`, `get_assignment_endpoint`,
+   `submit_assignment_endpoint`, and `get_my_submission_endpoint` — with
+   calls to this one helper, so the wording can't drift between endpoints
+   again. Also updated the admin assignments page's A6 "can this user
+   manage this course unit" 403-message sniffing (`load()`'s catch block)
+   to recognize the new "do not manage" substring alongside the old "not
+   enrolled" one it was checking for — that heuristic would otherwise have
+   silently broken (kept showing "New assignment" to a non-managing
+   instructor) the moment the error copy changed underneath it.
+
+**Verified**: `deeptutor/multi_user/assignments_router.py` parses
+(`ast.parse`) cleanly; still doesn't fully `import` in this static
+environment for the same pre-existing, unrelated `main.yaml` config reason
+documented above (reconfirmed unchanged by this addendum's edits — the
+import failure occurs before reaching any of the lines touched here).
+Reviewed the four call sites and the new helper by inspection. Frontend:
+`npx tsc --noEmit` (exit 0) and `npx eslint` targeted at the admin
+assignments page (zero errors/warnings) after both changes.
+
+## 2026-08-02 — Claude (Track C, Round 3) — Per-course notification/activity feed
+
+**Item**: repo owner's ask — students get an alert when their instructor adds
+something new (assignment, notes), scoped to a lightweight polling-based
+activity feed, not real-time/websocket. Built on branch
+`fix-round3-notifications` off `feature-round2-integration`, as the third of
+three parallel agents this round (the other two own `assignments.py` /
+`assignments_router.py` / `course_units.py` / `router.py` and their own
+frontend pages).
+
+**Status**: done, with two hand-off patches for the repo owner to apply at
+merge time (see below) — both are one-liners in files this agent was told
+not to touch directly.
+
+**What changed**:
+
+- `deeptutor/services/db/models.py` — two new, fully independent classes
+  (no existing class touched): `Notification` (`id`, `course_unit_id` FK
+  `ON DELETE CASCADE`, `kind`, `title`, `created_at` as
+  `DateTime(timezone=True)` — double-checked against the prior round's
+  naive/aware datetime bug) and `NotificationRead` (join table:
+  `notification_id`, `user_id`, `read_at`, unique constraint on the pair) —
+  read state is an insert, not a mutation on `Notification` itself, so
+  concurrent students marking the same notification read can't race.
+- `deeptutor/multi_user/notifications.py` (new) — `create_notification()`,
+  `list_notifications_for_user()` (joins through `Enrollment` and re-checks
+  each candidate course unit via the existing `is_approved_student_of()`
+  predicate — imported, not re-derived — so B1's end-date/grace-period
+  expiry is respected the same way it is for assignments/notes), and
+  `mark_notification_read()` (idempotent insert).
+- `deeptutor/multi_user/notifications_router.py` (new) — `GET
+  /notifications` and `POST /notifications/{id}/read`, any authenticated
+  user (an instructor/admin with no enrollments just gets an empty list).
+  Kept out of `router.py` since another agent owns that file this round.
+- `deeptutor/api/main.py` — registered the new router the same way
+  `multi_user_router`/`assignments_router`/`book_access_router` are
+  registered (import + `app.include_router(..., prefix="/api/v1/multi-user",
+  dependencies=_auth)`). **Conflict risk**: this file is not called out as
+  owned by anyone in `ARCHITECTURE_AND_COMPLETED_WORK.md`, but it's a
+  single shared file every router-adding change touches — if either of the
+  other two agents also added a router this round, this will need a manual
+  merge (all three edits are small, additive, non-overlapping blocks, so
+  it should be a trivial resolve, not a real conflict).
+- `deeptutor/multi_user/course_books.py` — one-line trigger inside
+  `set_book_status()`: when `status == "published"`, calls
+  `create_notification(course_unit_id, "notes_published", "New course notes
+  published")` after the status-flip transaction commits. This file was
+  confirmed not owned by another agent this round, so applied directly
+  rather than handed off.
+- `web/lib/notifications-api.ts` (new) — `listNotifications()`,
+  `markNotificationRead()`, matching `assignments-api.ts`'s `unwrap()`
+  pattern.
+- `web/components/sidebar/NotificationBell.tsx` (new) — bell icon + unread
+  badge, dropdown panel (title + relative time), polls `GET /notifications`
+  every 30s, clicking an unread item optimistically marks it read then
+  confirms with the backend. Self-contained — no props needed.
+- `web/components/sidebar/SidebarShell.tsx` — mounted `<NotificationBell />`
+  in both the collapsed rail (below the logo/toggle header) and the
+  expanded header (next to the collapse button). This file wasn't called
+  out as owned by anyone else this round, so edited directly per the task's
+  own instructions — two small, additive JSX insertions plus one import,
+  no existing logic touched.
+
+**Left as hand-off patches (NOT applied — files owned by the other agent this
+round)**:
+
+1. `deeptutor/multi_user/assignments.py` — add near the top imports:
+   ```python
+   from deeptutor.multi_user.notifications import create_notification
+   ```
+   Then in `publish_assignment()` (currently lines ~224-234), after
+   `record.status = "published"` and the `await session.flush()` but before
+   returning, capture `course_unit_id`/`title` off `record` while still
+   inside the `session_scope()` block, then call the notification helper
+   after that block closes (matches the pattern used in
+   `course_books.py`'s `set_book_status()` — notification creation runs in
+   its own transaction, not nested inside the status-flip transaction):
+   ```python
+   async def publish_assignment(assignment_id: str) -> dict[str, Any] | None:
+       async with session_scope() as session:
+           result = await session.execute(
+               select(Assignment).where(Assignment.id == assignment_id)
+           )
+           record = result.scalar_one_or_none()
+           if record is None:
+               return None
+           record.status = "published"
+           await session.flush()
+           course_unit_id, title = record.course_unit_id, record.title
+           payload = _assignment_to_dict(record)
+       await create_notification(course_unit_id, "assignment_published", f"New assignment: {title}")
+       return payload
+   ```
+
+**Verified**: static checks only, per this round's ground rules (no Docker/
+Postgres stood up — three agents in parallel). `python -c "import ast;
+ast.parse(...)"` on every changed/new Python file; live-imported
+`deeptutor.services.db.models` (confirms both new ORM classes construct and
+their table names resolve), `deeptutor.multi_user.notifications` (confirms
+all three functions import cleanly), `deeptutor.multi_user.notifications_router`
+(confirms both routes register: `/notifications` GET,
+`/notifications/{notification_id}/read` POST), and `deeptutor.api.main`
+itself with `DEEPTUTOR_AUTH_ENABLED=false` (confirms the new router is
+actually mounted on the live FastAPI app — `app.routes` shows both new paths
+under `/api/v1/multi-user/...`). `npm ci` + `npx tsc --noEmit` run under
+`web/` (see follow-up note if not finished by report time — first run in
+this worktree, no `node_modules` existed yet).
+
+**New findings**: none — this was pure new-surface work, no existing bugs
+encountered.
+
+**Left for later / handing back**: the two hand-off patches above
+(`assignments.py`'s one-line hook — the other agent or the repo owner should
+apply it), and the `main.py` conflict-risk note. No live regression pass was
+done (explicitly out of scope this round — the repo owner does the
+Docker-based pass after all three tracks merge). Notification "kind" values
+used so far: `"assignment_published"` (not yet wired, pending the hand-off
+patch) and `"notes_published"` (wired live in `course_books.py`). No
+frontend page renders a *full* notifications history — only the dropdown's
+recent list — if that's wanted later, `listNotifications()` already returns
+everything and a dedicated `/notifications` page would just need to render
+the same data without truncation.
+
+## 2026-08-02 — Claude — Round 3: instructor leave-request UI + real archive feature
+
+**Item**: Close the two live-QA gaps found at the end of the Round 2 merge
+pass — (1) B2's leave-request UI genuinely doesn't exist on the instructor
+side, and (2) B6's delete-dialog copy references an "archiving" feature
+that doesn't exist anywhere in the codebase. Branch `fix-round3-archive`,
+cut from `feature-round2-integration`. Scope: `deeptutor/multi_user/
+course_units.py`, `deeptutor/multi_user/router.py`, `deeptutor/services/
+db/models.py` (`CourseUnit` only), `web/app/(admin)/admin/course-units/
+page.tsx` (+ `RosterEditor.tsx`), `web/lib/course-units-api.ts`.
+
+**Status**: both gaps closed.
+
+**Gap 1 — instructor leave-request UI**: the backend
+(`request_leave`/`list_leave_requests_for_course`/`approve_leave`/
+`reject_leave` in `course_units.py`, endpoints already wired in
+`router.py`) and the client functions (`getLeaveRequests`/
+`approveLeaveRequest`/`rejectLeaveRequest` in `course-units-api.ts`) all
+already existed from Round 2 — confirmed by reading the code before
+starting, nothing needed adding on that side. Added a "Pending leave
+requests" section to `RosterEditor.tsx` (same visual pattern as the
+existing "Pending requests" join-approval block, distinct amber→orange
+color to tell the two apart at a glance), loaded alongside the roster and
+join-requests in the same `loadAll()` call. "Confirm leave" calls
+`approveLeaveRequest` (removes the enrollment — matches the existing
+backend semantics, submissions kept for audit); "Keep enrolled" calls
+`rejectLeaveRequest` (reverts status to `approved`).
+
+**Gap 2 — archive feature (new this round)**:
+
+1. `deeptutor/services/db/models.py`: added `CourseUnit.is_archived:
+   Mapped[bool]` (`nullable=False, default=False`) — the only column
+   touched in this file this round, per the 3-way parallel-agent split
+   (two other agents added `Assignment` columns and a new
+   `Notification`/`NotificationRead` pair in the same file, in parallel,
+   on sibling worktrees — confirmed disjoint by only ever touching the
+   `CourseUnit` class).
+2. `course_units.py`: added `archive_course_unit(course_unit_id)` /
+   `unarchive_course_unit(course_unit_id)` — plain flag flips, no cascade
+   to enrollments/assignments/submissions.
+3. **Access-model decision (as instructed, following the repo owner's
+   recommended default unless a strong reason not to — no strong reason
+   found)**: an archived course unit behaves exactly like an existing
+   grace-period-expired course unit for students — blocked from taking new
+   actions (assignments, notes), while instructor/admin roster/gradebook/
+   submission access is never blocked, forever. Implemented by extending
+   the *existing* `_is_student_access_expired()` predicate to also return
+   `True` when `unit.is_archived` is set, rather than writing a second
+   parallel "am I blocked" check — every existing caller of
+   `is_approved_student_of()` (which calls `_is_student_access_expired`
+   internally) picks this up automatically with no call-site changes.
+   Confirmed by reading every caller of `is_approved_student_of` in
+   `assignments.py`/`assignments_router.py`/`book_access_router.py` before
+   relying on this — none of them special-case the grace-period block, so
+   none needed a special case for archival either.
+4. **Catalog / new-enrollment exclusion**: a brand-new
+   `CourseUnitArchivedError` is raised by `request_enrollment()` when a
+   student with *no existing enrollment row* tries to join an archived
+   unit — an existing enrollment (any status: pending/approved/
+   leave_requested) is left untouched and still returned idempotently, so
+   this only blocks genuinely new joins, never disrupts someone already
+   on the roster. `router.py`'s `/enrollment-requests` endpoint catches it
+   and returns 409. Separately, `/course-units/catalog` (the student
+   browse-to-join view) now excludes archived units *unless* the calling
+   student already has some enrollment status on them — so an
+   already-enrolled/pending/leave-requested student still sees the course
+   in their catalog (reading as blocked via the access-model decision
+   above, exactly like an expired course does today), but it's not
+   surfaced as something new to join. This is two independent layers
+   (list-filter + join-time guard) deliberately, in case anything ever
+   calls `request_enrollment` directly without going through the catalog.
+5. `router.py`: `POST /course-units/{id}/archive` and
+   `POST /course-units/{id}/unarchive`, both gated via the existing
+   `_require_course_unit_access` helper (instructor-of-that-unit or
+   admin) — the same predicate the majority of this router's
+   course-unit-scoped endpoints already use. **Note**: this is *not* the
+   same gating `update_course_unit_endpoint`/`delete_course_unit_endpoint`
+   actually use today — those two are hard-coded to `require_admin` only,
+   with no `is_instructor_of` check, which looks like a pre-existing
+   inconsistency against the architecture doc's stated permission model
+   ("Course Units management: instructor — own units only"). Not fixed as
+   part of this round (out of scope, and changing who can edit/delete a
+   course unit is a bigger call than adding a new endpoint) — flagged here
+   in case it's a deliberate restriction rather than an oversight; if it's
+   the latter, this file's new archive endpoints are the template to copy
+   from once it's fixed.
+6. `web/app/(admin)/admin/course-units/page.tsx`: an Archive/Unarchive
+   icon button (lucide `Archive`/`ArchiveRestore`) next to the roster/
+   assignments/gradebook/notes icons on every row — shown to everyone who
+   can see the row at all (admins see every unit; instructors already only
+   ever see their own units in this list via `list_course_units_for_instructor`,
+   so no extra per-row ownership check was needed client-side). The list
+   is split into an always-visible "active" table and a collapsed-by-
+   default "Archived course units (N)" section below it that expands on
+   click — satisfies "clearly discoverable, not hidden" without
+   permanently cluttering the main list. Extracted the row markup into a
+   shared `renderUnitRow()` helper used by both tables instead of
+   duplicating it, since the two tables are otherwise identical apart from
+   which unit list they iterate. The delete-confirmation dialog's copy
+   ("Consider archiving instead…") was left exactly as-is, per the
+   instructions — it's now true.
+7. `web/lib/course-units-api.ts`: `CourseUnit.is_archived: boolean` added
+   to the type; `archiveCourseUnit`/`unarchiveCourseUnit` client functions
+   added. `getLeaveRequests`/`approveLeaveRequest`/`rejectLeaveRequest`
+   were already present from Round 2, confirmed and reused as-is, nothing
+   added there.
+
+**Verified**: `python -c "import ast; ast.parse(...)"` on all three touched
+Python files (syntax-clean), then `python -c "import
+deeptutor.multi_user.router"` — imports cleanly, route count went from 26
+to 28 (the two new archive/unarchive endpoints), confirming no import-time
+errors from the new `CourseUnitArchivedError` import or the `Boolean`
+SQLAlchemy import in `models.py`. Frontend: `npm ci` + `npx tsc --noEmit`
+under `web/` — see result below this entry's timestamp in the actual PR
+notes / commit message; no live Docker/Postgres testing was done, per this
+round's explicit instructions (the repo owner does the live regression
+pass after all three Round 3 tracks merge).
+
+**New findings**:
+- The `update_course_unit_endpoint`/`delete_course_unit_endpoint` gating
+  inconsistency described in item 5 above — worth a real look in a future
+  round, it's a genuine permission-model mismatch against the documented
+  architecture, not something introduced by this round.
+- No Alembic migration added for `is_archived` (matches this round's
+  explicit instructions — `create_all()` will pick up the new column when
+  the schema is reset at merge time, same as prior rounds' new columns).
+
+**Left for later / handing back**:
+- Live Docker/Postgres regression pass (repo owner's explicit call, not
+  done here): create a course unit, archive it, confirm a non-enrolled
+  student can't see/join it via the catalog, confirm an already-enrolled
+  student on it reads as blocked the same way an expired course does,
+  confirm instructor/admin still see full roster/gradebook/submissions,
+  unarchive and confirm access returns.
+- The `update_course_unit`/`delete_course_unit` admin-only gating
+  inconsistency (item 5 above) — not fixed, flagged for a follow-up
+  decision.
+- Nothing else known-incomplete from this round's two gaps — both are
+  fully wired end-to-end (storage → router → client → UI).
+
+— Claude
+
+## 2026-08-02 — Claude — Round 3 merge + regression pass complete
+
+**Item**: merge all three Round 3 tracks (assignment UX, notifications,
+archive/leave-request UI) and verify live. This round was dispatched
+differently from prior rounds: instead of handing off to external Cascade/
+Devin sessions, the repo owner asked Claude to run parallel subagents
+directly, each in its own git worktree off `feature-round2-integration`, on
+branches `fix-round3-assignment-ux`, `fix-round3-notifications`, and
+`fix-round3-archive`. Claude designed the file-ownership split, wrote each
+agent's brief, then merged + tested — the actual implementation was still
+done by the three subagents, not written by Claude directly.
+
+**Status**: done.
+
+**What changed**: merged all three branches into a new
+`feature-round3-integration`, cut from `feature-round2-integration`. Three
+merges, three conflicts total — all three in `DEVIN_LOG.md` (each track
+appended its own entry after the same point), resolved by keeping every
+entry in full, same pattern as every round before this one. **Every other
+file merged with zero conflicts** — `deeptutor/services/db/models.py` in
+particular had three separate agents adding to it in parallel (`Assignment`
+columns, a new `Notification`/`NotificationRead` pair, a `CourseUnit`
+column) and none of them touched a line the others did. The file-ownership
+split held completely.
+
+One hand-off patch required manual application (by design — the
+notifications track couldn't safely edit `assignments.py` itself, since
+another track owned that file this round): added the
+`await create_notification(...)` call inside `publish_assignment()`,
+capturing `course_unit_id`/`title` before the `session_scope()` block closes
+and firing the notification in its own transaction after, matching the
+pattern the notifications track had already used for the course-notes
+trigger in `course_books.py`.
+
+**One correction mid-round**: the assignment-UX agent's first pass skipped
+the two original findings this track existed to fix (the missing
+`is_timed` UI toggle, and the error-copy unification) — its own report said
+so plainly rather than silently omitting them. Sent it back with a specific
+follow-up instruction; it closed both on the second pass, verified again by
+static checks (import/`tsc`), before this merge.
+
+**Verified**: rebuilt the Docker image from the fully-merged branch (clean
+build — confirms Python imports and TypeScript compile across the combined
+diff of all three tracks plus the hand-off patch), reset the Postgres
+schema via `scripts/init_db.py` (confirmed via `psql \d` that
+`course_units.is_archived`, `assignments.is_major`/`passing_score`, and the
+new `notifications`/`notification_reads` tables all landed with correct FKs
+and cascades), then ran a full live regression pass via browser + API with
+fresh throwaway accounts (`r3_instr`, `r3_stud_a`, `r3_stud_b`, all deleted
+afterward):
+
+- **Timer toggle (the original A4 gap)** — confirmed live: the admin
+  assignment form now has a "Timed assignment" checkbox revealing a "Time
+  limit (minutes)" field, alongside a "Major assignment (no retakes)"
+  checkbox and a "Require a passing score to stop retakes" checkbox with a
+  70%-default passing-score field. All three render correctly and disable/
+  reveal each other's dependent fields as expected.
+- **Error-copy unification (the original A6 gap)** — not independently
+  re-tested this pass (the fix was a straightforward string-consolidation
+  behind a new shared helper, reviewed by inspection in the agent's own
+  report); low-risk, didn't re-verify live given everything else this round
+  to cover.
+- **Post-submit results page** — confirmed live end-to-end: submitting an
+  assignment (both a fail and a pass, on two separate assignments)
+  navigates to a dedicated results route showing "Submission received,"
+  score, per-question feedback, and "Back to assignments"/"Home" links —
+  not an inline swap on the same page.
+- **Major vs. quiz retake policy** — confirmed live, all three branches:
+  (1) a quiz with `passing_score=70` — student fails first attempt (0%),
+  results page correctly says "you can try again," retry succeeds and
+  passes; (2) a *different* student passes the same quiz on their **first**
+  attempt with attempts still remaining — a second submit is correctly
+  blocked with "You have already passed this assignment," a distinct
+  message from the attempt-limit case; (3) a major assignment created with
+  `attempt_limit=5` — first attempt fails, second attempt is still blocked
+  ("Attempt limit reached (1)") because `is_major` hard-caps the *effective*
+  limit at 1 server-side regardless of the configured value.
+- **Notifications** — confirmed live end-to-end: publishing the quiz above
+  fired a real notification (`GET /notifications` showed it immediately);
+  the bell icon rendered a red "1" unread badge for the enrolled student,
+  the dropdown showed "New assignment: Retake Policy Quiz — 2m ago,"
+  clicking it marked it read and cleared the badge. Admin (no enrollments)
+  correctly saw a clean "No notifications yet" empty state.
+- **Instructor leave-request UI (the original B2 gap)** — confirmed live:
+  a student's leave request now shows up in the instructor's own roster
+  panel under a new "Pending leave requests" section with "Confirm leave"/
+  "Keep enrolled" actions; confirming cleanly removed the student from the
+  roster with no leftover request or orphaned UI state.
+- **Archive feature (the original B6 gap)** — confirmed live end-to-end:
+  archiving a course unit moved it out of the active list into a collapsed
+  "Archived course units (N)" section with an "Unarchive" action; a
+  still-enrolled student was correctly blocked from the archived course's
+  assignments (403 "not enrolled" — the same code path as the existing
+  grace-period expiry, as designed); the course correctly disappeared from
+  the join-request catalog entirely; the instructor kept full roster
+  access throughout; unarchiving restored student access, confirmed before
+  moving on to the K1/C1 checks below.
+- **K1 and C1 re-verified once more** (this round touched `assignments.py`
+  and `course_units.py` again, on top of everything Round 2 already
+  changed there): fired two concurrent submits on a fresh 1-attempt
+  assignment — one succeeded, one correctly rejected, exactly one
+  submission recorded. Deleted a course unit with real submissions across
+  multiple assignments — everything cascaded cleanly, course-unit list
+  updated immediately, no orphan. Both still hold after three full rounds
+  of changes layered on the same tables.
+
+**New findings**: none beyond what the three tracks already logged
+themselves (the `update_course_unit`/`delete_course_unit` admin-only-gating
+inconsistency the archive track flagged as a pre-existing, out-of-scope
+observation — still open, still just a note, not re-investigated this
+pass).
+
+**Left for later / handing back**: the three git worktrees created for this
+round (`C:\Users\ic\OneDrive\Desktop\DeepTutor-fix-assignments`,
+`-notifications`, `-archive`) are still present on disk with their branches
+intact — safe to remove once the repo owner is comfortable this merge is
+final, not removed automatically as part of this pass. All test data (3
+throwaway accounts, 1 course unit, 3 assignments, their submissions) has
+been deleted; verified the system is back to its pre-test state. Branch
+`feature-round3-integration` is merged locally and ready for review — per
+standing instruction, nothing gets pushed to origin until the repo owner
+explicitly says so.
+
+— Claude

@@ -257,14 +257,28 @@ def get_user_by_id(user_id: str) -> tuple[str, dict[str, Any]] | None:
     return None
 
 
-def delete_user(username: str) -> bool:
+async def delete_user(username: str) -> bool:
+    """Delete a user from the JSON store AND sweep their Postgres rows.
+
+    Now async because it calls ``course_units.delete_user_data()`` to remove
+    orphaned ``Enrollment``/``Submission`` rows — those tables have no FK to
+    a users table on purpose (identity stays in JSON), so without this sweep
+    a deleted user's roster entries and submissions linger forever, breaking
+    gradebook/roster rendering. See B5 in FEATURE_ROUND2_PLAN.md.
+    """
     if not USERS_FILE.exists():
         return False
     users = load_users()
     if username not in users:
         return False
+    # Capture user_id before the record disappears so the DB sweep can run.
+    user_id = str(users[username].get("id") or "")
     users.pop(username, None)
     _write_users(users)
+    if user_id:
+        from .course_units import delete_user_data
+
+        await delete_user_data(user_id)
     return True
 
 

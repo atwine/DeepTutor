@@ -97,7 +97,18 @@ async def set_book_status(book_id: str, status: str) -> dict[str, Any] | None:
             return None
         entry.status = status
         entry.updated_at = now
-    return _entry_to_dict(entry)
+        course_unit_id = entry.course_unit_id
+    result = _entry_to_dict(entry)
+
+    if status == "published":
+        # Notification trigger: alert approved students in this course unit
+        # that new course notes were published. Runs in its own transaction,
+        # after the status flip above has already committed.
+        from deeptutor.multi_user.notifications import create_notification
+
+        await create_notification(course_unit_id, "notes_published", "New course notes published")
+
+    return result
 
 
 async def list_entries_for_course_unit(course_unit_id: str) -> list[dict[str, Any]]:
