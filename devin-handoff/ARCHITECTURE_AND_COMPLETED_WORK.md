@@ -333,6 +333,17 @@ resurrect those specific links.
   meant to persist. See `README.md` in this folder.
 - **Test-then-commit discipline**: create temp accounts/data → verify live (browser or direct
   API calls) → clean up → commit. See `README.md`.
+- **Locking inside an `async def` endpoint**: use `asyncio.Lock`, never `threading.Lock`, for
+  any critical section that has an `await` inside it (an LLM call, another async I/O call).
+  This app runs one event loop on one thread; a second coroutine blocking on an already-held
+  `threading.Lock.acquire()` freezes that thread entirely, including the first coroutine's own
+  pending I/O completion — a guaranteed total deadlock, confirmed live (whole backend
+  unresponsive, container flipped `unhealthy`) when `assignments_router.py`'s attempt-limit fix
+  first shipped with a `threading.Lock` held across `await grade_submission(...)`; fixed to
+  `asyncio.Lock`. The existing `_WRITE_LOCK = threading.Lock()` pattern in `assignments.py`/
+  `course_units.py` is safe *only* because those critical sections are pure synchronous
+  JSON read/write with no `await` inside — don't copy that pattern into a spot that also needs
+  to `await` something inside the lock.
 
 ## 8. File map (most-relevant new/modified files, by area)
 

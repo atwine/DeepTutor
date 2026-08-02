@@ -299,3 +299,91 @@ does.
 Once the audit is done, the two 🐛 bugs (attempt-limit race, `delete_course_unit` cascade) are
 ready to fix directly — the doc has a fix direction for each, no product decision needed
 first.
+
+---
+
+## 2026-08-01 — Cascade — Audit of Claude's edge-case pass + fix K1 + fix C1/C2
+
+**Item**: TODO.md item 3 (edge-case testing) — audit + bug fixes.
+**Status**: done. Audit complete, both 🐛 bugs fixed and verified.
+**What changed**:
+
+### Audit findings
+
+Reviewed Claude's `EDGE_CASE_TESTING.md` pass for gaps as requested:
+
+- **Feedback system × course-unit/assignment interaction**: Not a gap. The response feedback system (`sessions.py` `set_message_feedback` / `list_feedback`) is scoped per-user via `PathService.get_chat_history_db()` — each user has their own `chat_history.db` under `data/users/<uid>/user/`. Feedback is stored on messages in the user's own SQLite store and has no cross-reference to course units or assignments. No isolation issue exists.
+- **Memory / Knowledge Center multi-user isolation**: Not a gap. Memory, knowledge bases, notebook, and all workspace features are isolated via `get_current_path_service()` (`multi_user/paths.py`), which resolves the per-user `PathService` rooted at `data/users/<uid>/` from the request context. Each user's workspace is a separate directory tree. No cross-user data access is possible through the normal request path.
+- **K2 (concurrent enrollment approve/reject)**: Agree with Claude's 🚫 — the enrollment state machine only changes via explicit instructor actions (`approve_enrollment` / `unenroll_student`), both of which are simple last-write-wins JSON updates under `_WRITE_LOCK`. No async yield point exists between read and write, so no race window comparable to K1.
+- **E3 (AI-Judge failure consumes attempt)**: Agree with Claude's ⚠️ assessment. The `_grade_free_text` try/except degrades to 0.0 and the submission is still recorded. This is a fairness gap, not a crash, and a regrade endpoint is a product decision, not a bug fix.
+
+No new rows added to `EDGE_CASE_TESTING.md` — the pass coverage is sound.
+
+### Fix K1 — attempt-limit race condition
+
+`deeptutor/multi_user/assignments_router.py` — added a per-`(assignment_id, user_id)` lock (`_submit_locks` dict + `_get_submit_lock()`) that serializes concurrent submissions for the same student+assignment. The `submit_assignment_endpoint` now holds this lock across the entire check-grade-write flow, so two concurrent submits can't both pass the attempt-count check. A post-grading re-check is also included as a belt-and-suspenders guard. The lock is per-student+assignment, so unrelated students' submissions proceed independently.
+
+### Fix C1+C2 — `delete_course_unit()` cascade
+
+`deeptutor/multi_user/course_units.py` — extended `delete_course_unit()` to cascade-delete assignments, their submissions, and course-books entries for the deleted unit, mirroring the existing enrollment cleanup pattern already in that function. Uses lazy imports of `assignments.py` and `course_books.py` internals to avoid a circular import at module load.
+
+**Verified**: ran a test script in the running container:
+- **Cascade delete**: created a unit with an assignment + submission + course-book entry, deleted the unit, confirmed all three were cascaded (no orphaned assignments, submissions, or book entries remain).
+- **Attempt-limit race**: simulated two concurrent threads submitting to a 1-attempt assignment using the router's lock mechanism — exactly 1 succeeded, 1 was blocked, final submission count = 1.
+- Test data was fully cleaned up by the cascade delete itself (0 leftover units/assignments/books confirmed after the test).
+
+**New findings**: none beyond what Claude's pass already documented.
+**Left for later / handing back**: the two ⚠️ items (C3 — pending requests with zero instructors, E3 — AI-Judge failure consumes attempt) remain flagged but not fixed, as they require product decisions. TODO.md item 3 is now closed.
+
+---
+
+## 2026-08-02 — Claude — CRITICAL: fixed a total-outage deadlock in Devin's K1 fix
+
+**Item**: TODO.md item 3 (edge-case testing) — verifying Devin's fixes before considering the
+item done, per the repo owner's ask to re-verify each round-trip through this handoff.
+**Status**: done. Found and fixed a severe regression in the K1 fix; the underlying race-
+condition fix itself is correct and now verified safe. C1/C2 (cascade delete) verified as-is,
+no changes needed there.
+**What changed**: `deeptutor/multi_user/assignments_router.py` — replaced `threading.Lock`
+with `asyncio.Lock` for the per-`(assignment_id, user_id)` submit lock; `with submit_lock:` →
+`async with submit_lock:`. Removed the now-unnecessary `_submit_locks_guard` (a plain dict
+`.get()`/assignment has no `await` in it, so it's already safe under cooperative scheduling —
+a second guard lock added nothing).
+
+**The bug, precisely**: Devin's original fix held a `threading.Lock` across
+`await grade_submission(...)` (a real LLM call for free-text questions, several seconds).
+`threading.Lock.acquire()` is a blocking C call — when a second coroutine contends for an
+already-held `threading.Lock`, it blocks the **entire OS thread**, not just that coroutine. This
+app runs one event loop on one thread (standard uvicorn), so that thread *is* the event loop.
+Blocking it doesn't just slow the second request down — it means the **first** request's
+pending LLM response can never be delivered either, since delivering it requires the event
+loop to keep running. Two coroutines contending for the same `threading.Lock` across an
+`await` boundary is therefore a **guaranteed total deadlock**, not added latency.
+
+**Confirmed live, not just reasoned about**: reproduced with two concurrent submits to the
+same 1-attempt free-text assignment, plus a third, totally unrelated request fired at the same
+instant. All three hung; the request eventually timed out client-side at 30s. A direct
+`curl` to `/api/v1/health` afterward hung for 15s with no response, and `docker ps` showed
+the container flip to `unhealthy`. **The entire backend was down for every user**, not just
+the two racing requests — had this shipped, any two near-simultaneous submissions to the same
+free-text assignment (a normal double-click, not an attack) would have taken down the whole
+platform. Had to `docker compose restart` to recover.
+
+**Verified after the fix**: identical test — submit1 succeeded in ~8.5s (real LLM latency),
+submit2 correctly got 400 "Attempt limit reached" at almost the same instant submit1's lock
+released, and — the key check — the unrelated request completed in **1.35s**, fully decoupled
+from the two contending submits. Container stayed `healthy` throughout. Re-ran the cascade-
+delete verification too (unrelated to this bug, just re-confirming after the redeploy): deleted
+a unit with a published assignment + submission, both now return a clean 404 instead of being
+orphaned — still correct.
+
+**Why this matters beyond this one fix**: `threading.Lock` (or any blocking primitive) held
+across an `await` point in async code is a systemic footgun, not a one-off mistake — worth
+being alert to in any future fix that adds locking to an `async def` endpoint anywhere in this
+codebase. The existing `_WRITE_LOCK = threading.Lock()` pattern in `assignments.py`/
+`course_units.py` is safe *only* because those critical sections never `await` anything inside
+the `with` block (pure synchronous JSON read/write) — that's the load-bearing distinction, not
+"threading.Lock is wrong," and worth calling out explicitly since it's easy to copy the
+existing `_WRITE_LOCK` pattern into a spot that also happens to need an `await` inside it.
+**Left for later / handing back**: none — both K1 and C1/C2 are now genuinely done and
+verified safe under real concurrency, not just "verified to produce the right HTTP status."

@@ -141,6 +141,36 @@ def delete_course_unit(course_unit_id: str) -> bool:
         }
         if len(remaining) != len(enrollments):
             _write_json(ENROLLMENTS_FILE, remaining)
+        # Cascade: sweep assignments + their submissions and course-books
+        # entries for the deleted unit, so nothing is left orphaned pointing
+        # at a dead course_unit_id. Same pattern as the enrollment cleanup
+        # above — the unit is gone, so anything keyed to it is dead data.
+        from .assignments import ASSIGNMENTS_FILE, SUBMISSIONS_FILE, _load_assignments, _load_submissions
+        from .course_books import COURSE_BOOKS_FILE, _load as _load_course_books
+
+        assignments = _load_assignments()
+        orphaned_assignment_ids = {
+            aid for aid, rec in assignments.items() if rec.get("course_unit_id") == course_unit_id
+        }
+        if orphaned_assignment_ids:
+            remaining_assignments = {
+                aid: rec for aid, rec in assignments.items() if aid not in orphaned_assignment_ids
+            }
+            _write_json(ASSIGNMENTS_FILE, remaining_assignments)
+            submissions = _load_submissions()
+            remaining_submissions = {
+                sid: rec
+                for sid, rec in submissions.items()
+                if rec.get("assignment_id") not in orphaned_assignment_ids
+            }
+            if len(remaining_submissions) != len(submissions):
+                _write_json(SUBMISSIONS_FILE, remaining_submissions)
+        course_books = _load_course_books()
+        remaining_books = {
+            bid: rec for bid, rec in course_books.items() if rec.get("course_unit_id") != course_unit_id
+        }
+        if len(remaining_books) != len(course_books):
+            _write_json(COURSE_BOOKS_FILE, remaining_books)
         return True
 
 

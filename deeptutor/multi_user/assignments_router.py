@@ -7,6 +7,7 @@ in, and an admin can do anything.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -38,6 +39,33 @@ from .gradebook import build_gradebook, build_gradebook_csv
 from .identity import get_user_by_id
 
 router = APIRouter()
+
+# Per-(assignment_id, user_id) lock to serialize concurrent submissions for the
+# same student+assignment, preventing the race where two near-simultaneous
+# submits both pass the attempt-count check before either writes.
+#
+# Must be ``asyncio.Lock``, not ``threading.Lock``: the submit flow holds this
+# lock across ``await grade_submission(...)`` (a real LLM call for free-text
+# questions). A ``threading.Lock`` blocks the OS thread on contention — and
+# since this app runs one event loop on one thread, a second coroutine
+# blocking on ``threading.Lock.acquire()`` freezes that thread entirely,
+# which means the first coroutine's own pending LLM response can never be
+# delivered to let it finish and release the lock. That's a total, permanent
+# deadlock (confirmed live: the whole backend became unresponsive to even a
+# health check), not just added latency. ``asyncio.Lock`` is itself
+# awaitable, so a contended waiter yields to the event loop instead of
+# blocking it. Dict creation below has no ``await`` in it, so it's safe
+# without a separate guard lock — coroutines only interleave at await points.
+_submit_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_submit_lock(assignment_id: str, user_id: str) -> asyncio.Lock:
+    key = f"{assignment_id}:{user_id}"
+    lock = _submit_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _submit_locks[key] = lock
+    return lock
 
 
 class QuestionPayload(BaseModel):
@@ -250,23 +278,40 @@ async def submit_assignment_endpoint(
     if not is_approved_student_of(user_id, course_unit_id):
         raise HTTPException(status_code=403, detail="You are not enrolled in this course unit")
 
-    already = count_submissions(assignment_id, user_id)
-    if already >= assignment["attempt_limit"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Attempt limit reached ({assignment['attempt_limit']}).",
-        )
+    # Hold a per-student+assignment lock across grading + write so two
+    # concurrent submits can't both pass the attempt-count check. The lock is
+    # only held for this student's submission flow — other students' submits
+    # and all unrelated writes proceed independently.
+    submit_lock = _get_submit_lock(assignment_id, user_id)
+    async with submit_lock:
+        already = count_submissions(assignment_id, user_id)
+        if already >= assignment["attempt_limit"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Attempt limit reached ({assignment['attempt_limit']}).",
+            )
 
-    answers = [a.model_dump() for a in payload.answers]
-    question_results, score, max_score = await grade_submission(assignment, answers)
-    record = create_submission(
-        assignment_id,
-        user_id,
-        answers=answers,
-        question_results=question_results,
-        score=score,
-        max_score=max_score,
-    )
+        answers = [a.model_dump() for a in payload.answers]
+        question_results, score, max_score = await grade_submission(assignment, answers)
+
+        # Re-check after grading: the attempt count can't have changed during
+        # grading since we hold the lock, but this guards against any path that
+        # bypasses the lock (e.g. a future code change or a manual DB write).
+        already_after = count_submissions(assignment_id, user_id)
+        if already_after >= assignment["attempt_limit"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Attempt limit reached ({assignment['attempt_limit']}).",
+            )
+
+        record = create_submission(
+            assignment_id,
+            user_id,
+            answers=answers,
+            question_results=question_results,
+            score=score,
+            max_score=max_score,
+        )
     return {"submission": record}
 
 
