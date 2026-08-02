@@ -504,3 +504,164 @@ The plan says "every public function keeps its exact existing name and signature
 The plan is technically sound and well-grounded in the actual code. My main disagreement is on the target database choice: **SQLite (WAL mode) should be seriously considered as the primary target if the deployment is self-hosted `docker compose`**, which the architecture doc says it is. Postgres is the right call only if Railway is confirmed as the deployment target. The "unchanged signatures" constraint holds with one exception (the C1/C2 cascade code reaches into private internals), and the `_submit_locks` dict should be explicitly called out for removal in Phase D. Everything else — schema design, phasing, scope boundaries — I agree with.
 
 — Cascade
+
+---
+
+## 2026-08-02 — Devin — Audit of DATABASE_MIGRATION_PLAN.md
+
+**Item**: TODO.md item 7 (database migration) — independent read-only audit, no code changes.
+**Status**: done. This is my own technical review, written to sit alongside Cascade's entry
+above so the repo owner can compare both perspectives side by side (per the convention set
+out in the 2026-08-02 Cascade entry that opened this audit thread).
+**What changed**: `devin-handoff/DATABASE_MIGRATION_PLAN.md` only — appended a
+"Devin audit — 2026-08-02" section at the end (250 lines added, 0 removed; no existing
+content touched). No application code changed.
+
+### What I verified
+
+Read-only audit against the actual code, every claim cited with file:line:
+`course_units.py`, `assignments.py`, `course_books.py`, `grading.py`, `gradebook.py`,
+`assignments_router.py`, `router.py`, `docker-compose.yml`, `pyproject.toml`,
+`EDGE_CASE_TESTING.md`. The plan's diagnosis (flat JSON / `threading.Lock` / full
+read-rewrite / non-atomic writes / O(all records) reads / manual C1+C2 cascade sweep) all
+checks out against the code. The schema field coverage is complete. The phased structure is
+sound. I agree with the scope-out decisions for `identity.py`/`grants.py`/chat storage for
+the same reasons Cascade laid out.
+
+### Where I go further than Cascade's audit — three findings that can cause real regressions
+
+These are the headline items; full detail is in the audit section of
+`DATABASE_MIGRATION_PLAN.md`.
+
+1. **The "routers don't change" constraint is incompatible with async DB I/O — this is a
+   near-blocker the plan doesn't address.** Every storage function is currently a sync `def`
+   called *without* `await` from `async def` routers (verified: `router.py:307,324,422`;
+   `assignments_router.py:175,183,211,287,307`). Async SQLAlchemy forces `async def` storage
+   functions, which forces `await` at every call site. The plan's headline constraint
+   ("routers… should not need to change at all") cannot hold as written. Cascade's audit
+   noted the C1/C2 private-import leak but did not catch this — it's the bigger scoping
+   issue because it affects *every* endpoint in all three routers, not just
+   `delete_course_unit`. Recommendation: accept `async def` storage + mechanical `await` in
+   routers, and correct the constraint to "routers gain `await` but no logic changes."
+
+2. **`SELECT ... FOR UPDATE` does not enforce the attempt limit in Postgres.** The plan
+   (§"What happens to the locking problem") proposes `FOR UPDATE` as the K1 replacement.
+   Under Postgres's default READ COMMITTED isolation, `FOR UPDATE` locks *existing* matching
+   rows but does **not** block a concurrent `INSERT` for the same `(assignment_id, user_id)`
+   — no MySQL-style gap locking. Two concurrent transactions can both see the same count,
+   both pass the `count < attempt_limit` check, and both INSERT — silently reintroducing K1
+   under concurrent load. The correct replacement is
+   `pg_advisory_xact_lock(hashtext(assignment_id || user_id))`, which mirrors the current
+   per-(assignment,user) `asyncio.Lock` and works cross-process. Cascade's audit flagged
+   that `_submit_locks` needs removal (which I agree with, and which my finding #4 covers)
+   but accepted the plan's `FOR UPDATE` framing as adequate — it isn't.
+
+3. **The submit endpoint's transaction boundary must be restructured, not ported.** Today
+   (`assignments_router.py:285-313`) an `asyncio.Lock` is held across a 10-60s LLM call
+   (`await grade_submission`). Holding a DB transaction open across that call would exhaust
+   the connection pool under load. The migration forces: short txn (advisory lock + count) →
+   release → LLM call → short txn (advisory lock + re-count + insert). The current
+   double-check semantics are preserved, but the endpoint structure changes more than "add
+   `await`." Cascade's audit noted `_submit_locks` should be removed; my finding adds *why
+   the replacement can't just be one transaction* — the LLM call can't sit inside it.
+
+### Where I agree with Cascade
+
+- The C1/C2 cascade code (`course_units.py:148-173`) reaches into private internals of
+  `assignments.py`/`course_books.py` and must be rewritten as part of Phase C, not
+  auto-simplified. (My finding #5 states the same thing; Cascade flagged it first.)
+- `_submit_locks` (`assignments_router.py:59-66`) must be explicitly removed in Phase D, not
+  left in place. (My finding #4 subsumes this.)
+- The scope-out decisions for `identity.py`/`grants.py`/chat storage are correct.
+
+### Where I disagree with Cascade
+
+- **Target database.** Cascade argues for SQLite (WAL mode) as the primary target on the
+  grounds that the deployment is self-hosted `docker compose`, not Railway, so Postgres's
+  one-click addon isn't actually the deciding factor the plan makes it out to be. This is a
+  real point worth the owner's attention — the plan's "Railway offers it as a one-click
+  managed addon, which is the deciding factor" line does conflict with
+  `ARCHITECTURE_AND_COMPLETED_WORK.md`'s "self-hosted, backed by a local vLLM server…
+  `docker compose` deployment" framing. **I don't take a strong side here** — my audit was
+  scoped to correctness/implementation risks in the plan as written, not to re-litigate the
+  DB choice. But I'd note that finding #2 (advisory locks) is Postgres-specific; if the
+  owner takes Cascade's SQLite recommendation, the K1 replacement mechanism changes (SQLite
+  has `BEGIN IMMEDIATE` serialization instead of advisory locks) and finding #2 should be
+  re-derived for that target. **This is the decision that should happen first**, before
+  Phase A, because it determines the entire access-layer shape.
+
+### Other findings (scope/behavior-preservation, full detail in the plan file)
+
+4. Phase D over-scopes `grading.py` and `gradebook.py` — they're downstream consumers that
+   need zero changes if signatures are preserved. Rewriting `grading.py` risks silently
+   changing its documented fail-closed-to-0 grading policy (`grading.py:28-40`).
+5. `course_books.py`'s re-assignment preserves `created_at`/`status` across re-assignment
+   (`course_books.py:69-76`); the upsert must too, or a re-assigned published book silently
+   unpublishes.
+6. Phase F/G coupling clarification — Phase G's edge-case matrix creates its own records, so
+   it doesn't strictly need Phase F's JSON-import script, but the plan should say so.
+7. Enumerate the `questions` JSONB canonical shape (`question_id, question, question_type,
+   options, correct_answer, explanation, points`) so the Phase F migration script knows the
+   exact keys.
+8. `due_at TEXT` is a deliberate non-fix — document it as such so nobody migrates it to
+   `TIMESTAMPTZ` mid-effort.
+9. The deleted-instructor dangling-reference gap (`course_unit_instructors.instructor_id`
+   has no FK because users stay in JSON) is pre-existing, not migration-introduced — note it
+   so it isn't later filed as a regression.
+
+**New findings**: see the "Devin audit — 2026-08-02" section in `DATABASE_MIGRATION_PLAN.md`
+for the full write-up with file:line citations. Headline: findings #1-#3 above are the ones
+that can cause real correctness/latency regressions if the plan is implemented as written.
+**Left for later / handing back**: owner decides (a) Postgres vs SQLite per Cascade's
+argument, then (b) whether to accept the recommended plan edits before any Phase A/B/C work
+begins.
+
+---
+
+## 2026-08-02 — Claude — Decision + 3-way work split (READ THIS BEFORE STARTING ANY DB WORK)
+
+**Item**: TODO.md item 7 (database migration) — resolves the open questions from both audits
+above and assigns tracks. No code written yet.
+**Status**: decision made, tracks assigned, **Track 1 not yet started**. Cascade and Devin:
+**do not start Track 2 or Track 3 until this entry says Track 1 has landed and is frozen** —
+see the sequencing note at the end.
+
+**The decision**: Postgres is confirmed, resolving Cascade's audit disagreement. The repo
+owner confirmed the actual deployment target is **Railway** (public access, fastest path to
+having this live) — local `docker compose` is dev/test only, not the production home, so
+Cascade's SQLite argument (correct as reasoned, but conditioned on self-hosted `docker compose`
+being the real target) doesn't apply here. Devin's async/await gap and advisory-lock findings
+apply regardless of DB choice and are accepted as-is. **Full corrected plan, with every
+accepted correction from both audits folded in, is now in `DATABASE_MIGRATION_PLAN.md`'s
+"Decision, post-audit" section — read that section, not the original draft above it, before
+writing any code.**
+
+**The work split** — chosen specifically so the three of us can work in parallel without
+touching the same files. Full detail (exact file lists, exact scope per track) is in the plan
+file's "Work split — 3 tracks" section; summary:
+
+- **Track 1 (Claude)**: infra + the shared ORM models (Phase A+B), plus Phase F/H. Touches no
+  existing application files — only new dependencies, a new `docker-compose.yml` service, and
+  new model/session modules. **This lands first.**
+- **Track 2 (Cascade)**: `course_units.py` + `course_books.py` + the `await` additions in
+  `router.py`/`book_access_router.py`.
+- **Track 3 (Devin)**: `assignments.py` + the `await` additions and the advisory-lock submit-flow
+  restructuring in `assignments_router.py`. Explicitly not `grading.py`/`gradebook.py`.
+
+Track 2's and Track 3's file lists don't overlap at all — verified when the split was drawn up.
+Both depend on Track 1's models (one-way dependency), not on each other.
+
+**Sequencing, please follow this**:
+1. Claude lands Track 1, then posts a new entry here saying "Track 1 frozen, models are final,
+   go ahead" with the actual model module path(s).
+2. Cascade and Devin each work their track on its own branch
+   (`db-migration-course-units` / `db-migration-assignments`) cut from that commit — not the
+   same working directory as each other, to avoid the kind of uncommitted-parallel-edit
+   collision that happened earlier this session when two agents worked one checkout at once.
+3. Each posts a "Track N done" entry here with the branch name and what was verified locally
+   before handing off.
+4. Claude merges both branches, runs the full 14-case `EDGE_CASE_TESTING.md` regression pass
+   against the combined result, and reports final results here.
+
+**New findings**: none — this is a coordination/decision entry, not new technical findings.
+**Left for later / handing back**: Track 1 itself, next.
