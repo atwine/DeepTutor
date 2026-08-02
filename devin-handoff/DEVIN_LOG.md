@@ -1061,3 +1061,43 @@ pass; worth a follow-up sweep if time allows before Railway deployment, but
 none of them touch code this migration changed.
 
 — Claude
+
+---
+
+## Track A (Cascade) — Feature Round 2: Assignment Lifecycle & Integrity
+
+**Branch**: `feature-course-mgmt-cascade`  
+**Commit**: `a4c7312`  
+
+### Completed Items
+
+| ID | Feature | Files Changed |
+|----|---------|--------------|
+| A1 | Un-publish assignment (`POST /assignments/{id}/unpublish`) | `assignments.py`, `assignments_router.py`, admin page |
+| A2 | `due_at` enforcement in submit endpoint | `assignments.py` (`check_due_at()`), `assignments_router.py` |
+| A3 | Per-student exception/emergency access | `models.py` (`AssignmentAccessGrant`), `assignments.py` (CRUD + `get_effective_attempt_limit`), `assignments_router.py` (3 new endpoints), `__init__.py` |
+| A4 | Pre-assignment briefing screen + optional timer | `models.py` (`is_timed`, `time_limit_minutes`), student page, `assignments-api.ts` |
+| A5 | Submission confirmation/receipt state | Student page (2s receipt animation before results) |
+| A6 | Small polish (pluralization, button hide, error copy) | Admin page, student page |
+
+### Architecture Decisions
+
+1. **A1 (unpublish)**: Option (a) from plan — existing submissions preserved, no new ones while in draft. Enables question-edit then re-publish flow.
+2. **A2 (due_at)**: Parsed as ISO 8601 via `datetime.fromisoformat()`. Unparseable or empty = no deadline. Timezone-naive input assumed UTC.
+3. **A3 (access grants)**: `AssignmentAccessGrant` table with `(assignment_id, user_id)` unique constraint. `extra_attempts` adds on top of base limit; `extended_due_at` overrides assignment's `due_at`. Upsert semantics via SELECT+UPDATE/INSERT.
+4. **A4 (timer)**: Client-side `setInterval`-based countdown. Auto-submits on expiry. Timer state resets on collapse. Server does not enforce time limit (client-only UX).
+5. **A5 (receipt)**: 2-second green checkmark animation after successful submit, then reveals results.
+6. **A6 (button hide)**: Conditional on `canManage` state inferred from whether the list endpoint returns a 403 error.
+
+### Migration Required
+
+Run `deeptutor/services/db/migrations/002_track_a_assignment_lifecycle.sql` against Postgres before deploying. It is idempotent (`IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`).
+
+### For Track B / Claude (coordination notes)
+
+- `models.py` now has `AssignmentAccessGrant` class + two new columns on `Assignment` (`is_timed`, `time_limit_minutes`). These are purely additive — no existing columns changed.
+- `assignments.py` gained ~150 lines of new functions at the bottom (access grant CRUD + due_at check). The `_UNSET` sentinel and `update_assignment` signature gained `is_timed` and `time_limit_minutes` params.
+- `assignments_router.py` gained 5 new endpoints (unpublish, 3 access-grant CRUD, and the submit flow now calls `check_due_at` + `get_effective_attempt_limit` before the existing attempt-limit logic).
+- Frontend `assignments-api.ts` has new type fields and functions. Both page components have significant additions but no structural breaks.
+
+— Cascade
