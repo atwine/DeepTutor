@@ -21,17 +21,24 @@ from deeptutor.api.routers.auth import (
 
 from .assignments import (
     check_attempt_limit,
+    check_due_at,
     count_submissions,
     create_assignment,
     create_submission_checked,
     delete_assignment,
+    get_access_grant,
     get_assignment,
+    get_effective_attempt_limit,
     get_latest_submission,
+    list_access_grants_for_assignment,
     list_assignments_for_course,
     list_submissions_for_assignment,
     public_question_view,
     publish_assignment,
+    revoke_access_grant,
+    unpublish_assignment,
     update_assignment,
+    upsert_access_grant,
 )
 from .course_units import get_course_unit, is_approved_student_of, is_instructor_of
 from .grading import grade_submission
@@ -58,6 +65,8 @@ class AssignmentCreate(BaseModel):
     weight: float = 1.0
     attempt_limit: int = 1
     due_at: str = ""
+    is_timed: bool = False
+    time_limit_minutes: int | None = None
 
 
 class AssignmentUpdate(BaseModel):
@@ -67,6 +76,8 @@ class AssignmentUpdate(BaseModel):
     weight: float | None = None
     attempt_limit: int | None = None
     due_at: str | None = None
+    is_timed: bool | None = None
+    time_limit_minutes: int | None = None
 
 
 class AnswerPayload(BaseModel):
@@ -108,6 +119,8 @@ def _assignment_summary(assignment: dict[str, Any]) -> dict[str, Any]:
         "weight": assignment["weight"],
         "attempt_limit": assignment["attempt_limit"],
         "due_at": assignment["due_at"],
+        "is_timed": assignment.get("is_timed", False),
+        "time_limit_minutes": assignment.get("time_limit_minutes"),
         "question_count": len(assignment.get("questions", [])),
         "created_at": assignment["created_at"],
     }
@@ -132,6 +145,8 @@ async def create_assignment_endpoint(
         attempt_limit=payload.attempt_limit,
         due_at=payload.due_at,
         created_by=current.user_id,
+        is_timed=payload.is_timed,
+        time_limit_minutes=payload.time_limit_minutes,
     )
     return {"assignment": record}
 
@@ -194,6 +209,7 @@ async def update_assignment_endpoint(
 ) -> dict[str, Any]:
     assignment = await _get_assignment_or_404(assignment_id)
     await _require_manage_access(current, assignment)
+    from .assignments import _UNSET
     try:
         record = await update_assignment(
             assignment_id,
@@ -205,6 +221,12 @@ async def update_assignment_endpoint(
             weight=payload.weight,
             attempt_limit=payload.attempt_limit,
             due_at=payload.due_at,
+            is_timed=payload.is_timed,
+            time_limit_minutes=(
+                payload.time_limit_minutes
+                if "time_limit_minutes" in payload.model_fields_set
+                else _UNSET
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -223,6 +245,19 @@ async def publish_assignment_endpoint(
     if not assignment.get("questions"):
         raise HTTPException(status_code=400, detail="Add at least one question before publishing")
     record = await publish_assignment(assignment_id)
+    return {"assignment": record}
+
+
+@router.post("/assignments/{assignment_id}/unpublish")
+async def unpublish_assignment_endpoint(
+    assignment_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """Revert a published assignment to draft. Existing submissions are
+    preserved; no new submissions accepted while in draft."""
+    assignment = await _get_assignment_or_404(assignment_id)
+    await _require_manage_access(current, assignment)
+    record = await unpublish_assignment(assignment_id)
     return {"assignment": record}
 
 
@@ -251,23 +286,27 @@ async def submit_assignment_endpoint(
     if not await is_approved_student_of(user_id, course_unit_id):
         raise HTTPException(status_code=403, detail="You are not enrolled in this course unit")
 
-    # The submit flow is restructured, not mechanically ported from the old
-    # asyncio.Lock version. The attempt-limit guard is now two short Postgres
-    # transactions with a `pg_advisory_xact_lock` per (assignment, student),
-    # with the LLM grading call BETWEEN them holding no DB resources:
+    # A2/A3: check per-student access grant for deadline extension and extra
+    # attempts before proceeding with the submit flow.
+    grant = await get_access_grant(assignment_id, user_id)
+
+    # A2: due_at enforcement — reject if past deadline (respects per-student
+    # extended_due_at from an access grant).
+    try:
+        check_due_at(assignment, grant)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # A3: effective attempt limit — base + extra_attempts from grant.
+    attempt_limit = get_effective_attempt_limit(assignment, grant)
+
+    # The submit flow uses two short Postgres transactions with
+    # `pg_advisory_xact_lock` per (assignment, student), with the LLM grading
+    # call BETWEEN them holding no DB resources:
     #
     #   txn1: advisory_lock + count → raise if >= limit (fail-fast) → release
     #   LLM: await grade_submission(...) — no transaction/lock held
     #   txn2: advisory_lock + re-count + insert → raise if >= limit → release
-    #
-    # This is correct across multiple app processes (the old in-process
-    # `asyncio.Lock` dict was not) and doesn't hold a DB connection across the
-    # 10-60s LLM call (which would exhaust the pool under load). The advisory
-    # lock in txn2 is the real guard: it serializes the count-check + insert
-    # so two concurrent submits can't both pass. See DATABASE_MIGRATION_PLAN.md
-    # "Decision, post-audit" §3 and assignments.py's
-    # `check_attempt_limit`/`create_submission_checked` docstrings.
-    attempt_limit = assignment["attempt_limit"]
     try:
         await check_attempt_limit(assignment_id, user_id, attempt_limit)
     except ValueError as exc:
@@ -359,3 +398,63 @@ async def export_gradebook_csv_endpoint(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{safe_name}.csv"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Access grants (A3) — per-student exception/emergency access endpoints
+# ---------------------------------------------------------------------------
+
+
+class AccessGrantPayload(BaseModel):
+    user_id: str
+    extra_attempts: int | None = None
+    extended_due_at: str | None = None
+
+
+@router.get("/assignments/{assignment_id}/access-grants")
+async def list_access_grants_endpoint(
+    assignment_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """List all per-student access grants for an assignment."""
+    assignment = await _get_assignment_or_404(assignment_id)
+    await _require_manage_access(current, assignment)
+    grants = await list_access_grants_for_assignment(assignment_id)
+    return {"grants": grants}
+
+
+@router.post("/assignments/{assignment_id}/access-grants")
+async def create_access_grant_endpoint(
+    assignment_id: str,
+    payload: AccessGrantPayload,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """Create or update a per-student access grant (extra attempts and/or
+    extended deadline) for a specific student on this assignment."""
+    assignment = await _get_assignment_or_404(assignment_id)
+    await _require_manage_access(current, assignment)
+    if get_user_by_id(payload.user_id) is None:
+        raise HTTPException(status_code=404, detail="Student not found")
+    grant = await upsert_access_grant(
+        assignment_id,
+        payload.user_id,
+        extra_attempts=payload.extra_attempts,
+        extended_due_at=payload.extended_due_at,
+        granted_by=current.user_id,
+    )
+    return {"grant": grant}
+
+
+@router.delete("/assignments/{assignment_id}/access-grants/{user_id}")
+async def revoke_access_grant_endpoint(
+    assignment_id: str,
+    user_id: str,
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """Revoke a per-student access grant."""
+    assignment = await _get_assignment_or_404(assignment_id)
+    await _require_manage_access(current, assignment)
+    removed = await revoke_access_grant(assignment_id, user_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="No access grant found for this student")
+    return {"ok": True}

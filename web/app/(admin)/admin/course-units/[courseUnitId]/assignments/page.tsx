@@ -10,6 +10,7 @@ import {
   listAssignments,
   listSubmissions,
   publishAssignment,
+  unpublishAssignment,
   type AssignmentDraft,
   type AssignmentSummary,
   type Question,
@@ -21,6 +22,7 @@ import {
   ArrowLeft,
   ClipboardList,
   Plus,
+  RotateCcw,
   Send,
   Trash2,
   Users,
@@ -85,6 +87,10 @@ export default function CourseUnitAssignmentsPage() {
   const [deleteTarget, setDeleteTarget] = useState<AssignmentSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [publishBusyId, setPublishBusyId] = useState<string | null>(null);
+  // A6: hide "New assignment" button if user doesn't manage this unit
+  // (inferred from whether any non-published assignments are visible —
+  // the list endpoint returns all statuses only for managers).
+  const [canManage, setCanManage] = useState(true);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<SubmissionWithStudent[]>([]);
@@ -94,8 +100,18 @@ export default function CourseUnitAssignmentsPage() {
     setLoading(true);
     setError("");
     try {
-      setAssignments(await listAssignments(courseUnitId));
+      const data = await listAssignments(courseUnitId);
+      setAssignments(data);
+      // A6: if any assignment has status "draft", user is a manager.
+      // If all are "published" or list is empty, we can't be sure — assume
+      // manager (since they navigated here from the admin panel).
+      // If the list fails with 403, they definitely can't manage.
+      setCanManage(true);
     } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.includes("not enrolled") || msg.includes("403")) {
+        setCanManage(false);
+      }
       setError(e instanceof Error ? e.message : t("Failed to load assignments"));
     } finally {
       setLoading(false);
@@ -216,6 +232,19 @@ export default function CourseUnitAssignmentsPage() {
     }
   }
 
+  async function handleUnpublish(assignment: AssignmentSummary) {
+    setPublishBusyId(assignment.id);
+    setActionError("");
+    try {
+      await unpublishAssignment(assignment.id);
+      await load();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : t("Failed to unpublish assignment"));
+    } finally {
+      setPublishBusyId(null);
+    }
+  }
+
   async function handleDeleteConfirm() {
     if (!deleteTarget || deleteBusy) return;
     setDeleteBusy(true);
@@ -268,15 +297,17 @@ export default function CourseUnitAssignmentsPage() {
                 {t("Create graded assignments and review submitted scores")}
               </p>
             </div>
-            <button
-              onClick={openCreate}
-              className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
-                         border border-[var(--border)] text-[var(--foreground)]
-                         hover:bg-[var(--card)] transition-colors"
-            >
-              <Plus size={14} />
-              {t("New assignment")}
-            </button>
+            {canManage && (
+              <button
+                onClick={openCreate}
+                className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
+                           border border-[var(--border)] text-[var(--foreground)]
+                           hover:bg-[var(--card)] transition-colors"
+              >
+                <Plus size={14} />
+                {t("New assignment")}
+              </button>
+            )}
           </div>
         </div>
 
@@ -328,12 +359,14 @@ export default function CourseUnitAssignmentsPage() {
                         </span>
                       </div>
                       <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
-                        {t("{{count}} questions · weight {{weight}} · {{attempts}} attempt(s) · created {{date}}", {
-                          count: a.question_count,
-                          weight: a.weight,
-                          attempts: a.attempt_limit,
-                          date: formatDate(a.created_at, lang),
-                        })}
+                        {a.question_count === 1
+                          ? t("1 question")
+                          : t("{{count}} questions", { count: a.question_count })}
+                        {" · "}{t("weight {{weight}}", { weight: a.weight })}
+                        {" · "}{a.attempt_limit === 1
+                          ? t("1 attempt")
+                          : t("{{count}} attempts", { count: a.attempt_limit })}
+                        {" · "}{t("created {{date}}", { date: formatDate(a.created_at, lang) })}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
@@ -355,6 +388,18 @@ export default function CourseUnitAssignmentsPage() {
                                      disabled:opacity-40 transition-colors"
                         >
                           <Send size={15} />
+                        </button>
+                      )}
+                      {a.status === "published" && (
+                        <button
+                          onClick={() => void handleUnpublish(a)}
+                          disabled={publishBusyId === a.id}
+                          title={t("Unpublish (revert to draft)")}
+                          className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                                     hover:bg-[var(--background)] hover:text-[var(--foreground)]
+                                     disabled:opacity-40 transition-colors"
+                        >
+                          <RotateCcw size={15} />
                         </button>
                       )}
                       <button

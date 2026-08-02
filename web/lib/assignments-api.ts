@@ -67,6 +67,8 @@ export interface AssignmentSummary {
   weight: number;
   attempt_limit: number;
   due_at: string;
+  is_timed: boolean;
+  time_limit_minutes: number | null;
   question_count: number;
   created_at: string;
 }
@@ -99,6 +101,8 @@ export interface AssignmentDraft {
   weight?: number;
   attempt_limit?: number;
   due_at?: string;
+  is_timed?: boolean;
+  time_limit_minutes?: number | null;
 }
 
 export async function createAssignment(
@@ -169,6 +173,15 @@ export async function publishAssignment(assignmentId: string): Promise<Assignmen
   return data.assignment;
 }
 
+export async function unpublishAssignment(assignmentId: string): Promise<Assignment> {
+  const res = await apiFetch(
+    apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/unpublish`),
+    { method: "POST" },
+  );
+  const data = await unwrap<{ assignment: Assignment }>(res, "Failed to unpublish assignment");
+  return data.assignment;
+}
+
 export async function deleteAssignment(assignmentId: string): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}`),
@@ -215,4 +228,55 @@ export async function getMySubmission(assignmentId: string): Promise<Submission 
     "Failed to load your submission",
   );
   return data.submission;
+}
+
+// ---------------------------------------------------------------------------
+// Access grants (A3) — per-student exception/emergency access
+// ---------------------------------------------------------------------------
+
+export interface AccessGrant {
+  id: string;
+  assignment_id: string;
+  user_id: string;
+  extra_attempts: number | null;
+  extended_due_at: string | null;
+  granted_by: string;
+  granted_at: string;
+}
+
+export async function listAccessGrants(assignmentId: string): Promise<AccessGrant[]> {
+  const res = await apiFetch(
+    apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/access-grants`),
+  );
+  const data = await unwrap<{ grants: AccessGrant[] }>(res, "Failed to load access grants");
+  return data.grants;
+}
+
+export async function createAccessGrant(
+  assignmentId: string,
+  payload: { user_id: string; extra_attempts?: number | null; extended_due_at?: string | null },
+): Promise<AccessGrant> {
+  const res = await apiFetch(
+    apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/access-grants`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await unwrap<{ grant: AccessGrant }>(res, "Failed to create access grant");
+  return data.grant;
+}
+
+export async function revokeAccessGrant(
+  assignmentId: string,
+  userId: string,
+): Promise<void> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/access-grants/${encodeURIComponent(userId)}`,
+    ),
+    { method: "DELETE" },
+  );
+  await unwrap<{ ok: boolean }>(res, "Failed to revoke access grant");
 }
