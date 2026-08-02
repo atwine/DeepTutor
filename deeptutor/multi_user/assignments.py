@@ -27,6 +27,7 @@ from uuid import uuid4
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from deeptutor.multi_user.notifications import create_notification
 from deeptutor.services.db import session_scope
 from deeptutor.services.db.models import Assignment, AssignmentAccessGrant, Submission
 
@@ -243,7 +244,13 @@ async def publish_assignment(assignment_id: str) -> dict[str, Any] | None:
             return None
         record.status = "published"
         await session.flush()
-        return _assignment_to_dict(record)
+        course_unit_id, title = record.course_unit_id, record.title
+        payload = _assignment_to_dict(record)
+
+    await create_notification(
+        course_unit_id, "assignment_published", f"New assignment: {title}"
+    )
+    return payload
 
 
 async def unpublish_assignment(assignment_id: str) -> dict[str, Any] | None:
