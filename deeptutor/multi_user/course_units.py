@@ -23,7 +23,13 @@ from uuid import uuid4
 from sqlalchemy import delete, select
 
 from deeptutor.services.db import session_scope
-from deeptutor.services.db.models import CourseUnit, CourseUnitInstructor, Enrollment, Submission
+from deeptutor.services.db.models import (
+    CourseMaterial,
+    CourseUnit,
+    CourseUnitInstructor,
+    Enrollment,
+    Submission,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +52,57 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def new_material_id() -> str:
+    return f"mat_{uuid4().hex}"
+
+
+# ---------------------------------------------------------------------------
+# Issue #3: Auto-provision a course-specific RAG knowledge base
+# ---------------------------------------------------------------------------
+
+
+def _provision_course_kb(unit_id: str) -> str | None:
+    """Provision an empty KB named ``course_<unit_id>`` in the admin workspace's
+    knowledge-bases root, using the same initializer the KB create endpoint uses
+    (see ``deeptutor/api/routers/knowledge.py:create_knowledge_base`` and
+    ``deeptutor/knowledge/initializer.py:KnowledgeBaseInitializer``).
+
+    Returns the KB name on success, or ``None`` on failure (the caller --
+    ``create_course_unit`` -- does NOT block on a provisioning failure; it logs
+    a warning and leaves ``kb_name`` as None so it can be provisioned later).
+    The KB is created with the default RAG provider and no initial documents --
+    materials are indexed incrementally as instructors upload them.
+    """
+    try:
+        from deeptutor.knowledge.initializer import KnowledgeBaseInitializer
+        from deeptutor.knowledge.progress_tracker import ProgressTracker
+        from deeptutor.multi_user.knowledge_access import admin_kb_base_dir
+
+        kb_name = f"course_{unit_id}"
+        base_dir = str(admin_kb_base_dir().resolve())
+        progress_tracker = ProgressTracker(kb_name, base_dir)
+        initializer = KnowledgeBaseInitializer(
+            kb_name=kb_name,
+            base_dir=base_dir,
+            progress_tracker=progress_tracker,
+        )
+        # create_directory_structure mkdir-s raw/ and registers the KB in
+        # kb_config.json with an "initializing" status -- no documents are
+        # processed here (the KB starts empty; materials are added later).
+        initializer.create_directory_structure()
+        # Flip the KB to "ready" since there are no documents to index.
+        from deeptutor.knowledge.manager import KnowledgeBaseManager
+
+        manager = KnowledgeBaseManager(base_dir=base_dir)
+        manager.update_kb_status(name=kb_name, status="ready")
+        return kb_name
+    except Exception as exc:
+        logger.warning(
+            "Failed to auto-provision course KB for unit %s: %s", unit_id, exc
+        )
+        return None
+
+
 def _unit_to_dict(unit: CourseUnit) -> dict[str, Any]:
     """Serialize a CourseUnit ORM instance to the same dict shape the old
     JSON store returned — preserves backward compatibility for all callers."""
@@ -59,6 +116,9 @@ def _unit_to_dict(unit: CourseUnit) -> dict[str, Any]:
         "is_archived": bool(unit.is_archived),
         "instructor_ids": [i.instructor_id for i in unit.instructors],
         "created_at": unit.created_at.isoformat() if unit.created_at else "",
+        # Issue #3: the auto-provisioned KB name for this course unit. "" when
+        # no KB has been provisioned yet (existing units or a failed provision).
+        "kb_name": unit.kb_name or "",
     }
 
 
@@ -94,6 +154,11 @@ async def create_course_unit(
     unit_id = new_course_unit_id()
     now = datetime.now(timezone.utc)
     clean_ids = [str(uid) for uid in instructor_ids if str(uid).strip()]
+    # Issue #3: Auto-provision a course-specific RAG KB. Done before the DB
+    # insert so the KB name can be stored on the CourseUnit row in one write.
+    # Failures are non-fatal -- the unit is still created with kb_name=None and
+    # the KB can be provisioned later (see ``provision_course_kb_for_unit``).
+    kb_name = _provision_course_kb(unit_id)
     async with session_scope() as session:
         unit = CourseUnit(
             id=unit_id,
@@ -103,6 +168,7 @@ async def create_course_unit(
             start_date=start_date or None,
             end_date=end_date or None,
             created_at=now,
+            kb_name=kb_name,
         )
         session.add(unit)
         await session.flush()
@@ -634,3 +700,196 @@ async def delete_user_data(user_id: str) -> None:
         await session.execute(
             delete(Submission).where(Submission.user_id == str(user_id))
         )
+
+# ---------------------------------------------------------------------------
+# Issue #3: Course materials (instructor uploads + course-specific RAG)
+# ---------------------------------------------------------------------------
+
+
+# Supported file types for course materials. Mirrors the API contract's
+# file_type enum. Extensions not in the RAG FileTypeRouter's supported set
+# (e.g. .ipynb) are still accepted as uploads -- they're stored and downloadable
+# but won't be indexed into the RAG KB (ingestion_status stays "pending").
+_COURSE_MATERIAL_FILE_TYPES: dict[str, str] = {
+    ".ipynb": "ipynb",
+    ".pdf": "pdf",
+    ".docx": "docx",
+    ".pptx": "pptx",
+    ".xlsx": "xlsx",
+    ".md": "md",
+    ".markdown": "md",
+    ".txt": "txt",
+    ".text": "txt",
+}
+
+
+def _file_type_for_filename(filename: str) -> str:
+    """Map a filename's extension to the CourseMaterial.file_type enum.
+    Returns ``"other"`` for anything not in the explicit mapping above."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return _COURSE_MATERIAL_FILE_TYPES.get(f".{ext}", "other")
+
+
+def _material_to_dict(material: CourseMaterial) -> dict[str, Any]:
+    """Serialize a CourseMaterial ORM instance to the API response shape."""
+    return {
+        "id": material.id,
+        "course_unit_id": material.course_unit_id,
+        "filename": material.filename,
+        "file_type": material.file_type,
+        "size_bytes": material.size_bytes,
+        "status": material.status,
+        "uploaded_at": material.uploaded_at.isoformat() if material.uploaded_at else "",
+        "published_at": material.published_at.isoformat() if material.published_at else None,
+        "ingestion_status": material.ingestion_status,
+    }
+
+
+async def provision_course_kb_for_unit(course_unit_id: str) -> dict[str, Any] | None:
+    """Provision (or re-provision) the course-specific KB for an existing
+    course unit that was created before this feature (``kb_name`` is None).
+    Stores the KB name on the CourseUnit row. Returns the updated unit dict,
+    or None if the course unit doesn't exist or already has a KB provisioned."""
+    async with session_scope() as session:
+        unit = await session.get(CourseUnit, course_unit_id)
+        if unit is None or unit.kb_name:
+            return None
+        kb_name = _provision_course_kb(course_unit_id)
+        if kb_name is None:
+            return None
+        unit.kb_name = kb_name
+        await session.flush()
+        await session.refresh(unit, ["instructors"])
+    return _unit_to_dict(unit)
+
+
+async def get_course_kb_name(course_unit_id: str) -> str | None:
+    """Return the auto-provisioned KB name for a course unit, or None if the
+    unit doesn't exist or has no KB provisioned yet."""
+    async with session_scope() as session:
+        unit = await session.get(CourseUnit, course_unit_id)
+        if unit is None:
+            return None
+        return unit.kb_name
+
+
+async def create_material_record(
+    course_unit_id: str,
+    filename: str,
+    file_path: str,
+    size_bytes: int,
+) -> dict[str, Any]:
+    """Create a CourseMaterial record with status='draft' and
+    ingestion_status='pending'. Returns the serialized material dict."""
+    now = datetime.now(timezone.utc)
+    material = CourseMaterial(
+        id=new_material_id(),
+        course_unit_id=course_unit_id,
+        filename=filename,
+        file_type=_file_type_for_filename(filename),
+        file_path=file_path,
+        size_bytes=size_bytes,
+        status="draft",
+        uploaded_at=now,
+        published_at=None,
+        ingestion_status="pending",
+    )
+    async with session_scope() as session:
+        session.add(material)
+        await session.flush()
+    return _material_to_dict(material)
+
+
+async def list_materials_for_course(
+    course_unit_id: str, *, include_draft: bool = True
+) -> list[dict[str, Any]]:
+    """List course materials. When ``include_draft`` is False (student view),
+    only published materials are returned."""
+    async with session_scope() as session:
+        query = select(CourseMaterial).where(
+            CourseMaterial.course_unit_id == course_unit_id
+        )
+        if not include_draft:
+            query = query.where(CourseMaterial.status == "published")
+        query = query.order_by(CourseMaterial.uploaded_at)
+        result = await session.execute(query)
+        materials = result.scalars().all()
+    return [_material_to_dict(m) for m in materials]
+
+
+async def get_material(course_unit_id: str, material_id: str) -> dict[str, Any] | None:
+    """Get a single course material by id. Returns None if not found or if it
+    doesn't belong to the given course unit."""
+    async with session_scope() as session:
+        material = await session.get(CourseMaterial, material_id)
+        if material is None or material.course_unit_id != course_unit_id:
+            return None
+        return _material_to_dict(material)
+
+
+async def get_material_orm(
+    course_unit_id: str, material_id: str
+) -> CourseMaterial | None:
+    """Get the raw CourseMaterial ORM instance (for file-path lookups in the
+    download/delete endpoints). Returns None if not found or mismatched."""
+    async with session_scope() as session:
+        material = await session.get(CourseMaterial, material_id)
+        if material is None or material.course_unit_id != course_unit_id:
+            return None
+        return material
+
+
+async def publish_material(course_unit_id: str, material_id: str) -> dict[str, Any] | None:
+    """Set a material's status to 'published' and record published_at. Returns
+    None if the material doesn't exist or doesn't belong to this course unit."""
+    now = datetime.now(timezone.utc)
+    async with session_scope() as session:
+        material = await session.get(CourseMaterial, material_id)
+        if material is None or material.course_unit_id != course_unit_id:
+            return None
+        material.status = "published"
+        material.published_at = now
+        await session.flush()
+    return _material_to_dict(material)
+
+
+async def unpublish_material(course_unit_id: str, material_id: str) -> dict[str, Any] | None:
+    """Revert a material's status to 'draft' and clear published_at. Returns
+    None if the material doesn't exist or doesn't belong to this course unit."""
+    async with session_scope() as session:
+        material = await session.get(CourseMaterial, material_id)
+        if material is None or material.course_unit_id != course_unit_id:
+            return None
+        material.status = "draft"
+        material.published_at = None
+        await session.flush()
+    return _material_to_dict(material)
+
+
+async def delete_material(course_unit_id: str, material_id: str) -> bool:
+    """Delete a CourseMaterial DB record. Returns False if not found or
+    mismatched. The caller is responsible for removing the physical file from
+    the KB's raw/ directory (see the DELETE endpoint in router.py)."""
+    async with session_scope() as session:
+        material = await session.get(CourseMaterial, material_id)
+        if material is None or material.course_unit_id != course_unit_id:
+            return False
+        await session.delete(material)
+    return True
+
+
+async def update_ingestion_status(
+    material_id: str, status: str
+) -> None:
+    """Update a material's ingestion_status (pending -> indexing -> ready/failed).
+    Called by the background indexing task. Best-effort -- logs a warning if the
+    material no longer exists (e.g. deleted while indexing was in flight)."""
+    async with session_scope() as session:
+        material = await session.get(CourseMaterial, material_id)
+        if material is None:
+            logger.warning(
+                "Cannot update ingestion_status for material %s: not found", material_id
+            )
+            return
+        material.ingestion_status = status
+        await session.flush()
