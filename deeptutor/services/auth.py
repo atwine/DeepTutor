@@ -214,6 +214,20 @@ def get_user_info(username: str) -> dict | None:
     return None
 
 
+def set_disabled(username: str, disabled: bool) -> bool:
+    """Enable or disable a user account. Returns True on success.
+
+    A disabled user cannot log in (checked in ``authenticate``). Admin-only
+    by convention — the endpoint that calls this is admin-gated.
+    """
+    from deeptutor.multi_user.identity import set_disabled as _set_disabled
+
+    if not _set_disabled(username, disabled):
+        return False
+    logger.info("User '%s' disabled=%s", username, disabled)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # JWT
 # ---------------------------------------------------------------------------
@@ -369,6 +383,11 @@ def authenticate(username: str, password: str) -> TokenPayload | None:
 
     record = users.get(username)
     if not record:
+        return None
+
+    # A disabled account cannot log in, even with correct credentials.
+    if isinstance(record, dict) and record.get("disabled"):
+        logger.info("Login blocked for disabled user '%s'", username)
         return None
 
     hashed = record.get("hash", "") if isinstance(record, dict) else record

@@ -10,6 +10,10 @@ export interface ProfileInfo {
   avatar?: string;
   full_name?: string;
   registration_number?: string;
+  first_name?: string;
+  surname?: string;
+  gender?: string;
+  course?: string;
 }
 
 function extractDetail(data: unknown, fallback: string): string {
@@ -46,9 +50,9 @@ export async function setAvatarMarker(avatar: string): Promise<string> {
   return String(data.avatar ?? avatar);
 }
 
-/** Update the current user's own display name and/or registration number. */
+/** Update the current user's own demographics (name, registration number, gender, course). */
 export async function updateProfileDetails(
-  updates: Partial<Pick<ProfileInfo, "full_name" | "registration_number">>,
+  updates: Partial<Pick<ProfileInfo, "full_name" | "registration_number" | "first_name" | "surname" | "gender" | "course">>,
 ): Promise<void> {
   const res = await apiFetch(apiUrl("/api/v1/auth/profile/details"), {
     method: "PUT",

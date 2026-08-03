@@ -54,6 +54,10 @@ def _canonical_record(
             "avatar": "",
             "full_name": "",
             "registration_number": "",
+            "first_name": "",
+            "surname": "",
+            "gender": "",
+            "course": "",
         }
     if not isinstance(value, dict):
         return None
@@ -72,6 +76,10 @@ def _canonical_record(
         "avatar": str(value.get("avatar") or ""),
         "full_name": str(value.get("full_name") or ""),
         "registration_number": str(value.get("registration_number") or ""),
+        "first_name": str(value.get("first_name") or ""),
+        "surname": str(value.get("surname") or ""),
+        "gender": str(value.get("gender") or ""),
+        "course": str(value.get("course") or ""),
     }
 
 
@@ -188,6 +196,12 @@ def save_user(username: str, hashed_password: str, role: Role = "user") -> dict[
             "created_at": str(existing.get("created_at") or utc_now()),
             "disabled": bool(existing.get("disabled", False)),
             "avatar": str(existing.get("avatar") or ""),
+            "full_name": str(existing.get("full_name") or ""),
+            "registration_number": str(existing.get("registration_number") or ""),
+            "first_name": str(existing.get("first_name") or ""),
+            "surname": str(existing.get("surname") or ""),
+            "gender": str(existing.get("gender") or ""),
+            "course": str(existing.get("course") or ""),
         }
         users[username] = record
         _write_users(users)
@@ -208,6 +222,10 @@ def list_user_info(  # nosec B107 - empty defaults mean "no env fallback supplie
             "avatar": str(record.get("avatar") or ""),
             "full_name": str(record.get("full_name") or ""),
             "registration_number": str(record.get("registration_number") or ""),
+            "first_name": str(record.get("first_name") or ""),
+            "surname": str(record.get("surname") or ""),
+            "gender": str(record.get("gender") or ""),
+            "course": str(record.get("course") or ""),
         }
         for username, record in load_users(env_username, env_password_hash).items()
     ]
@@ -231,7 +249,9 @@ def search_enrollable_users(query: str, *, limit: int = 20) -> list[dict[str, An
             continue
         full_name = str(record.get("full_name") or "")
         reg_number = str(record.get("registration_number") or "")
-        haystack = f"{username} {full_name} {reg_number}".lower()
+        first_name = str(record.get("first_name") or "")
+        surname = str(record.get("surname") or "")
+        haystack = f"{username} {full_name} {first_name} {surname} {reg_number}".lower()
         if needle in haystack:
             matches.append(
                 {
@@ -287,8 +307,12 @@ def update_profile_details(
     *,
     full_name: str | None = None,
     registration_number: str | None = None,
+    first_name: str | None = None,
+    surname: str | None = None,
+    gender: str | None = None,
+    course: str | None = None,
 ) -> bool:
-    """Update the current user's own display name / registration number.
+    """Update the current user's own demographics.
 
     These identify a real person for departmental reporting (rosters, grade
     exports) — distinct from ``username``, which is just the login handle.
@@ -304,6 +328,31 @@ def update_profile_details(
             users[username]["full_name"] = full_name
         if registration_number is not None:
             users[username]["registration_number"] = registration_number
+        if first_name is not None:
+            users[username]["first_name"] = first_name
+        if surname is not None:
+            users[username]["surname"] = surname
+        if gender is not None:
+            users[username]["gender"] = gender
+        if course is not None:
+            users[username]["course"] = course
+        _write_users(users)
+    return True
+
+
+def set_disabled(username: str, disabled: bool) -> bool:
+    """Enable or disable a user account. A disabled user cannot log in.
+
+    Admin-only — called from the user-management endpoint, not self-service.
+    Returns True on success, False if the user was not found.
+    """
+    if not USERS_FILE.exists():
+        return False
+    with _USERS_WRITE_LOCK:
+        users = load_users()
+        if username not in users:
+            return False
+        users[username]["disabled"] = bool(disabled)
         _write_users(users)
     return True
 

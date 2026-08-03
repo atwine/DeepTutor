@@ -127,17 +127,12 @@ un-auditable.
   rather than in `deeptutor/services/auth.py` itself. Needs a decision on
   where this lives before implementing (relevant to the Railway deployment
   scoping conversation, `TODO.md` §B).
-- **The `disabled` field on user records is fully non-functional.** It
-  exists in the data model (`identity.py`) and is returned by
-  `GET /users`/`GET /profile`, but there is no admin endpoint to actually
-  set it to `true`, and even if it were hand-set in the JSON store,
-  `authenticate()` never checks it — a "disabled" user could still log in.
-  Not currently exploitable (nothing sets it), but it's a half-built
-  feature that will become a live bug the moment someone adds a "disable
-  user" admin action without also fixing `authenticate()`. Either finish it
-  (add the admin endpoint + the `authenticate()` check) or remove the field
-  — leaving it as-is misleads anyone who sees the field and assumes it does
-  something.
+- **The `disabled` field on user records is now functional.** Previously
+  half-built (the field existed but no endpoint set it and `authenticate()`
+  never checked it). Fixed in the same pass as this review: `authenticate()`
+  now rejects disabled users, and `PUT /users/{username}/disabled` (admin-
+  only, with self-disable guard) toggles the flag. Admins can disable/enable
+  accounts from the user management table.
 - **`sandbox-runner`'s cross-user filesystem visibility.** Already
   explicitly documented in `docker-compose.yml`'s own comments as an
   accepted risk: every `code_execution` invocation in that container shares

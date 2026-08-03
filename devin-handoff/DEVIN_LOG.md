@@ -2960,3 +2960,111 @@ paths, avatar upload magic-byte sniffing + SVG rejection, user-id path
 validation, admin self-delete/self-demote guards).
 
 — Devin
+
+## 2026-08-03 — Devin — Disabled-user feature finished + student demographics added
+
+**Item**: Two tasks from the security review handoff:
+
+1. **Security finding #2 — finish the `disabled` user field** (repo owner
+   chose "add the button"). Previously the field existed in the data model
+   but no endpoint set it and `authenticate()` never checked it — a
+   half-built feature that would become a live bug the moment someone added
+   a "disable user" admin action.
+2. **Student demographics** — new fields on user records: first name,
+   surname, gender (required, male/female only), course (Masters/PhD,
+   students only), and Student ID (students only). Editable by the user
+   on their own profile page; visible to admins in the user management
+   table.
+
+**Status**: done. Committed to `devin-security-review` branch (same branch
+as the security review — these are follow-on work from the review's
+findings).
+
+**What changed**:
+
+*Disabled-user feature:*
+- `deeptutor/services/auth.py` — `authenticate()` now checks the `disabled`
+  flag and rejects disabled users (returns `None`, logs the block). Also
+  added a `set_disabled()` wrapper function.
+- `deeptutor/multi_user/identity.py` — added `set_disabled()` function
+  (writes the flag under the write lock).
+- `deeptutor/api/routers/auth.py` — new `PUT /users/{username}/disabled`
+  endpoint (admin-only, self-disable guard matching the existing
+  self-delete/self-demote pattern). New `SetDisabledRequest` model.
+- `web/lib/admin-api.ts` — new `setUserDisabled()` client function.
+- `web/app/(admin)/admin/users/page.tsx` — disable/enable toggle button
+  in the actions column (Ban/CircleCheck icon), confirmation dialog with
+  copy explaining "a disabled user cannot log in; data is preserved,"
+  disabled badge on the user row.
+- `SECURITY.md` — updated the finding from "flagged, not fixed" to
+  "now functional" with a brief description of the fix.
+
+*Demographics:*
+- `deeptutor/multi_user/identity.py` — `_canonical_record()`,
+  `list_user_info()`, `save_user()`, and `search_enrollable_users()`
+  updated to handle `first_name`, `surname`, `gender`, `course`. The
+  enrollment search now matches on first name and surname too, not just
+  username/full_name/registration_number. `update_profile_details()`
+  accepts the four new keyword arguments.
+- `deeptutor/api/routers/auth.py` — `UserInfo` model has the four new
+  fields. `UpdateProfileDetailsRequest` has them with validators:
+  gender must be `male` or `female` (required, no empty/other options per
+  repo owner's instruction); course must be `masters`, `phd`, or empty.
+  The `update_profile_details_endpoint` passes all new fields through.
+- `web/lib/profile-api.ts` — `ProfileInfo` interface and
+  `updateProfileDetails()` updated for the new fields.
+- `web/app/(utility)/profile/page.tsx` — Details card restructured:
+  first name, surname, and gender show for **all roles** (gender is
+  required, male/female only, save button disabled until selected);
+  course and Student ID show for **students only** (the original
+  student-only guard is preserved for those fields). The card's
+  description text adapts to the role.
+- `web/lib/admin-users.ts` — `filterUsersByQuery()` now searches by
+  first name, surname, and registration number in addition to username.
+- `web/app/(admin)/admin/users/page.tsx` — user table rows now show
+  first name + surname under the username.
+
+**Role-based field visibility** (per repo owner's decision):
+
+| Field | Student | Instructor | Admin |
+|---|---|---|---|
+| First name | yes | yes | yes |
+| Surname | yes | yes | yes |
+| Gender | yes (required) | yes (required) | yes (required) |
+| Course (Masters/PhD) | yes | no | no |
+| Student ID | yes | no | no |
+
+**Verified**:
+- Backend: `from deeptutor.api.main import app` imports cleanly, 376
+  routes (was 375, +1 for the disabled endpoint). Auth router has 17
+  routes (was 16).
+- Live test against the local JSON user store (Postgres wasn't running,
+  but the identity functions don't need it for this test): created a
+  test user, called `update_profile_details()` with all four new
+  demographics fields → fields saved correctly. Called `set_disabled(
+  True)` → flag set. Called `set_disabled(False)` → flag cleared.
+  Cleaned up. `AUTH_ENABLED` was false in this worktree so couldn't
+  test the `authenticate()` rejection path live, but the code path is
+  straightforward (early return `None` if `record.get("disabled")`).
+- Frontend: couldn't run `tsc --noEmit` (no `node_modules` in this
+  worktree, and `npm install` was interrupted). The changes are
+  straightforward type additions (new optional fields on existing
+  interfaces, new function matching existing patterns) — low risk of
+  type errors. Will need a frontend typecheck during the merge/regression
+  pass.
+
+**Decisions made by the repo owner during this work**:
+- Gender: required for all users, male/female only (no non-binary, no
+  prefer-not-to-say, no empty option).
+- Course + Student ID: students only (not shown for instructors/admins).
+- First name + Surname: all roles.
+- Profile visibility: self + admins + instructors (other students can't
+  see demographics — this is the existing behavior, not changed here).
+
+**Security review findings status after this work**:
+1. No login rate-limiting → **deferred** (tied to Railway deployment, §B)
+2. `disabled` field non-functional → **fixed** (this pass)
+3. Sandbox cross-user visibility → **deferred** (scoped for later, needs
+   architecture decision about whether students get the code tool)
+
+— Devin

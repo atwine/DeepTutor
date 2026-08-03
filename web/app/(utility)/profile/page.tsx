@@ -105,6 +105,10 @@ export default function ProfilePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fullNameDraft, setFullNameDraft] = useState("");
   const [regNumberDraft, setRegNumberDraft] = useState("");
+  const [firstNameDraft, setFirstNameDraft] = useState("");
+  const [surnameDraft, setSurnameDraft] = useState("");
+  const [genderDraft, setGenderDraft] = useState("");
+  const [courseDraft, setCourseDraft] = useState("");
   const [detailsSaving, setDetailsSaving] = useState(false);
   const [detailsSaved, setDetailsSaved] = useState(false);
 
@@ -127,6 +131,10 @@ export default function ProfilePage() {
           setProfile(info);
           setFullNameDraft(info.full_name ?? "");
           setRegNumberDraft(info.registration_number ?? "");
+          setFirstNameDraft(info.first_name ?? "");
+          setSurnameDraft(info.surname ?? "");
+          setGenderDraft(info.gender ?? "");
+          setCourseDraft(info.course ?? "");
         }
       } catch {
         if (!cancelled) setError(t("Failed to load profile"));
@@ -194,7 +202,11 @@ export default function ProfilePage() {
   const detailsDirty =
     profile !== null &&
     (fullNameDraft !== (profile.full_name ?? "") ||
-      regNumberDraft !== (profile.registration_number ?? ""));
+      regNumberDraft !== (profile.registration_number ?? "") ||
+      firstNameDraft !== (profile.first_name ?? "") ||
+      surnameDraft !== (profile.surname ?? "") ||
+      genderDraft !== (profile.gender ?? "") ||
+      courseDraft !== (profile.course ?? ""));
 
   const handleSaveDetails = useCallback(async () => {
     setDetailsSaving(true);
@@ -203,6 +215,10 @@ export default function ProfilePage() {
       await updateProfileDetails({
         full_name: fullNameDraft,
         registration_number: regNumberDraft,
+        first_name: firstNameDraft,
+        surname: surnameDraft,
+        gender: genderDraft,
+        course: courseDraft,
       });
       setProfile((prev) =>
         prev
@@ -210,6 +226,10 @@ export default function ProfilePage() {
               ...prev,
               full_name: fullNameDraft,
               registration_number: regNumberDraft,
+              first_name: firstNameDraft,
+              surname: surnameDraft,
+              gender: genderDraft,
+              course: courseDraft,
             }
           : prev,
       );
@@ -220,7 +240,7 @@ export default function ProfilePage() {
     } finally {
       setDetailsSaving(false);
     }
-  }, [fullNameDraft, regNumberDraft]);
+  }, [fullNameDraft, regNumberDraft, firstNameDraft, surnameDraft, genderDraft, courseDraft]);
 
   const descriptor = parseAvatarMarker(profile?.avatar);
   const hasImage = descriptor.kind === "image";
@@ -239,6 +259,7 @@ export default function ProfilePage() {
         : fallback.color;
   const isAdmin = profile?.role === "admin";
   const isInstructor = profile?.role === "instructor";
+  const isStudent = !isAdmin && !isInstructor;
   const lang: Language = i18n.language?.startsWith("zh") ? "zh" : "en";
   const joinedDate = profile?.created_at ? new Date(profile.created_at) : null;
   const joined =
@@ -321,34 +342,78 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* Details card — registration number only makes sense for
-                students (it's what instructors search on to enroll someone);
-                admins and instructors have no use for it. */}
-            {!isAdmin && !isInstructor && (
-              <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm">
-                <h2 className="text-sm font-semibold text-[var(--foreground)]">
-                  {t("Details")}
-                </h2>
-                <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
-                  {t(
-                    "Your real name and registration number, so instructors can find you when enrolling you in a course unit.",
-                  )}
-                </p>
+            {/* Details card — first name, surname, and gender are for all
+                roles. Course and Student ID are student-only (instructors
+                and admins aren't enrolled in a program). Gender is required. */}
+            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm">
+              <h2 className="text-sm font-semibold text-[var(--foreground)]">
+                {t("Details")}
+              </h2>
+              <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
+                {isStudent
+                  ? t(
+                      "Your name and student details, so instructors can find you when enrolling you in a course unit.",
+                    )
+                  : t("Your name and gender.")}
+              </p>
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs text-[var(--muted-foreground)]">
+                  {t("First name")}
+                  <input
+                    type="text"
+                    value={firstNameDraft}
+                    onChange={(e) => setFirstNameDraft(e.target.value)}
+                    disabled={detailsSaving}
+                    placeholder={t("e.g. Jane")}
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                  />
+                </label>
+                <label className="block text-xs text-[var(--muted-foreground)]">
+                  {t("Surname")}
+                  <input
+                    type="text"
+                    value={surnameDraft}
+                    onChange={(e) => setSurnameDraft(e.target.value)}
+                    disabled={detailsSaving}
+                    placeholder={t("e.g. Doe")}
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                  />
+                </label>
+                <label className="block text-xs text-[var(--muted-foreground)]">
+                  {t("Gender")} <span className="text-red-500">*</span>
+                  <select
+                    value={genderDraft}
+                    onChange={(e) => setGenderDraft(e.target.value)}
+                    disabled={detailsSaving}
+                    required
+                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
+                  >
+                    <option value="" disabled>
+                      {t("Select…")}
+                    </option>
+                    <option value="male">{t("Male")}</option>
+                    <option value="female">{t("Female")}</option>
+                  </select>
+                </label>
+                {isStudent && (
                   <label className="block text-xs text-[var(--muted-foreground)]">
-                    {t("Full name")}
-                    <input
-                      type="text"
-                      value={fullNameDraft}
-                      onChange={(e) => setFullNameDraft(e.target.value)}
+                    {t("Course")}
+                    <select
+                      value={courseDraft}
+                      onChange={(e) => setCourseDraft(e.target.value)}
                       disabled={detailsSaving}
-                      placeholder={t("e.g. Jane Doe")}
                       className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
-                    />
+                    >
+                      <option value="">{t("Not specified")}</option>
+                      <option value="masters">{t("Masters")}</option>
+                      <option value="phd">{t("PhD")}</option>
+                    </select>
                   </label>
+                )}
+                {isStudent && (
                   <label className="block text-xs text-[var(--muted-foreground)]">
-                    {t("Registration number")}
+                    {t("Student ID")}
                     <input
                       type="text"
                       value={regNumberDraft}
@@ -358,25 +423,25 @@ export default function ProfilePage() {
                       className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
                     />
                   </label>
-                </div>
-
-                <div className="mt-4 flex items-center gap-3">
-                  <button
-                    onClick={() => void handleSaveDetails()}
-                    disabled={detailsSaving || !detailsDirty}
-                    className="rounded-lg bg-[var(--foreground)] px-3 py-1.5 text-sm font-medium text-[var(--background)]
-                               hover:opacity-90 disabled:opacity-40 transition-colors"
-                  >
-                    {detailsSaving ? t("Saving…") : t("Save")}
-                  </button>
-                  {detailsSaved && (
-                    <span className="text-xs text-[var(--muted-foreground)]">
-                      {t("Saved")}
-                    </span>
-                  )}
-                </div>
+                )}
               </div>
-            )}
+
+              <div className="mt-4 flex items-center gap-3">
+                <button
+                  onClick={() => void handleSaveDetails()}
+                  disabled={detailsSaving || !detailsDirty || !genderDraft}
+                  className="rounded-lg bg-[var(--foreground)] px-3 py-1.5 text-sm font-medium text-[var(--background)]
+                             hover:opacity-90 disabled:opacity-40 transition-colors"
+                >
+                  {detailsSaving ? t("Saving…") : t("Save")}
+                </button>
+                {detailsSaved && (
+                  <span className="text-xs text-[var(--muted-foreground)]">
+                    {t("Saved")}
+                  </span>
+                )}
+              </div>
+            </div>
 
             {/* Avatar card */}
             <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm">
