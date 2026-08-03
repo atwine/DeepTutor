@@ -2316,4 +2316,115 @@ async functions directly) was not performed — the task's stated fallback
 async storage functions end-to-end... not a raw SQL DELETE") was used
 instead, which is what was actually done here.
 
+## 2026-08-02 — Devin — Round 4 Task 2 done: course-unit edit/delete permission decision
+
+**Item**: Round 4 Task 2 — resolve the course-unit edit/delete permission
+inconsistency (`update_course_unit_endpoint`/`delete_course_unit_endpoint`
+were both `require_admin`-only, unlike every other course-unit endpoint in
+`router.py`).
+
+**Status**: done. Split decision, not a uniform "open both up" or "leave both
+admin-only" — the two endpoints have different risk profiles and got
+different answers.
+
+**Branch**: `devin-r4-cu-perms`, worktree `../DeepTutor-r4-cu-perms`,
+branched from `main`.
+
+**Decision + reasoning**:
+
+- **`PUT /course-units/{id}` (update) -> opened to `require_instructor_or_admin`**,
+  gated by the same `_require_course_unit_access` ownership check every
+  other instructor-scoped endpoint in this file already uses (archive/
+  unarchive, roster, gradebook, notes, leave-requests, etc.). Editing
+  name/term/description/dates carries the same risk profile as those
+  already-open actions — no reason for this one field-set to be the outlier.
+- **BUT `instructor_ids` reassignment inside that same endpoint stays
+  admin-only** — this is the one field on `CourseUnitUpdate` that's a
+  materially different kind of risk than metadata edits: letting any
+  instructor-of-the-unit freely reassign `instructor_ids` would let them
+  unilaterally drop a co-instructor or hand the course to an arbitrary user
+  id with zero admin involvement. That's privilege-escalation-shaped, not
+  just "a bigger mistake," and it's the same line B4 (Feature Round 2)
+  already drew for course *creation* (an instructor can add themselves, but
+  not freely add/remove others). Implementation: a non-admin caller's
+  `instructor_ids` in the payload is silently ignored (rest of the update
+  still applies) rather than 400/403ing the whole request — the admin-only
+  instructor-picker UI never sends this field for a non-admin caller in the
+  first place, so this is a defense-in-depth backstop, not a normal-path
+  behavior change.
+- **`DELETE /course-units/{id}` stays `require_admin`-only, deliberately, as
+  the one remaining outlier** — unlike archive (fully reversible) or update
+  (metadata-only after the guard above), delete is irreversible and cascades
+  away every assignment/submission/course-book-notes link under the unit
+  (`ON DELETE CASCADE` in `deeptutor/services/db/models.py`, re-verified live
+  in this same round's Task 1). One instructor's mistake or a compromised
+  instructor account permanently destroying another instructor's (on a
+  co-taught unit) grade history with zero admin checkpoint is a materially
+  bigger risk than anything else this router lets an instructor do
+  unilaterally. Archive already covers the reversible "I'm done with this"
+  case for instructors — delete is for admins cleaning up for real, on
+  purpose, not an oversight to "fix."
+
+**What changed**:
+- `deeptutor/multi_user/router.py` — `update_course_unit_endpoint`: dependency
+  changed `require_admin` -> `require_instructor_or_admin`, added
+  `await _require_course_unit_access(current, course_unit_id)`, and
+  `instructor_ids` is forced to `None` (dropped) for non-admin callers before
+  calling `update_course_unit`. `delete_course_unit_endpoint`: no behavior
+  change, but added a docstring spelling out explicitly *why* it stays
+  admin-only (per the task's own instruction: "make the call explicitly
+  rather than leaving it an unexamined inconsistency" — applies to the
+  "leave it as-is" half of the decision too, not just the half that changed).
+  Also fixed a now-stale module comment above `CourseUnitCreate` that still
+  said "(re)assigning [a unit's] instructor(s) is an admin-only action" —
+  true before B4, not true since (create already lets an instructor
+  self-add); reworded to describe the actual current rule (`instructor_ids`
+  reassignment specifically is admin-only, both at create and now at update).
+- `web/app/(admin)/admin/course-units/page.tsx` — Edit button (pencil icon)
+  un-gated from `{isAdmin && ...}` to match the Archive button's existing
+  gating (shown to everyone who can reach this page — the course-unit list
+  itself is already scoped to "units I teach" for a non-admin via
+  `GET /course-units`, confirmed by reading `list_course_units_for_instructor`
+  usage, so no new exposure). Delete button stays `{isAdmin && ...}`-gated.
+  The instructor-picker section's non-admin copy was create-mode-only
+  ("You will be automatically added...") and would have been actively wrong
+  once instructors can reach the edit form too; added a
+  `form.id`-conditional branch so edit mode shows "Only an admin can change
+  who teaches this course unit" instead.
+
+**Verified**:
+- `python -c "from deeptutor.multi_user.router import router; print(len(router.routes))"`
+  against the live local Postgres (`DATABASE_URL=postgresql+asyncpg://
+  deeptutor:deeptutor@localhost:5432/deeptutor`) — imports cleanly, 28 routes.
+- Wrote a throwaway script (`tmp_test_cu_perms.py`, deleted before finishing,
+  not committed) that called `update_course_unit_endpoint` directly (bypassing
+  HTTP, constructing `TokenPayload` the same way `services/auth.py` does) with
+  three real scenarios against the live DB:
+  1. The unit's own instructor updates `name` + attempts to also set
+     `instructor_ids=["t2_intruder"]` in the same request -> name change
+     applied, `instructor_ids` unchanged (verified via the returned record).
+  2. A *different* instructor (not on this unit) attempts the same update ->
+     raises `HTTPException(403)` via `_require_course_unit_access`, confirming
+     ownership is actually enforced, not just role-checked.
+  3. An admin sets `instructor_ids=["t2_new_instructor"]` -> applied
+     successfully, confirming the admin path still has full control.
+  All three assertions passed. Did not additionally re-verify the frontend
+  change with a browser session (no running frontend dev server in this
+  session) — the JSX change was reviewed manually for correct
+  bracket/ternary nesting instead (see diff), and is a straightforward
+  visibility-gating change with no new data flow.
+
+**New findings**: the module-level comment inconsistency (see "What changed"
+above) — worth flagging since it's the kind of stale-comment-as-inconsistency
+this whole task was about, just one level up (a comment describing a rule
+that a *previous* round's code change had already made partially false, and
+nobody caught it until this pass either).
+
+**Left for later / handing back**: none for this task. If a future round
+wants a lighter-weight "let a co-instructor remove themselves from a course
+they no longer want to be listed on" self-service action, that's a
+narrower, safer version of touching `instructor_ids` than a general open-up
+would have been — worth keeping in mind rather than revisiting the general
+"should instructor_ids be instructor-editable" question from scratch.
+
 — Devin
