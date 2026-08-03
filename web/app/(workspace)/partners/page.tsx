@@ -123,7 +123,8 @@ export default function PartnersPage() {
   }, [authLoading, load]);
 
   return (
-    <div className="mx-auto h-full max-w-4xl overflow-y-auto px-6 py-8">
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-6xl px-6 py-10 pb-16 md:px-10">
       <header className="mb-7 flex items-end justify-between gap-4">
         <div>
           <h1 className="text-[19px] font-semibold tracking-tight text-[var(--foreground)]">
@@ -247,6 +248,7 @@ export default function PartnersPage() {
           })}
         </div>
       )}
+      </div>
     </div>
   );
 }

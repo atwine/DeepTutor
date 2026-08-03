@@ -127,7 +127,7 @@ export default function KnowledgeHome({
 
   return (
     <div className="flex-1 overflow-y-auto bg-[var(--background)]">
-      <div className="mx-auto max-w-4xl px-6 py-8">
+      <div className="mx-auto max-w-6xl px-6 py-10 pb-16 md:px-10">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>

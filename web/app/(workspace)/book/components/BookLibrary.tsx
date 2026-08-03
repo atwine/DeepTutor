@@ -179,7 +179,7 @@ export default function BookLibrary({
   return (
     <div className="flex h-full min-h-full flex-col overflow-hidden bg-[var(--background)]">
       {/* Header bar */}
-      <header className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-6 py-3">
+      <header className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-6 py-3 md:px-10">
         <div className="flex items-center gap-3">
           <Library size={18} className="text-[var(--muted-foreground)]" />
           <div>
@@ -215,7 +215,8 @@ export default function BookLibrary({
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-6 py-6">
+      <main className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-6xl px-6 py-8 md:px-10">
         {/* Stats row */}
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard
@@ -438,6 +439,7 @@ export default function BookLibrary({
             })}
           </div>
         )}
+        </div>
       </main>
     </div>
   );

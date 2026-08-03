@@ -136,7 +136,7 @@ export default function CoWriterHomePage() {
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--background)]">
-      <div className="mx-auto max-w-5xl px-6 py-8">
+      <div className="mx-auto max-w-6xl px-6 py-10 pb-16 md:px-10">
         <header className="mb-7 flex items-end justify-between gap-4">
           <div>
             <h1 className="text-[19px] font-semibold tracking-tight text-[var(--foreground)]">
