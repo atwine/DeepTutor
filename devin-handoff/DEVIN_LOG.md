@@ -3218,6 +3218,58 @@ rule (0,1,0) in the actual shipped CSS, and re-ran a login/user-list
 regression check against the rebuilt container to confirm nothing else
 broke.
 
+## 2026-08-03 — Devin — Sidebar reorder + "Admin" label rename
+
+**Item**: Repo owner requested the left sidebar be reordered (same order
+for every role) and one of the two "Admin"-labeled destinations renamed
+to reduce ambiguity with the "Settings" nav item.
+
+**Decisions** (per repo owner, via clarifying questions): the desired
+order below Learning Space is Knowledge Center then Memory (not the
+reverse); the ambiguous "Admin" pair is the sidebar footer link (→ User
+Management) vs. the "Settings" nav item — rename the footer link rather
+than merge it into Settings.
+
+**What changed**:
+- `web/components/sidebar/SidebarShell.tsx` — `PRIMARY_NAV` gained a new
+  "Browse Courses" entry (icon: GraduationCap) right after "Home".
+  `SECONDARY_NAV` reordered to Knowledge Center → Memory → Docs →
+  Settings, so the two consoles sit immediately below "Learning Space"
+  (the last `PRIMARY_NAV` entry) in the order requested.
+- `web/components/auth/CoursesLink.tsx` — deleted. It was a standalone
+  footer component with its own (simpler, unconditional) visibility
+  logic; converting "Browse Courses" into a normal `PRIMARY_NAV` entry
+  makes its position controlled by array order like every other item,
+  which is what "the order should be the same for all types of accounts"
+  requires — a bespoke footer component sitting outside the ordered list
+  couldn't satisfy that.
+- `web/components/sidebar/WorkspaceSidebar.tsx`,
+  `web/components/sidebar/UtilitySidebar.tsx` — removed the now-redundant
+  `<CoursesLink />` from both sidebars' footer slots (there are two
+  sidebar shells in this app, both share `SidebarShell`'s nav arrays, so
+  both needed the same footer cleanup to stay consistent).
+- `web/components/auth/AdminLink.tsx` — the admin-role label changed from
+  "Admin" to "Accounts Management"; the instructor-role variant
+  ("Course Units") is unchanged. Tooltip updated to "Manage registered
+  accounts" (was the redundant "Admin — User Management").
+- `web/locales/en/app.json`, `web/locales/zh/app.json` — added
+  translation keys for "Browse Courses", "Accounts Management", and the
+  new "Courses tooltip" (English + Chinese copy).
+
+**New sidebar order** (role-gated items only show for roles listed in
+`roles`, but position is fixed for everyone):
+Home → Browse Courses → Partners → My Agents (admin/instructor) →
+Co-Writer → Book → Learning Space → Knowledge Center (admin) → Memory →
+Docs → Settings (admin) · footer: Profile → Accounts Management/Course
+Units (admin/instructor) → Logout.
+
+**Verified**: `docker compose build --no-cache` succeeded (Next.js build
+runs a full TypeScript typecheck — confirms no leftover references to
+the deleted `CoursesLink` component). Confirmed the compiled frontend
+bundle contains both new strings ("Accounts Management", "Browse
+Courses") via `grep` inside the rebuilt container. Both locale JSON
+files validated with `json.load()` after manual edits.
+
 **Item 3: Instructor sees "Request to join" on their own course.**
 Reported live on the "Grace" instructor account. Root cause:
 `GET /course-units/catalog` (`deeptutor/multi_user/router.py`) computed
