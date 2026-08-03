@@ -2673,3 +2673,166 @@ Branch `feature-round4-integration` is merged locally, **not yet pushed**
 once they say so, same standing rule as every round before this one.
 
 — Claude
+
+## 2026-08-03 — Claude — Round 4 pushed to `main`; full technical handoff, going forward
+
+**Read this entry in full before starting anything.** This is a deliberate
+handoff point: the repo owner is moving primary development to Devin
+(running on Sonnet) to conserve Claude Code usage here — Claude Code's role
+from this point on is mainly **live browser/UI testing and merge/regression
+verification**, not implementation. Devin, this is now your primary
+driver's seat. Write verbosely in your own log entries — the repo owner is
+reading these directly now, not just relying on a summary from Claude.
+
+### Where things actually stand, right now
+
+- `main` is at commit `cf84034` on `origin/main` (`atwine/DeepTutor`) —
+  **pushed**, this is real, not a pending local branch like every prior
+  "handoff" entry in this file. `git log --oneline -5` from a fresh clone
+  will show this merge at the top.
+- The app runs via `docker compose -f docker-compose.yml up -d` (production
+  target, **not** `docker-compose.dev.yml`). Four services:
+  `deeptutor` (backend+frontend), `postgres`, `pocketbase` (unused sidecar,
+  fine to ignore), `sandbox-runner`.
+- **Schema bootstrapping changed in Round 4** — `scripts/init_db.py` now
+  shells out to `alembic upgrade head` instead of `Base.metadata.create_all()`.
+  If you're starting from a database that predates Round 4 (anything with
+  tables but no `alembic_version` table), you need to either (a) drop
+  everything and re-run `scripts/init_db.py` fresh, or (b) manually stamp
+  it: `alembic stamp head` after confirming the live schema already matches
+  `65b81544bdc8_baseline_current_schema.py` — do NOT just run `alembic
+  upgrade head` blind against an existing hand-migrated database without
+  checking this first, it will try to `CREATE TABLE` things that already
+  exist and fail.
+- **Any future schema change is now**: edit `deeptutor/services/db/models.py`
+  → `alembic revision --autogenerate -m "..."` (run against a database that
+  actually differs from the target metadata — see Round 4 Task 3's own log
+  entry for the "autogenerate against the live DB produces an empty
+  migration" gotcha) → review the generated file by hand → `alembic upgrade
+  head`. **Never** another manual `ALTER TABLE` or drop-and-recreate — that
+  discipline is exactly what Round 4 Task 3 was built to end.
+- **Docker/dependency-file discipline, learned the hard way twice now**:
+  this repo's Dockerfile does NOT install from `pyproject.toml` — it runs
+  `pip install -r requirements.txt`, which chains to `requirements/server.txt`.
+  Any new Python dependency needs to go in **both** `pyproject.toml` and
+  `requirements/server.txt`, or it silently won't be in the built image
+  (bit `asyncpg` during the original migration, bit `alembic` in Round 4).
+  Similarly, any new top-level file/directory a runtime script depends on
+  (like `alembic.ini`/`alembic/`) needs an explicit `COPY` line in the
+  Dockerfile — it is not enough for the file to exist in the repo. **If you
+  add a new dependency or a new top-level config file/directory this
+  runtime needs, grep the Dockerfile's `COPY` list and `requirements/server.txt`
+  before considering the task done, not after Claude finds it missing in a
+  container rebuild.**
+- Nothing about identity/auth storage changed this whole multi-round effort
+  — `deeptutor/multi_user/identity.py` is still flat JSON, deliberately, per
+  the original migration scoping (`DATABASE_MIGRATION_PLAN.md`).
+
+### What's actually built now (condensed — full detail in
+`ARCHITECTURE_AND_COMPLETED_WORK.md` + this file's full history)
+
+A 3-role (admin/instructor/student) course-management layer on top of
+upstream DeepTutor's tutoring platform:
+
+- **Course units**: create (admin, or instructor self-service since Round
+  2/B4), edit (instructor-of-unit or admin since Round 4/Task 2 —
+  `instructor_ids` reassignment stays admin-only), delete (admin-only,
+  deliberately, cascades everything), archive/unarchive (instructor-or-
+  admin, reversible, blocks student access without destroying data), start/
+  end dates with a 7-day grace period after end (`COURSE_END_GRACE_PERIOD_DAYS`
+  in `course_units.py`).
+- **Enrollment**: student-initiated join-request → instructor approve/
+  reject; student-initiated leave-request → instructor confirm (both
+  directions now have real UI, not just backend — leave-request UI was the
+  Round 3→Round 4 gap that got closed).
+- **Assignments**: instructor-authored questions (multiple-choice/fill-
+  blank auto-graded, free-text AI-Judge-graded via the same prompt Quiz
+  uses), publish/unpublish (reversible), `due_at` enforcement, per-student
+  access grants (extra attempts / extended deadline, for emergencies),
+  timed assignments with a pre-start briefing screen + live countdown +
+  auto-submit on expiry, `is_major` (hard-caps at 1 attempt regardless of
+  configured limit) vs. `passing_score`-gated retakes (blocked once passed,
+  even with attempts remaining) for everything else, a dedicated post-
+  submit results page (not an inline swap).
+- **Grading/reporting**: per-course gradebook + CSV export, cross-course
+  compiled report per instructor (backend only, no frontend page — see
+  TODO.md §D).
+- **Course notes**: instructor assigns one of their own Books as a course
+  unit's notes, publish/unpublish, cascade-deletes cleanly with the course
+  unit (re-verified through the live HTTP path in Round 4, not just the
+  storage layer).
+- **Notifications**: lightweight polling-based per-course activity feed
+  (bell icon + unread badge), fires on assignment-publish and notes-publish.
+- **Response feedback**: thumbs up/down on any tutor answer, admin review
+  queue (`/admin/feedback`).
+- **Storage**: course units/assignments/enrollments/submissions/notifications/
+  access-grants all in Postgres (async SQLAlchemy, Alembic-migrated as of
+  Round 4). Identity/grants still flat JSON, chat history still per-user
+  SQLite — both deliberately out of scope for the DB migration.
+
+### What's left, in the order I'd actually do it
+
+**1. Security review (`TODO.md` §A)** — small, and matters most before
+anything below it. `SECURITY.md` predates all of this multi-user/Postgres
+work. Do this first, it's cheap and derisks everything after it.
+
+**2. Railway deployment (`TODO.md` §B)** — the actual remaining milestone.
+Needs its own scoping conversation with the repo owner before code — this
+is genuinely a "discuss first" item, not a "read the ticket and go" item,
+because it involves infrastructure decisions (does `sandbox-runner` work
+as a second Railway service or does it need rethinking, what's the actual
+cutover plan for the institution's real students). **Do not start writing
+Railway-specific code without that conversation happening first** — this
+is exactly the kind of thing that's expensive to redo if the infra
+assumptions turn out wrong.
+
+**3. The small loose ends in `TODO.md` §D** — cheap, no discussion needed,
+pick up any time: the instructor cross-course report's frontend page is
+the most user-visible of these (backend fully works, just has no UI).
+
+**4. `TODO.md` §E's two bigger deferred features** — AI-assisted question
+generation and KB/Book upload limits. **Both need a real scoping
+conversation with the repo owner before any code**, same as Railway. Don't
+guess at "how should generated questions work" or "what's a reasonable
+upload quota" — those are product decisions, not technical ones.
+
+**5. `TODO.md` §C (GPU scaling) and §F (rebranding, Help Assistant)** — not
+tasks to pick up, just things to keep aware of. GPU scaling waits for an
+actual strain signal; rebranding waits on the repo owner's assets; Help
+Assistant waits on the repo owner re-opening it.
+
+### Things that need the repo owner's input before Devin proceeds
+
+Flagging these explicitly since Devin is now working with less real-time
+back-and-forth than the Claude-orchestrated rounds had:
+
+- **Railway deployment specifics** — see above, this is the big one.
+- **AI question generation** — what the actual UX/review flow should look
+  like before any implementation.
+- **KB/Book upload limits** — what quota is actually reasonable for this
+  institution's usage.
+- Anything else that smells like a product/policy call rather than a bug
+  fix — when in doubt, log the question in `DEVIN_LOG.md` and wait, the
+  same discipline every round so far has used for genuine judgment calls
+  (see Round 4 Task 2's permission-decision entry for what a
+  well-reasoned, explicitly-logged decision looks like when Devin *does*
+  have enough context to decide alone — that's the bar).
+
+### The way forward, concretely
+
+- **Devin**: pick up `TODO.md` §A (security review) first — it's small,
+  self-contained, and doesn't need a design conversation. Log start/
+  findings/completion in this file the same way every round has. For
+  anything in §B/§E, raise the needed discussion with the repo owner
+  before writing code, not after.
+- **Claude Code (here)**: the repo owner will come back to this session
+  mainly for live browser-driven testing/verification of whatever Devin
+  ships, and for merging Devin's branches the same way every round in this
+  file has been merged — cut a branch off `main` at `cf84034` (or whatever
+  `main`'s tip is by then), work there, log completion, and either the
+  repo owner or Claude Code will merge + push once it's verified live.
+- **Standing rule, still in force**: nothing gets pushed to `origin/main`
+  without the repo owner explicitly saying so. This round was pushed only
+  after that explicit go-ahead — same rule applies to whatever comes next.
+
+— Claude
