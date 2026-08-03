@@ -2252,4 +2252,68 @@ Each task's own completion will get its own log entry below, same
 Item/Status/What changed/Verified/New findings/Left-for-later format as
 every other entry in this file.
 
+## 2026-08-02 — Devin — Round 4 Task 1 done: course-notes cascade delete verified live
+
+**Item**: Round 4 Task 1 — verify (and fix if needed) that deleting a course
+unit cascades to its book/notes index (`CourseBookEntry`) the same way it
+already does for assignments/submissions.
+
+**Status**: done, verification-only — no code change needed. The cascade
+already works correctly.
+
+**Branch**: `devin-r4-notes-cascade`, worktree `../DeepTutor-r4-notes-cascade`,
+branched from `main`.
+
+**What changed**: nothing in application code. This was a live-verification
+task; the working tree is clean (confirmed with `git status --short` before
+finishing — no diff to commit).
+
+**Verified**: wrote a throwaway integration script
+(`tmp_test_notes_cascade.py`, deleted before finishing, not committed) that
+exercised the real async storage functions end-to-end against the live local
+Postgres (`deeptutor-postgres` container, reached from the host via
+`DATABASE_URL=postgresql+asyncpg://deeptutor:deeptutor@localhost:5432/deeptutor`
+— `asyncpg` was already installed in this environment):
+
+1. `course_units.create_course_unit(...)` — real course unit.
+2. `course_books.assign_book_to_course_unit(book_id, owner_id, course_unit_id)`
+   — real `CourseBookEntry` row (book manifest on disk not required for this
+   test: the cascade being tested is a DB-level FK concern on the index row
+   itself, independent of the book's physical files).
+3. `course_books.set_book_status(book_id, "published")` — published it.
+4. Confirmed pre-delete state: `list_entries_for_course_unit` returns 1 entry,
+   `get_book_entry(book_id)` resolves with `status="published"`.
+5. `course_units.delete_course_unit(course_unit_id)` — the same function
+   `DELETE /course-units/{id}` calls — returned `True`.
+6. Post-delete: `get_book_entry(book_id)` returns `None` and
+   `list_entries_for_course_unit(course_unit_id)` returns `[]`. This is
+   exactly the condition `book_access_router.py`'s
+   `GET /books/{book_id}/course-content` endpoint checks first (`entry is
+   None` -> raises 404 "This book isn't assigned to a course unit") — so the
+   read endpoint 404s cleanly post-delete rather than resolving a dead
+   `course_unit_id`, confirming the behavior described in the task without
+   needing to drive a full browser/UI session.
+
+All assertions passed on the first correct run. (One debugging detour: an
+early version of the test script printed an em-dash character in a
+diagnostic message, which silently truncated output when redirected to a
+file under this Windows PowerShell environment's default console encoding —
+looked like the process was hanging/dying after the delete step. Not a bug
+in the app; fixed by using plain ASCII in the test script's own print
+statements, unrelated to the actual verification.)
+
+**New findings**: none — the FK's `ondelete="CASCADE")` on
+`CourseBookEntry.course_unit_id` (`deeptutor/services/db/models.py`) behaves
+identically to the already-proven `Assignment`/`Submission` cascade. No
+caching layer or soft-delete path intercepts this — `delete_course_unit`
+does a real `session.delete(unit)` + commit, and Postgres's own FK cascade
+does the rest, same mechanism, no special-casing needed for CourseBookEntry.
+
+**Left for later / handing back**: none for this task specifically. A full
+browser-driven UI verification (as opposed to exercising the underlying
+async functions directly) was not performed — the task's stated fallback
+("if a full UI/browser drive isn't practical... at minimum exercise the real
+async storage functions end-to-end... not a raw SQL DELETE") was used
+instead, which is what was actually done here.
+
 — Devin
