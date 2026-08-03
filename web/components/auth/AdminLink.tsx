@@ -13,21 +13,22 @@ interface AdminLinkProps {
 export function AdminLink({ collapsed = false }: AdminLinkProps) {
   const pathname = usePathname();
   const { t } = useTranslation();
-  const { enabled, isAdmin, isInstructor } = useAuthStatus();
+  const { enabled, isAdmin } = useAuthStatus();
 
-  if (!enabled || (!isAdmin && !isInstructor)) return null;
+  if (!enabled || !isAdmin) return null;
 
-  // Admins land on user management (their primary admin surface, with a
-  // cross-link to Course Units from there); instructors have no access to
-  // user management, so their sidebar entry goes straight to the units
-  // they teach.
+  // Instructors now get their own "My Course Units" entry in the primary
+  // nav (placed directly below "Browse Courses"), so this footer link is
+  // admin-only — avoids a duplicate entry for instructors. Admins land on
+  // user management (their primary admin surface, with a cross-link to the
+  // global Course Units catalog from there).
   //
   // Labeled "Accounts Management" rather than "Admin" — with a separate
   // admin-only "Settings" nav item already in the sidebar, a plain "Admin"
   // label here read as a duplicate/ambiguous destination.
-  const href = isAdmin ? "/admin/users" : "/admin/course-units";
-  const label = isAdmin ? t("Accounts Management") : t("Course Units");
-  const title = isAdmin ? t("Manage registered accounts") : t("Course units you teach");
+  const href = "/admin/users";
+  const label = t("Accounts Management");
+  const title = t("Manage registered accounts");
   const active = pathname.startsWith(href);
 
   if (collapsed) {

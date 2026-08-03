@@ -10,6 +10,7 @@ import {
   Bot,
   Brain,
   ChevronDown,
+  ClipboardList,
   GraduationCap,
   HeartHandshake,
   HelpCircle,
@@ -62,6 +63,20 @@ const PRIMARY_NAV: NavEntry[] = [
     label: "Browse Courses",
     icon: GraduationCap,
     tooltipKey: "Courses tooltip",
+  },
+  {
+    // Instructors manage the course units they teach from here. Labeled
+    // "My Course Units" to distinguish it from the admin's global catalog
+    // (admins reach the global Course Units via a cross-link from Accounts
+    // Management, not from here) and placed directly below "Browse Courses"
+    // so an instructor's own units sit right under the catalog. The route
+    // is unchanged — only the label and ordering differ. Admins do not see
+    // this entry (they keep their "Accounts Management" footer link).
+    href: "/admin/course-units",
+    label: "My Course Units",
+    icon: ClipboardList,
+    tooltipKey: "My Course Units tooltip",
+    roles: ["instructor"],
   },
   {
     href: "/partners",
