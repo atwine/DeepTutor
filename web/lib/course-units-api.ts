@@ -26,6 +26,11 @@ export interface CourseUnit {
  * instructor doesn't request to join their own course). */
 export interface CatalogCourseUnit extends CourseUnit {
   my_status: "pending" | "approved" | "leave_requested" | "teaching" | null;
+  /** Issue #4: ISO timestamp when the student completed the unit (all
+   * published assignments submitted+graded), or "" when not yet completed.
+   * Only populated for approved enrollments; "" otherwise. Completion is
+   * automatic and never revokes read access to course materials. */
+  completed_at: string;
 }
 
 export interface RosterEntry {

@@ -25,6 +25,7 @@ from .course_units import (
     approve_enrollment,
     approve_leave,
     archive_course_unit,
+    check_and_mark_completion,
     create_course_unit,
     delete_course_unit,
     enroll_student,
@@ -396,7 +397,16 @@ async def course_unit_catalog_endpoint(
             if user_id and user_id in unit.get("instructor_ids", [])
             else status_by_unit.get(unit["id"])
         )
-        catalog.append({**_with_instructor_names(unit), "my_status": my_status})
+        # Issue #4: for an approved student, check whether all published
+        # assignments are submitted+graded and auto-mark completion. The
+        # check is idempotent (only sets completed_at once) and never
+        # revokes read access. "" for non-approved/teaching units.
+        completed_at = ""
+        if my_status == "approved" and user_id:
+            completed_at = await check_and_mark_completion(unit["id"], user_id)
+        catalog.append(
+            {**_with_instructor_names(unit), "my_status": my_status, "completed_at": completed_at}
+        )
     return {"course_units": catalog}
 
 

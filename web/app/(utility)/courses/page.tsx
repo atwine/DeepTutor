@@ -182,6 +182,18 @@ export default function CourseCatalogPage() {
                           <Check size={12} strokeWidth={2} />
                           {t("Enrolled")}
                         </span>
+                        {/* Issue #4: automatic completion — shown when all
+                         * published assignments are submitted+graded.
+                         * Completion never revokes read access. */}
+                        {unit.completed_at && (
+                          <span
+                            className="flex items-center gap-1 rounded-full bg-blue-500/15 px-2.5 py-1 text-xs font-medium text-blue-600 dark:text-blue-400"
+                            title={new Date(unit.completed_at).toLocaleString()}
+                          >
+                            <Check size={12} strokeWidth={2} />
+                            {t("Completed")}
+                          </span>
+                        )}
                         <Link
                           href={`/courses/${unit.id}/assignments`}
                           className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"

@@ -21,6 +21,9 @@ export interface GradebookRow {
   registration_number: string;
   assignments: GradebookAssignmentResult[];
   final_grade: number | null;
+  /** Issue #4: ISO timestamp when the student completed the unit (all
+   * published assignments submitted+graded), or "" when not yet completed. */
+  completed_at: string;
 }
 
 export interface Gradebook {
