@@ -2584,3 +2584,92 @@ this task's DDL.
   with the repo owner).
 
 — Devin
+
+## 2026-08-03 — Claude — Round 4 merge + regression pass complete
+
+**Item**: merge all three Round 4 branches (`devin-r4-notes-cascade`,
+`devin-r4-cu-perms`, `devin-r4-alembic`), verify live, report results.
+
+**Status**: done.
+
+**What changed**: merged all three into `feature-round4-integration`, cut
+from `main`. Three merges, three conflicts total — all three in this file
+(each track appended after the same point, same pattern every round has
+hit), resolved by keeping every entry in full. Every other file merged with
+zero conflicts, confirming the parallel split held (Task 1 touched nothing,
+Task 2 touched only `router.py` + the admin course-units page, Task 3
+touched only new files + `scripts/init_db.py` + `pyproject.toml`).
+
+**A real deployment bug found and fixed during this pass, not by any of
+the three tracks**: Task 3's Alembic tooling was built and verified
+entirely via local CLI runs — never inside an actual container build. The
+Dockerfile's `COPY` list never learned about the new `alembic.ini`/
+`alembic/` files, so `scripts/init_db.py`'s `alembic upgrade head` failed
+inside the real deployed container with "No 'script_location' key found in
+configuration" — the files simply weren't there. Fixed by adding both to
+the Dockerfile's production-stage `COPY` list. **Also caught the
+now-familiar sibling bug**: Task 3 added `alembic` to `pyproject.toml` but
+not `requirements/server.txt`, which is what the Dockerfile actually
+installs from — the exact same gotcha that bit `asyncpg` during the
+original Postgres migration. Fixed both before rebuilding; confirmed
+`alembic upgrade head` now runs successfully inside the real container
+against a freshly-dropped schema, producing all 9 application tables plus
+`alembic_version`.
+
+**Verified**: rebuilt the Docker image twice (once to discover the Dockerfile
+gap, once after fixing it), reset the Postgres schema fully (including
+dropping `alembic_version` itself) and confirmed `scripts/init_db.py` now
+runs `alembic upgrade head` end-to-end through the real container entrypoint,
+not just a local CLI invocation. Then ran a live regression pass via API +
+browser with fresh throwaway accounts (`r4_instr_a`, `r4_instr_b`, `r4_stud`,
+all deleted afterward):
+
+- **Task 1 (course-notes cascade)** — Devin's own verification exercised the
+  underlying async storage functions directly, not the HTTP layer. Added an
+  independent check through the actual layer Devin's approach didn't cover:
+  inserted a real `CourseBookEntry` row, deleted the course unit via the
+  live `DELETE /course-units/{id}` HTTP endpoint (not a direct Python call),
+  confirmed the entry was gone via `psql` afterward. Cascades cleanly
+  through the real request path, not just the storage layer.
+- **Task 2 (permission decision)** — confirmed every branch of the decision
+  live: the unit's own instructor can edit metadata (name/description
+  applied), a smuggled `instructor_ids` field in that same request is
+  silently dropped (unchanged after), a *different* instructor gets a clean
+  403, delete stays admin-only for the unit's own instructor (403), and
+  admin retains full `instructor_ids` reassignment. Also confirmed in the
+  browser: the instructor now sees an "Edit" button (no "Delete"), and the
+  edit form correctly shows "Only an admin can change who teaches this
+  course unit" + "Previously taught by: r4_instr_b" rather than the
+  create-mode copy.
+- **Task 3 (Alembic)** — see the Dockerfile/requirements fixes above; once
+  fixed, confirmed end-to-end via the real deployment path.
+- **K1 re-verified**, with an unplanned but informative wrinkle: the local
+  vLLM endpoint was unreachable for part of this pass (the repo owner's own
+  machine had lost its VPN connection after a restart, unrelated to any
+  code in this round), which meant several submit requests hung on LLM
+  retries and one client-side `curl` timeout landed while a server-side
+  retry was still in flight. Once the VPN was restored, exactly one
+  submission had been recorded despite multiple overlapping/retried
+  requests across the outage — arguably a stronger proof than a clean
+  two-request test, since it held up under real overlapping retries, not
+  just one deliberately-timed pair. No regression; `assignments.py`'s
+  submit-flow locking wasn't touched by any Round 4 task.
+- C1 (cascade delete) was re-covered by the Task 1 verification above,
+  same DELETE endpoint, same mechanism.
+
+**New findings**: the Dockerfile/requirements gaps above — both now fixed,
+both worth remembering for any future round that adds new top-level
+files or dependencies: local CLI verification does not prove a container
+build actually ships the thing.
+
+**Left for later / handing back**: everything the three tracks themselves
+flagged (no CI step re-running `alembic upgrade head`; the "let a
+co-instructor remove themselves" narrower self-service idea; documenting
+the Alembic workflow in onboarding docs). All test data (3 throwaway
+accounts, 4 course units across this pass, their assignments/submissions)
+has been deleted; verified the system is back to its pre-test state.
+Branch `feature-round4-integration` is merged locally, **not yet pushed**
+— per the repo owner's explicit instruction this round, push happens only
+once they say so, same standing rule as every round before this one.
+
+— Claude
