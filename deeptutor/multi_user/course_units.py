@@ -79,8 +79,11 @@ def _provision_course_kb(unit_id: str) -> str | None:
         from deeptutor.multi_user.knowledge_access import admin_kb_base_dir
 
         kb_name = f"course_{unit_id}"
-        base_dir = str(admin_kb_base_dir().resolve())
-        progress_tracker = ProgressTracker(kb_name, base_dir)
+        base_dir_path = admin_kb_base_dir().resolve()
+        base_dir = str(base_dir_path)
+        # ProgressTracker joins base_dir / kb_name internally, so it needs a
+        # Path, not the str KnowledgeBaseInitializer expects.
+        progress_tracker = ProgressTracker(kb_name, base_dir_path)
         initializer = KnowledgeBaseInitializer(
             kb_name=kb_name,
             base_dir=base_dir,
