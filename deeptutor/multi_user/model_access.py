@@ -86,6 +86,30 @@ def redacted_model_access(user_id: str | None = None) -> dict[str, list[dict[str
                     "available": model is not None,
                 }
             )
+
+    # Default-model fallback: if the user has no explicit LLM grants, give them
+    # the catalog's active model automatically. This means new students can use
+    # the AI immediately without the admin having to grant access per-user. The
+    # admin controls which model is "active" from the settings page — that single
+    # model becomes the baseline for everyone. Explicit grants (via the
+    # GrantEditor) override this fallback: if the admin has assigned specific
+    # models to a user, those are used instead.
+    if not result["llm"]:
+        active_profile = admin_catalog_service().get_active_profile(catalog, "llm")
+        if active_profile is not None and not is_owner_bound(active_profile):
+            active_model = admin_catalog_service().get_active_model(catalog, "llm")
+            if active_model is not None:
+                result["llm"].append(
+                    {
+                        "profile_id": str(active_profile.get("id") or ""),
+                        "model_id": str(active_model.get("id") or ""),
+                        "name": str(active_model.get("name") or active_model.get("model") or ""),
+                        "model": str(active_model.get("model") or ""),
+                        "source": "default",
+                        "available": True,
+                    }
+                )
+
     return result
 
 
@@ -102,7 +126,7 @@ def allowed_llm_options() -> dict[str, Any]:
             "label": item.get("name") or item.get("model") or item.get("model_id"),
             "model": item.get("model") or "",
             "provider": "",
-            "source": "admin",
+            "source": item.get("source") or "admin",
             "is_active_default": False,
         }
         for item in redacted_model_access(user.id).get("llm", [])

@@ -3108,4 +3108,45 @@ confirmed present. It only appears for non-admin users; with only an
 admin account registered it won't show. Created a test `student1` account
 so the icon is visible for testing.
 
+## 2026-08-03 — Devin — Default-model fallback (Phase 1 of LLM access redesign)
+
+**Item**: Reduce admin effort for granting LLM access to students. Today
+the admin must manually open each student's GrantEditor and check model
+boxes one by one — doesn't scale to a classroom of 30+.
+
+**Decision** (per repo owner): The admin's "active" model in the catalog
+becomes the default for everyone. Students with no explicit grant
+automatically get that model. Explicit grants (via GrantEditor) override
+the fallback. No new "default" flag — reuses the existing
+`active_profile_id`/`active_model_id` from the catalog.
+
+**Status**: done (Phase 1). Phase 2 (student "request more access" flow)
+deferred — will be built separately.
+
+**What changed**:
+- `deeptutor/multi_user/model_access.py` — `redacted_model_access()`
+  now falls back to the catalog's active LLM model when the user has no
+  explicit LLM grants. The fallback model is tagged `source: "default"`
+  so the frontend can distinguish it from admin-granted models. Owner-
+  bound profiles (e.g. Codex OAuth) are excluded from the fallback —
+  those can't be shared. `allowed_llm_options()` passes the `source`
+  field through instead of hardcoding `"admin"`.
+
+**How it works**:
+1. Admin configures the model catalog and sets an active model (existing
+   UI, no changes needed)
+2. New student registers → immediately sees the active model in their
+   model picker, can use the AI right away
+3. If admin wants to give a student extra/different models, they use the
+   GrantEditor as before — explicit grants override the fallback
+4. If admin removes all explicit grants from a student, the student
+   falls back to the default model again
+
+**Verified** (live API test, 8 assertions):
+- Student with no grant sees the active model with `source="default"`
+- Student with explicit grant to a different model sees ONLY that model
+  (fallback is not merged in — explicit grant fully overrides)
+- Admin sees all models as before (no change to admin behavior)
+- Catalog save/apply works as before
+
 — Devin
