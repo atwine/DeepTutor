@@ -168,6 +168,11 @@ COPY scripts/ ./scripts/
 COPY pyproject.toml ./
 COPY requirements/ ./requirements/
 COPY requirements.txt ./
+# Alembic migration tooling (Round 4 Task 3) — scripts/init_db.py shells out
+# to `alembic upgrade head`, which needs alembic.ini + alembic/ present at
+# runtime, not just in a local checkout.
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
 
 # Create necessary directories (these will be overwritten by volume mounts)
 RUN mkdir -p \
