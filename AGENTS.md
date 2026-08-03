@@ -136,3 +136,34 @@ Source extras (.[ extra ], defined in pyproject.toml):
 .[dev]            — Test / lint tooling
 .[all]            — Everything above
 ```
+
+## Git Branching Workflow
+
+This repo uses a four-stage promotion flow. Work flows strictly one
+direction — a feature branch never merges directly into `staging` or
+`main`, and `development` never merges directly into `main`.
+
+```
+feature/*   →   development   →   staging   →   main
+ (many)            (one)            (one)        (one)
+```
+
+- **Feature branches** — one per feature/task, often a separate git
+  worktree. Fork from the latest `development` (never from `main`
+  directly): `git checkout -b feature/<name> development`. Delete after
+  merging back into `development`.
+- **`development`** — the integration branch. Every feature branch lands
+  here first. Direct pushes/merges are allowed (no PR required) — this
+  is the fast day-to-day branch.
+- **`staging`** — a stabilization checkpoint, promoted from `development`
+  once it looks solid (e.g. before a deploy/test pass). Direct
+  pushes/merges are allowed (no PR required).
+- **`main`** — production. Only ever receives promotions from `staging`.
+  **Protected on GitHub: direct pushes are blocked, a pull request is
+  required.** No mandatory reviewer (solo maintainer) — the PR step
+  itself is what's enforced, not a second approval.
+
+**For agents working in this repo**: when starting new work, branch from
+`development`, not `main` (`git checkout -b feature/<name> development`).
+Never push directly to `main` — merge into `staging` first, then open a
+PR from `staging` into `main`.
