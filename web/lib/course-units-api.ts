@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl } from "@/lib/api";
+﻿import { apiFetch, apiUrl } from "@/lib/api";
 
 export interface CourseUnit {
   id: string;
@@ -6,7 +6,7 @@ export interface CourseUnit {
   term: string;
   description: string;
   instructor_ids: string[];
-  /** Server-resolved usernames for `instructor_ids`, same order — lets a
+  /** Server-resolved usernames for `instructor_ids`, same order â€” lets a
    * non-admin instructor see a co-instructor's name without needing the
    * admin-only user list. */
   instructor_usernames: string[];
@@ -22,7 +22,7 @@ export interface CourseUnit {
 
 /** A course unit as shown in the student-facing catalog: `my_status` is the
  * caller's own relationship to it. "teaching" means the caller is one of
- * the unit's instructors (shown instead of an enrollment status — an
+ * the unit's instructors (shown instead of an enrollment status â€” an
  * instructor doesn't request to join their own course). */
 export interface CatalogCourseUnit extends CourseUnit {
   my_status: "pending" | "approved" | "leave_requested" | "teaching" | null;
@@ -31,6 +31,19 @@ export interface CatalogCourseUnit extends CourseUnit {
    * Only populated for approved enrollments; "" otherwise. Completion is
    * automatic and never revokes read access to course materials. */
   completed_at: string;
+}
+
+/** Issue #3: a file uploaded as course material for a course unit. */
+export interface CourseMaterial {
+  id: string;
+  course_unit_id: string;
+  filename: string;
+  file_type: "ipynb" | "pdf" | "docx" | "pptx" | "xlsx" | "md" | "txt" | "other";
+  size_bytes: number;
+  status: "draft" | "published";
+  uploaded_at: string;
+  published_at: string | null;
+  ingestion_status: "pending" | "indexing" | "ready" | "failed";
 }
 
 export interface RosterEntry {
@@ -134,7 +147,7 @@ export async function deleteCourseUnit(courseUnitId: string): Promise<void> {
   await unwrap<{ ok: boolean }>(res, "Failed to delete course unit");
 }
 
-/** Round 3: archive a course unit — blocks students the same way an
+/** Round 3: archive a course unit â€” blocks students the same way an
  * expired course does, while instructor/admin access is unaffected. */
 export async function archiveCourseUnit(courseUnitId: string): Promise<CourseUnit> {
   const res = await apiFetch(
@@ -257,7 +270,7 @@ export async function rejectEnrollmentRequest(
   await unwrap<{ ok: boolean }>(res, "Failed to reject request");
 }
 
-/** Every course unit, annotated with the caller's own enrollment status —
+/** Every course unit, annotated with the caller's own enrollment status â€”
  * the student-facing "what can I join" browse view. */
 export async function getCourseCatalog(): Promise<CatalogCourseUnit[]> {
   const res = await apiFetch(apiUrl("/api/v1/multi-user/course-units/catalog"));
@@ -308,7 +321,7 @@ export async function getLeaveRequests(
   return data.requests;
 }
 
-/** Instructor confirms a leave request — removes the student from the roster. */
+/** Instructor confirms a leave request â€” removes the student from the roster. */
 export async function approveLeaveRequest(
   courseUnitId: string,
   userId: string,
@@ -322,7 +335,7 @@ export async function approveLeaveRequest(
   await unwrap<{ ok: boolean }>(res, "Failed to approve leave request");
 }
 
-/** Instructor rejects a leave request — student stays enrolled. */
+/** Instructor rejects a leave request â€” student stays enrolled. */
 export async function rejectLeaveRequest(
   courseUnitId: string,
   userId: string,
@@ -334,4 +347,108 @@ export async function rejectLeaveRequest(
     { method: "POST" },
   );
   await unwrap<{ enrollment: unknown }>(res, "Failed to reject leave request");
+}
+
+
+// Issue #3: Course materials — instructor uploads + student-facing view.
+
+/** Upload one or more files as course materials (instructor/admin only).
+ * Uses multipart/form-data; the browser sets the boundary automatically. */
+export async function uploadMaterials(
+  courseUnitId: string,
+  files: File[],
+): Promise<CourseMaterial[]> {
+  const form = new FormData();
+  for (const file of files) {
+    form.append("files", file, file.name);
+  }
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/upload`,
+    ),
+    { method: "POST", body: form },
+  );
+  const data = await unwrap<{ materials: CourseMaterial[] }>(
+    res,
+    "Failed to upload materials",
+  );
+  return data.materials;
+}
+
+/** List materials for a course unit. Instructors/admins see all statuses;
+ * students see only published materials (enforced server-side). */
+export async function listMaterials(
+  courseUnitId: string,
+): Promise<CourseMaterial[]> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/admin/course-units/${encodeURIComponent(courseUnitId)}/materials`,
+    ),
+  );
+  const data = await unwrap<{ materials: CourseMaterial[] }>(
+    res,
+    "Failed to fetch materials",
+  );
+  return data.materials;
+}
+
+/** Publish a draft material so enrolled students can see/download it. */
+export async function publishMaterial(
+  courseUnitId: string,
+  materialId: string,
+): Promise<CourseMaterial> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/${encodeURIComponent(materialId)}/publish`,
+    ),
+    { method: "POST" },
+  );
+  const data = await unwrap<{ material: CourseMaterial }>(
+    res,
+    "Failed to publish material",
+  );
+  return data.material;
+}
+
+/** Revert a published material back to draft (hides it from students). */
+export async function unpublishMaterial(
+  courseUnitId: string,
+  materialId: string,
+): Promise<CourseMaterial> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/${encodeURIComponent(materialId)}/unpublish`,
+    ),
+    { method: "POST" },
+  );
+  const data = await unwrap<{ material: CourseMaterial }>(
+    res,
+    "Failed to unpublish material",
+  );
+  return data.material;
+}
+
+/** Permanently delete a material and its stored file. */
+export async function deleteMaterial(
+  courseUnitId: string,
+  materialId: string,
+): Promise<void> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/${encodeURIComponent(materialId)}`,
+    ),
+    { method: "DELETE" },
+  );
+  await unwrap<{ ok: boolean }>(res, "Failed to delete material");
+}
+
+/** Cookie-authenticated download URL for a material. A plain navigation
+ * triggers the download since auth is a same-origin cookie. */
+export function materialDownloadUrl(
+  courseUnitId: string,
+  materialId: string,
+): string {
+  return apiUrl(
+    `/api/v1/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/${encodeURIComponent(materialId)}/download`,
+  );
 }
