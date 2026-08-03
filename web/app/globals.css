@@ -190,8 +190,8 @@
      CSS theme cascade. color-scheme is inherited from .dark/.theme-glass on
      <html>, but setting it explicitly on the control itself keeps the popup
      correctly dark-themed regardless of inheritance timing (portals,
-     hydration) — without this, open dropdowns render with a white popup
-     background even though the closed control looks themed. */
+     hydration). The background-color half of this fix has to live outside
+     @layer base — see the unlayered rule near the bottom of this file for why. */
   .dark select,
   .theme-glass select {
     color-scheme: dark;
@@ -406,6 +406,26 @@
 .dark .prose mark {
   background: #854d0e;
   color: #fef9c3;
+}
+
+/* ─── Native <select> dark-mode popup background ───
+   color-scheme (set on .dark/.theme-glass select, in @layer base above) only
+   controls default text/highlight colors for the native popup — Chromium
+   derives the popup's actual solid background from the select's own *computed
+   background-color*, not color-scheme alone. Almost every <select> in this
+   app carries the bg-transparent utility class (for a seamless look against
+   whatever surface it sits on), and Tailwind's `utilities` layer outranks our
+   `@layer base` rules regardless of selector specificity — so a background-color
+   added there would be silently overridden by bg-transparent. Placed here,
+   unlayered (like .dark .prose mark above), this rule sits above all @layer
+   blocks and reliably wins. --popover is the token this design system already
+   defines for floating/overlay surfaces, which is exactly what a dropdown
+   popup is — used instead of --card because .theme-glass's --card is only 6%
+   opaque (still effectively transparent to the browser), while its --popover
+   is 92% opaque. */
+.dark select,
+.theme-glass select {
+  background-color: var(--popover);
 }
 
 /* ─── Subscript / Superscript ─── */

@@ -3186,15 +3186,37 @@ bcrypt's cost like a known username does (timing ratio ~1x instead of
 returning near-instantly).
 
 **Item 2: Dropdown white background in dark mode.** Reported by the repo
-owner with a screenshot — native `<select>` dropdown popups (e.g. the
-question-type picker in the assignment builder) rendered with a white
-background even in dark mode, though the closed control looked correctly
-themed. Root cause: `color-scheme: dark` was only set on `.dark` at the
-`<html>` level; browsers render native `<select>` popups based on the
-`color-scheme` used-value on the element itself, and relying purely on
-inheritance was unreliable. Fix: `web/app/globals.css` now sets
-`color-scheme: dark` directly on `.dark select, .theme-glass select`.
-Confirmed the rule is present in the rebuilt image's compiled CSS.
+owner with a screenshot (question-type picker in the assignment builder).
+First pass (setting `color-scheme: dark` directly on `.dark select` in
+`@layer base`) turned out to be incomplete — the repo owner caught more
+dropdowns still showing white (e.g. the admin Users role `<select>`) and
+asked for a thorough check. Root cause, fully diagnosed the second time:
+Chromium derives a native `<select>` popup's actual solid background from
+the element's *computed `background-color`*, not from `color-scheme`
+alone — `color-scheme` only picks default text/highlight colors once a
+background exists. Nearly every `<select>` in this app carries Tailwind's
+`bg-transparent` utility class, so the browser had no opaque color to
+derive a dark popup from and fell back to its own default (white),
+regardless of `color-scheme: dark` being set. Compounding this: Tailwind's
+`utilities` layer outranks `@layer base` regardless of selector
+specificity, so adding `background-color` to the same `@layer base` rule
+as `color-scheme` would have been silently overridden by `bg-transparent`
+anyway.
+
+Fix: `web/app/globals.css` now has a second, unlayered rule (placed near
+the existing unlayered `.dark .prose mark` override, i.e. outside every
+`@layer` block) setting `background-color: var(--popover)` on
+`.dark select, .theme-glass select`. `--popover` was chosen over `--card`
+because this design system already uses it for floating/overlay surfaces
+(17 other places), and because `.theme-glass`'s `--card` is only 6%
+opaque (still effectively transparent to the browser) while its
+`--popover` is 92% opaque. Verified in the rebuilt image: Tailwind's
+build flattens `@layer` away entirely (0 `@layer` at-rules survive
+compilation), so plain CSS specificity decides the winner — confirmed
+`.dark select` (specificity 0,1,1) beats the compiled `.bg-transparent`
+rule (0,1,0) in the actual shipped CSS, and re-ran a login/user-list
+regression check against the rebuilt container to confirm nothing else
+broke.
 
 **Item 3: Instructor sees "Request to join" on their own course.**
 Reported live on the "Grace" instructor account. Root cause:
