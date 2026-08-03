@@ -10,7 +10,7 @@ import {
   requestLeave,
   type CatalogCourseUnit,
 } from "@/lib/course-units-api";
-import { ArrowLeft, BookOpen, Calendar, Check, Clock, LogOut, RefreshCw, Send } from "lucide-react";
+import { ArrowLeft, BookOpen, Calendar, Check, Clock, GraduationCap, LogOut, RefreshCw, Send } from "lucide-react";
 import Link from "next/link";
 
 export default function CourseCatalogPage() {
@@ -215,6 +215,11 @@ export default function CourseCatalogPage() {
                       <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-400">
                         <Clock size={12} strokeWidth={2} />
                         {t("Requested")}
+                      </span>
+                    ) : unit.my_status === "teaching" ? (
+                      <span className="flex items-center gap-1 rounded-full bg-[var(--primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--primary)]">
+                        <GraduationCap size={12} strokeWidth={2} />
+                        {t("You teach this")}
                       </span>
                     ) : (
                       <button

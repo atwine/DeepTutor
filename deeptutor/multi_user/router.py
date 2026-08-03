@@ -360,8 +360,8 @@ async def course_unit_catalog_endpoint(
     current: TokenPayload | None = Depends(require_auth),
 ) -> dict[str, Any]:
     """Every course unit, open to any signed-in account, annotated with the
-    caller's own enrollment status (None/"pending"/"approved") — the
-    student-facing "what can I join" browse view. Distinct from
+    caller's own enrollment status (None/"pending"/"approved"/"teaching") —
+    the student-facing "what can I join" browse view. Distinct from
     ``/course-units`` (the admin/instructor management view) and
     ``/my/course-units`` (units already approved/taught/administered).
 
@@ -381,11 +381,22 @@ async def course_unit_catalog_endpoint(
     # (their access itself reads as blocked via _is_student_access_expired,
     # same as an expired course past its grace period; no special-case
     # needed beyond not surfacing it as a *new* thing to join).
-    catalog = [
-        {**_with_instructor_names(unit), "my_status": status_by_unit.get(unit["id"])}
-        for unit in await list_course_units()
-        if not unit.get("is_archived") or unit["id"] in status_by_unit
-    ]
+    catalog = []
+    for unit in await list_course_units():
+        if unit.get("is_archived") and unit["id"] not in status_by_unit:
+            continue
+        # An instructor browsing the catalog sees their own course(s) as
+        # "teaching", not "Request to join" — they already have full access
+        # via /my/course-units, and a join request against a course they
+        # teach makes no sense. This only overrides *their own* units; an
+        # instructor's join status on a colleague's course still resolves
+        # from the enrollment lookup above like any other account.
+        my_status = (
+            "teaching"
+            if user_id and user_id in unit.get("instructor_ids", [])
+            else status_by_unit.get(unit["id"])
+        )
+        catalog.append({**_with_instructor_names(unit), "my_status": my_status})
     return {"course_units": catalog}
 
 

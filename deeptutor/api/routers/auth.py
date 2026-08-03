@@ -45,8 +45,12 @@ from deeptutor.services.auth import (
     get_user_info,
     is_first_user,
     list_users,
+    login_lockout_remaining,
+    record_login_failure,
+    record_login_success,
     register_pb,
     set_avatar,
+    set_disabled,
     set_role,
 )
 from deeptutor.services.codex_auth.contracts import CodexAuthError
@@ -156,6 +160,10 @@ class UserInfo(BaseModel):
     avatar: str = ""
     full_name: str = ""
     registration_number: str = ""
+    first_name: str = ""
+    surname: str = ""
+    gender: str = ""
+    course: str = ""
 
 
 # Markers settable through PUT /profile. Image markers ("img:<version>") are
@@ -188,11 +196,15 @@ class UpdateProfileDetailsRequest(BaseModel):
 
     Distinct from ``UpdateProfileRequest`` (which is avatar-only) so this
     field set can grow (cohort/program, etc.) without touching the avatar
-    contract. Both fields are optional so a caller can update just one.
+    contract. All fields are optional so a caller can update just one.
     """
 
     full_name: str | None = None
     registration_number: str | None = None
+    first_name: str | None = None
+    surname: str | None = None
+    gender: str | None = None
+    course: str | None = None
 
     @field_validator("full_name")
     @classmethod
@@ -213,6 +225,55 @@ class UpdateProfileDetailsRequest(BaseModel):
         if len(v) > 64:
             raise ValueError("Registration number is too long")
         return v
+
+    @field_validator("first_name")
+    @classmethod
+    def first_name_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if len(v) > 100:
+            raise ValueError("First name is too long")
+        return v
+
+    @field_validator("surname")
+    @classmethod
+    def surname_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if len(v) > 100:
+            raise ValueError("Surname is too long")
+        return v
+
+    @field_validator("gender")
+    @classmethod
+    def gender_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().lower()
+        # Gender is required for all users — only male/female accepted.
+        # Empty string is rejected so a caller can't clear it once set.
+        if v not in {"male", "female"}:
+            raise ValueError("Gender must be 'male' or 'female'")
+        return v
+
+    @field_validator("course")
+    @classmethod
+    def course_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().lower()
+        allowed = {"", "masters", "phd"}
+        if v not in allowed:
+            raise ValueError("Course must be 'masters', 'phd', or empty")
+        return v
+
+
+class SetDisabledRequest(BaseModel):
+    """Payload for the PUT /users/{username}/disabled endpoint."""
+
+    disabled: bool
 
 
 # ---------------------------------------------------------------------------
@@ -490,20 +551,34 @@ async def auth_status(
 
 
 @router.post("/login")
-async def login(body: LoginRequest, response: Response) -> dict:
+async def login(body: LoginRequest, request: Request, response: Response) -> dict:
     """Validate credentials and set a JWT cookie."""
     if not AUTH_ENABLED:
         return {"ok": True, "message": "Auth is disabled — no login required."}
+
+    client_ip = request.client.host if request.client else "-"
+
+    # In-memory sliding-window lockout, keyed by (username, client_ip) — see
+    # deeptutor/services/auth.py's "Login rate limiting" section for rationale.
+    retry_after = login_lockout_remaining(body.username, client_ip)
+    if retry_after > 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Please try again later.",
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
 
     if POCKETBASE_ENABLED:
         # PocketBase mode: email = username field for backwards-compat with the
         # existing LoginRequest schema; users can pass their email as "username".
         pb_result = authenticate_pb(body.username, body.password)
         if not pb_result:
+            record_login_failure(body.username, client_ip)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
             )
+        record_login_success(body.username, client_ip)
         payload, pb_token = pb_result
         response.set_cookie(value=pb_token, max_age=_COOKIE_MAX_AGE, **_cookie_attrs())
         logger.info(f"User '{payload.username}' logged in via PocketBase (role={payload.role!r})")
@@ -518,10 +593,12 @@ async def login(body: LoginRequest, response: Response) -> dict:
     # Standard JWT + bcrypt mode
     result = authenticate(body.username, body.password)
     if not result:
+        record_login_failure(body.username, client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
         )
+    record_login_success(body.username, client_ip)
 
     token = create_token(result.username, result.role, result.user_id)
     response.set_cookie(value=token, max_age=_COOKIE_MAX_AGE, **_cookie_attrs())
@@ -721,6 +798,10 @@ async def update_profile_details_endpoint(
         current.username,
         full_name=body.full_name,
         registration_number=body.registration_number,
+        first_name=body.first_name,
+        surname=body.surname,
+        gender=body.gender,
+        course=body.course,
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return {"ok": True}
@@ -949,3 +1030,33 @@ async def update_user_role(
         f"Admin '{current.username if current else 'local'}' set '{username}' role to {body.role!r}"
     )
     return {"ok": True, "username": username, "role": body.role}
+
+
+@router.put("/users/{username}/disabled", status_code=status.HTTP_200_OK)
+async def set_user_disabled(
+    username: str,
+    body: SetDisabledRequest,
+    current: TokenPayload = Depends(require_admin),
+) -> dict:
+    """Enable or disable a user account. Admins cannot disable themselves.
+
+    A disabled user cannot log in (the check lives in ``authenticate``).
+    This is the admin-facing counterpart to the ``disabled`` field that has
+    existed in the user record since the multi-user layer was built — it
+    was previously non-functional because no endpoint set it and
+    ``authenticate`` never checked it. Both gaps are now closed.
+    """
+    if current and username == current.username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot disable your own account",
+        )
+
+    if not set_disabled(username, body.disabled):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    logger.info(
+        f"Admin '{current.username if current else 'local'}' "
+        f"{'disabled' if body.disabled else 'enabled'} user '{username}'"
+    )
+    return {"ok": True, "username": username, "disabled": body.disabled}

@@ -10,6 +10,7 @@ import {
   Bot,
   Brain,
   ChevronDown,
+  GraduationCap,
   HeartHandshake,
   HelpCircle,
   House,
@@ -52,6 +53,15 @@ const PRIMARY_NAV: NavEntry[] = [
     icon: House,
     tooltipKey: "Home tooltip",
     requires: "llm",
+  },
+  {
+    // Pulled out of the footer (was its own CoursesLink component) so its
+    // position in the nav is set by array order like everything else, and
+    // stays identical for every role — un-gated on ``roles``, same as before.
+    href: "/courses",
+    label: "Browse Courses",
+    icon: GraduationCap,
+    tooltipKey: "Courses tooltip",
   },
   {
     href: "/partners",
@@ -97,14 +107,17 @@ const PRIMARY_NAV: NavEntry[] = [
 
 const SECONDARY_NAV: NavEntry[] = [
   {
-    // A plain-language guide to the whole platform, for every role — the
-    // options here can be a lot for a first-time user, so this is the
-    // "how do I..." reference to point people at. Never gated: it has no
-    // model requirement and nothing here is role-sensitive information.
-    href: "/docs",
-    label: "Docs",
-    icon: HelpCircle,
-    tooltipKey: "Docs tooltip",
+    // Knowledge Center and Memory sit directly below Learning Space (the
+    // last PRIMARY_NAV entry) — both are consoles for the tutor's
+    // knowledge/memory stores rather than daily workspaces, so they're
+    // grouped together right after it. Ungated on model capability, but
+    // creating/deleting KBs and connecting a LightRAG server is
+    // admin-level system configuration — admin-only.
+    href: "/knowledge",
+    label: "Knowledge Center",
+    icon: BookOpen,
+    tooltipKey: "Knowledge tooltip",
+    roles: ["admin"],
   },
   {
     // Memory is its own top-level console (pulled out of the Learning Space):
@@ -116,15 +129,14 @@ const SECONDARY_NAV: NavEntry[] = [
     tooltipKey: "Memory tooltip",
   },
   {
-    // Knowledge Center sits just above Settings: it's a console for managing
-    // KBs and retrieval engines, not a daily workspace. Ungated on model
-    // capability, but creating/deleting KBs and connecting a LightRAG server
-    // is admin-level system configuration — admin-only.
-    href: "/knowledge",
-    label: "Knowledge Center",
-    icon: BookOpen,
-    tooltipKey: "Knowledge tooltip",
-    roles: ["admin"],
+    // A plain-language guide to the whole platform, for every role — the
+    // options here can be a lot for a first-time user, so this is the
+    // "how do I..." reference to point people at. Never gated: it has no
+    // model requirement and nothing here is role-sensitive information.
+    href: "/docs",
+    label: "Docs",
+    icon: HelpCircle,
+    tooltipKey: "Docs tooltip",
   },
   { href: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
 ];
@@ -170,9 +182,9 @@ export function SidebarShell({
 
   // Auth disabled (solo/local use, no real accounts) never hides anything —
   // the single user is effectively the admin. With auth enabled, hide a
-  // role-gated item until the role is actually known (mirrors AdminLink /
-  // CoursesLink, which likewise render nothing until resolved) rather than
-  // flashing it and then pulling it away.
+  // role-gated item until the role is actually known (mirrors AdminLink,
+  // which likewise renders nothing until resolved) rather than flashing it
+  // and then pulling it away.
   const visibleForRole = (item: NavEntry) => {
     if (!item.roles) return true;
     if (!authEnabled) return true;

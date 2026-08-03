@@ -47,8 +47,8 @@ export default function DocsPage() {
   const { t } = useTranslation();
 
   return (
-    <div className="h-screen overflow-y-auto bg-[var(--background)] px-4 py-10 [scrollbar-gutter:stable]">
-      <div className="mx-auto max-w-2xl pb-16">
+    <div className="h-screen overflow-y-auto bg-[var(--background)] [scrollbar-gutter:stable]">
+      <div className="mx-auto max-w-6xl px-6 py-10 pb-16 md:px-10">
         <Link
           href="/home"
           className="mb-6 inline-flex items-center gap-1.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"

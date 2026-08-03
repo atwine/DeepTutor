@@ -21,9 +21,13 @@ export function AdminLink({ collapsed = false }: AdminLinkProps) {
   // cross-link to Course Units from there); instructors have no access to
   // user management, so their sidebar entry goes straight to the units
   // they teach.
+  //
+  // Labeled "Accounts Management" rather than "Admin" — with a separate
+  // admin-only "Settings" nav item already in the sidebar, a plain "Admin"
+  // label here read as a duplicate/ambiguous destination.
   const href = isAdmin ? "/admin/users" : "/admin/course-units";
-  const label = isAdmin ? t("Admin") : t("Course Units");
-  const title = isAdmin ? t("Admin — User Management") : t("Course units you teach");
+  const label = isAdmin ? t("Accounts Management") : t("Course Units");
+  const title = isAdmin ? t("Manage registered accounts") : t("Course units you teach");
   const active = pathname.startsWith(href);
 
   if (collapsed) {

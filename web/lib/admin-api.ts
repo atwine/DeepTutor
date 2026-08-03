@@ -12,6 +12,10 @@ export interface UserRecord {
   avatar?: string;
   full_name?: string;
   registration_number?: string;
+  first_name?: string;
+  surname?: string;
+  gender?: string;
+  course?: string;
 }
 
 export async function listUsers(): Promise<UserRecord[]> {
@@ -79,4 +83,23 @@ export async function createUser(
     throw new Error(message);
   }
   return (await res.json()) as CreatedUser;
+}
+
+/** Enable or disable a user account (admin-only). */
+export async function setUserDisabled(
+  username: string,
+  disabled: boolean,
+): Promise<void> {
+  const res = await apiFetch(
+    apiUrl(`/api/v1/auth/users/${encodeURIComponent(username)}/disabled`),
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ disabled }),
+    },
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail ?? "Failed to update user status");
+  }
 }

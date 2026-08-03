@@ -8,6 +8,7 @@ import {
   listUsers,
   deleteUser,
   setUserRole,
+  setUserDisabled,
   createUser,
   type UserRecord,
   type UserRole,
@@ -27,6 +28,8 @@ import {
   UserPlus,
   Users,
   X,
+  Ban,
+  CircleCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { formatDate as formatLocaleDate, type Language } from "@/lib/datetime";
@@ -68,9 +71,10 @@ export default function AdminUsersPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [query, setQuery] = useState("");
   const [confirmTarget, setConfirmTarget] = useState<{
-    kind: "delete" | "role_change";
+    kind: "delete" | "role_change" | "toggle_disabled";
     user: UserRecord;
     newRole?: UserRole;
+    newDisabled?: boolean;
   } | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [createUsername, setCreateUsername] = useState("");
@@ -154,6 +158,16 @@ export default function AdminUsersPage() {
       if (kind === "delete") {
         await deleteUser(user.username);
         setUsers((prev) => prev.filter((u) => u.username !== user.username));
+      } else if (kind === "toggle_disabled") {
+        const newDisabled = confirmTarget.newDisabled ?? false;
+        await setUserDisabled(user.username, newDisabled);
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.username === user.username
+              ? { ...u, disabled: newDisabled }
+              : u,
+          ),
+        );
       } else {
         const newRole = confirmTarget.newRole ?? "user";
         await setUserRole(user.username, newRole);
@@ -176,7 +190,9 @@ export default function AdminUsersPage() {
           ? e.message
           : confirmTarget.kind === "delete"
             ? t("Failed to delete user")
-            : t("Failed to update role"),
+            : confirmTarget.kind === "toggle_disabled"
+              ? t("Failed to update user status")
+              : t("Failed to update role"),
       );
     } finally {
       setConfirmBusy(false);
@@ -186,6 +202,11 @@ export default function AdminUsersPage() {
   function requestRoleChange(user: UserRecord, newRole: UserRole) {
     if (newRole === user.role) return;
     setConfirmTarget({ kind: "role_change", user, newRole });
+  }
+
+  function requestToggleDisabled(user: UserRecord) {
+    const newDisabled = !user.disabled;
+    setConfirmTarget({ kind: "toggle_disabled", user, newDisabled });
   }
 
   useEffect(() => {
@@ -393,14 +414,27 @@ export default function AdminUsersPage() {
                               role={user.role}
                               size={32}
                             />
-                            <span className="min-w-0 truncate font-medium text-[var(--foreground)]">
-                              {user.username}
-                              {isSelf && (
-                                <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
-                                  {t("(you)")}
+                            <div className="min-w-0">
+                              <span className="block truncate font-medium text-[var(--foreground)]">
+                                {user.username}
+                                {isSelf && (
+                                  <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
+                                    {t("(you)")}
+                                  </span>
+                                )}
+                              </span>
+                              {(user.first_name || user.surname) && (
+                                <span className="block truncate text-xs text-[var(--muted-foreground)]">
+                                  {[user.first_name, user.surname].filter(Boolean).join(" ")}
                                 </span>
                               )}
-                            </span>
+                              {user.disabled && (
+                                <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:text-red-400">
+                                  <Ban size={9} strokeWidth={2} />
+                                  {t("Disabled")}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </td>
                         <td className="px-5 py-3">
@@ -461,6 +495,22 @@ export default function AdminUsersPage() {
                               <option value="admin">{t("Admin")}</option>
                             </select>
                             <button
+                              onClick={() => requestToggleDisabled(user)}
+                              disabled={isSelf}
+                              title={
+                                isSelf
+                                  ? t("Cannot disable your own account")
+                                  : user.disabled
+                                    ? t("Enable {{username}}", { username: user.username })
+                                    : t("Disable {{username}}", { username: user.username })
+                              }
+                              className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                                       hover:bg-amber-500/10 hover:text-amber-600 dark:hover:text-amber-400
+                                       disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                            >
+                              {user.disabled ? <CircleCheck size={15} /> : <Ban size={15} />}
+                            </button>
+                            <button
                               onClick={() =>
                                 setConfirmTarget({ kind: "delete", user })
                               }
@@ -504,14 +554,30 @@ export default function AdminUsersPage() {
       <ConfirmDialog
         open={confirmTarget !== null}
         title={
-          confirmTarget?.kind === "delete" ? t("Delete user") : t("Change role")
+          confirmTarget?.kind === "delete"
+            ? t("Delete user")
+            : confirmTarget?.kind === "toggle_disabled"
+              ? confirmTarget.newDisabled
+                ? t("Disable user")
+                : t("Enable user")
+              : t("Change role")
         }
         tone={confirmTarget?.kind === "delete" ? "danger" : "default"}
         confirmLabel={
-          confirmTarget?.kind === "delete" ? t("Delete user") : t("Change role")
+          confirmTarget?.kind === "delete"
+            ? t("Delete user")
+            : confirmTarget?.kind === "toggle_disabled"
+              ? confirmTarget.newDisabled
+                ? t("Disable user")
+                : t("Enable user")
+              : t("Change role")
         }
         busyLabel={
-          confirmTarget?.kind === "delete" ? t("Deleting…") : t("Changing…")
+          confirmTarget?.kind === "delete"
+            ? t("Deleting…")
+            : confirmTarget?.kind === "toggle_disabled"
+              ? t("Updating…")
+              : t("Changing…")
         }
         busy={confirmBusy}
         onConfirm={handleConfirmAction}
@@ -544,17 +610,25 @@ export default function AdminUsersPage() {
                 ? t(
                     "This permanently removes the account and its assignments. This cannot be undone.",
                   )
-                : confirmTarget.newRole === "admin"
-                  ? t(
-                      "Admins can manage users and assignments, and work in the shared main workspace.",
-                    )
-                  : confirmTarget.newRole === "instructor"
+                : confirmTarget.kind === "toggle_disabled"
+                  ? confirmTarget.newDisabled
                     ? t(
-                        "Instructors can manage their own course units — enrolling students, publishing materials, and viewing grades — without seeing other instructors' students or materials.",
+                        "A disabled user cannot log in. Their data and assignments are preserved — re-enable the account at any time.",
                       )
                     : t(
-                        "They will lose any admin or instructor management access and switch to their own assigned workspace.",
-                      )}
+                        "This will allow the user to log in again.",
+                      )
+                  : confirmTarget.newRole === "admin"
+                    ? t(
+                        "Admins can manage users and assignments, and work in the shared main workspace.",
+                      )
+                    : confirmTarget.newRole === "instructor"
+                      ? t(
+                          "Instructors can manage their own course units — enrolling students, publishing materials, and viewing grades — without seeing other instructors' students or materials.",
+                        )
+                      : t(
+                          "They will lose any admin or instructor management access and switch to their own assigned workspace.",
+                        )}
             </p>
           </>
         )}
