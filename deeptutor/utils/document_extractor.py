@@ -204,6 +204,8 @@ def extract_text_from_bytes(
         text = _extract_xlsx(data, filename)
     elif ext == ".pptx":
         text = _extract_pptx(data, filename)
+    elif ext == ".ipynb":
+        text = _extract_notebook(data, filename)
     elif ext in TEXT_LIKE_EXTENSIONS:
         text = _extract_text_like(data, filename)
     else:  # pragma: no cover - guarded above
@@ -355,6 +357,26 @@ def _extract_pptx(data: bytes, filename: str) -> str:
         if slide_text:
             slides.append(f"--- Slide {i} ---\n" + "\n".join(slide_text))
     return "\n\n".join(slides)
+
+
+def _extract_notebook(data: bytes, filename: str) -> str:
+    """Extract readable text from a Jupyter notebook (``.ipynb``).
+
+    Delegates to ``deeptutor.utils.notebook_parser`` which parses the JSON
+    structure and renders cells (markdown / code / text outputs) into a
+    single text block. Malformed JSON raises ``CorruptDocumentError``.
+    """
+    from deeptutor.utils.notebook_parser import (
+        NotebookParseError,
+        chunks_to_text,
+        parse_notebook_bytes,
+    )
+
+    try:
+        chunks = parse_notebook_bytes(data, source_file=filename)
+    except NotebookParseError as exc:
+        raise CorruptDocumentError(str(exc), filename=filename) from exc
+    return chunks_to_text(chunks)
 
 
 def _extract_text_like(data: bytes, filename: str) -> str:
