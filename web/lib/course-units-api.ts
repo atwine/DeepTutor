@@ -21,9 +21,11 @@ export interface CourseUnit {
 }
 
 /** A course unit as shown in the student-facing catalog: `my_status` is the
- * caller's own enrollment status for it (null/"pending"/"approved"). */
+ * caller's own relationship to it. "teaching" means the caller is one of
+ * the unit's instructors (shown instead of an enrollment status — an
+ * instructor doesn't request to join their own course). */
 export interface CatalogCourseUnit extends CourseUnit {
-  my_status: "pending" | "approved" | "leave_requested" | null;
+  my_status: "pending" | "approved" | "leave_requested" | "teaching" | null;
 }
 
 export interface RosterEntry {

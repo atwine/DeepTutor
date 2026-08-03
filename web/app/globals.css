@@ -186,6 +186,17 @@
     font: inherit;
   }
 
+  /* Native <select> dropdown popups are drawn by the OS/browser outside our
+     CSS theme cascade. color-scheme is inherited from .dark/.theme-glass on
+     <html>, but setting it explicitly on the control itself keeps the popup
+     correctly dark-themed regardless of inheritance timing (portals,
+     hydration) — without this, open dropdowns render with a white popup
+     background even though the closed control looks themed. */
+  .dark select,
+  .theme-glass select {
+    color-scheme: dark;
+  }
+
   summary::-webkit-details-marker {
     display: none;
   }

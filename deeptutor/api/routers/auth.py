@@ -45,6 +45,9 @@ from deeptutor.services.auth import (
     get_user_info,
     is_first_user,
     list_users,
+    login_lockout_remaining,
+    record_login_failure,
+    record_login_success,
     register_pb,
     set_avatar,
     set_disabled,
@@ -548,20 +551,34 @@ async def auth_status(
 
 
 @router.post("/login")
-async def login(body: LoginRequest, response: Response) -> dict:
+async def login(body: LoginRequest, request: Request, response: Response) -> dict:
     """Validate credentials and set a JWT cookie."""
     if not AUTH_ENABLED:
         return {"ok": True, "message": "Auth is disabled — no login required."}
+
+    client_ip = request.client.host if request.client else "-"
+
+    # In-memory sliding-window lockout, keyed by (username, client_ip) — see
+    # deeptutor/services/auth.py's "Login rate limiting" section for rationale.
+    retry_after = login_lockout_remaining(body.username, client_ip)
+    if retry_after > 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Please try again later.",
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
 
     if POCKETBASE_ENABLED:
         # PocketBase mode: email = username field for backwards-compat with the
         # existing LoginRequest schema; users can pass their email as "username".
         pb_result = authenticate_pb(body.username, body.password)
         if not pb_result:
+            record_login_failure(body.username, client_ip)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
             )
+        record_login_success(body.username, client_ip)
         payload, pb_token = pb_result
         response.set_cookie(value=pb_token, max_age=_COOKIE_MAX_AGE, **_cookie_attrs())
         logger.info(f"User '{payload.username}' logged in via PocketBase (role={payload.role!r})")
@@ -576,10 +593,12 @@ async def login(body: LoginRequest, response: Response) -> dict:
     # Standard JWT + bcrypt mode
     result = authenticate(body.username, body.password)
     if not result:
+        record_login_failure(body.username, client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
         )
+    record_login_success(body.username, client_ip)
 
     token = create_token(result.username, result.role, result.user_id)
     response.set_cookie(value=token, max_age=_COOKIE_MAX_AGE, **_cookie_attrs())

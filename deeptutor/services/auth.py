@@ -26,6 +26,8 @@ Multi-user setup (recommended):
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import logging
+import threading
+import time
 from typing import Any
 
 from deeptutor.services.config import load_auth_settings, load_integrations_settings
@@ -359,6 +361,72 @@ def register_pb(username: str, email: str, password: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Login rate limiting — in-memory sliding-window lockout
+# ---------------------------------------------------------------------------
+# Safe as in-memory state because the app runs as a single uvicorn worker (see
+# start-backend.sh: `uvicorn ... ` with no `--workers` flag) — no cross-process
+# sync needed. If a future deployment adds multiple workers/instances, this
+# needs to move to a shared store (e.g. Redis) instead.
+#
+# Keyed by (username, client_ip) per the repo owner's decision: protects a
+# specific account from a specific source without locking out an entire
+# shared/NAT'd network (e.g. a school lab) that happens to share one student's
+# bad password attempts.
+
+_LOGIN_LOCKOUT_MAX_ATTEMPTS = 3
+_LOGIN_LOCKOUT_WINDOW_SECONDS = 15 * 60  # 15 minutes
+
+_login_failures_lock = threading.Lock()
+_login_failures: dict[tuple[str, str], list[float]] = {}
+
+# A real (but never-used-for-an-actual-account) bcrypt hash, checked when the
+# username lookup misses. Keeps authenticate()'s response time similar for
+# unknown vs. known usernames — without this, an unknown username returns
+# immediately (skips bcrypt entirely) while a known one always pays bcrypt's
+# ~100ms cost, letting an attacker distinguish valid usernames by timing.
+_DUMMY_HASH_FOR_TIMING_PARITY = (
+    "$2b$12$RLr85RrjMzLqhIACrSHeC.ncaHIN4id/nvS1SkSwZfwM9.GXnLBoS"
+)
+
+
+def _prune_failures(timestamps: list[float], now: float) -> list[float]:
+    cutoff = now - _LOGIN_LOCKOUT_WINDOW_SECONDS
+    return [t for t in timestamps if t > cutoff]
+
+
+def login_lockout_remaining(username: str, client_ip: str) -> float:
+    """Seconds until (username, client_ip) may attempt to log in again, or 0 if not locked out."""
+    if not username:
+        return 0.0
+    key = (username, client_ip or "")
+    now = time.monotonic()
+    with _login_failures_lock:
+        timestamps = _prune_failures(_login_failures.get(key, []), now)
+        _login_failures[key] = timestamps
+        if len(timestamps) < _LOGIN_LOCKOUT_MAX_ATTEMPTS:
+            return 0.0
+        oldest = min(timestamps)
+        return max(_LOGIN_LOCKOUT_WINDOW_SECONDS - (now - oldest), 0.0)
+
+
+def record_login_failure(username: str, client_ip: str) -> None:
+    if not username:
+        return
+    key = (username, client_ip or "")
+    now = time.monotonic()
+    with _login_failures_lock:
+        timestamps = _prune_failures(_login_failures.get(key, []), now)
+        timestamps.append(now)
+        _login_failures[key] = timestamps
+
+
+def record_login_success(username: str, client_ip: str) -> None:
+    key = (username, client_ip or "")
+    with _login_failures_lock:
+        _login_failures.pop(key, None)
+
+
+# ---------------------------------------------------------------------------
 # Main auth entry point
 # ---------------------------------------------------------------------------
 
@@ -383,6 +451,9 @@ def authenticate(username: str, password: str) -> TokenPayload | None:
 
     record = users.get(username)
     if not record:
+        # Unknown username: still pay bcrypt's cost so response timing matches
+        # the known-username path below (see _DUMMY_HASH_FOR_TIMING_PARITY).
+        verify_password(password, _DUMMY_HASH_FOR_TIMING_PARITY)
         return None
 
     # A disabled account cannot log in, even with correct credentials.

@@ -118,15 +118,16 @@ un-auditable.
 
 **Flagged, not fixed here — need a decision, not a quick patch:**
 
-- **No brute-force/rate-limiting protection on `/login`.** No lockout, no
-  backoff, no CAPTCHA. `authenticate()` also does a cheap dict lookup before
-  the expensive bcrypt check, which is a (minor) username-enumeration timing
-  side channel. For a real deployment with real accounts, this should be
-  addressed — likely at the reverse-proxy/infra layer (rate-limiting is
-  usually a bad fit for in-app in-memory state across multiple workers)
-  rather than in `deeptutor/services/auth.py` itself. Needs a decision on
-  where this lives before implementing (relevant to the Railway deployment
-  scoping conversation, `TODO.md` §B).
+- **No brute-force/rate-limiting protection on `/login` — now fixed.** The
+  app runs a single uvicorn worker (`start-backend.sh` has no `--workers`
+  flag), so an in-memory lockout is safe without an infra dependency.
+  `/login` now locks out after 3 failed attempts within 15 minutes, keyed
+  by (username, client IP) — returns 429 with a `Retry-After` header,
+  including for a correct password submitted during the lockout window.
+  Also fixed the timing side-channel in the same pass: `authenticate()`
+  now runs a dummy bcrypt check for unknown usernames so response timing
+  no longer reveals whether an account exists. See
+  `deeptutor/services/auth.py`'s "Login rate limiting" section.
 - **The `disabled` field on user records is now functional.** Previously
   half-built (the field existed but no endpoint set it and `authenticate()`
   never checked it). Fixed in the same pass as this review: `authenticate()`

@@ -3150,3 +3150,80 @@ deferred — will be built separately.
 - Catalog save/apply works as before
 
 — Devin
+
+## 2026-08-03 — Devin — Login rate-limiting (security finding #1) + two UI bugs
+
+**Item 1: Security finding #1 — no login rate-limiting.** Previously
+flagged in `SECURITY.md` as needing a decision before implementing
+(concern: in-app in-memory state doesn't fit multi-worker deployments).
+Confirmed the app runs a single uvicorn worker (`start-backend.sh` has no
+`--workers` flag), so in-memory state is safe — no infra dependency
+needed.
+
+**Decisions** (per repo owner): 3 failed attempts / 15-minute window,
+keyed by (username, client IP) — protects one account from one source
+without locking out a whole shared/NAT'd network (e.g. a school lab).
+Also fixed the same finding's minor username-enumeration timing
+side-channel while in there.
+
+**What changed**:
+- `deeptutor/services/auth.py` — new in-memory sliding-window lockout:
+  `login_lockout_remaining()`, `record_login_failure()`,
+  `record_login_success()`. `authenticate()` now runs a dummy bcrypt
+  check for unknown usernames (`_DUMMY_HASH_FOR_TIMING_PARITY`) so
+  response timing no longer reveals whether a username exists.
+- `deeptutor/api/routers/auth.py` — `login()` now takes the `Request`
+  object, checks lockout before attempting auth (429 + `Retry-After`
+  header if locked out), and records failure/success for both the
+  PocketBase and JWT auth paths.
+
+**Verified live** (Docker container, both unit-level and HTTP-level):
+3 failed logins → 401 each; 4th attempt (even with the *correct*
+password) → 429 with `Retry-After: 900`; different IP or different
+username is unaffected (confirms per-(username, IP) keying); a success
+clears the lockout state; unknown-username `authenticate()` now pays
+bcrypt's cost like a known username does (timing ratio ~1x instead of
+returning near-instantly).
+
+**Item 2: Dropdown white background in dark mode.** Reported by the repo
+owner with a screenshot — native `<select>` dropdown popups (e.g. the
+question-type picker in the assignment builder) rendered with a white
+background even in dark mode, though the closed control looked correctly
+themed. Root cause: `color-scheme: dark` was only set on `.dark` at the
+`<html>` level; browsers render native `<select>` popups based on the
+`color-scheme` used-value on the element itself, and relying purely on
+inheritance was unreliable. Fix: `web/app/globals.css` now sets
+`color-scheme: dark` directly on `.dark select, .theme-glass select`.
+Confirmed the rule is present in the rebuilt image's compiled CSS.
+
+**Item 3: Instructor sees "Request to join" on their own course.**
+Reported live on the "Grace" instructor account. Root cause:
+`GET /course-units/catalog` (`deeptutor/multi_user/router.py`) computed
+`my_status` purely from the caller's *student* enrollments — an
+instructor isn't enrolled in their own course, so it came back `None`,
+and the frontend renders `None` as "Request to join".
+
+**Decision** (per repo owner): only hide the button for a course the
+instructor themselves teaches. They can still request to join a
+colleague's course as a student would — the fix doesn't hide the whole
+join flow for instructors, just their own units.
+
+**What changed**:
+- `deeptutor/multi_user/router.py` — `course_unit_catalog_endpoint` now
+  checks `unit["instructor_ids"]` first; if the caller is one of them,
+  `my_status = "teaching"` instead of the enrollment lookup.
+- `web/lib/course-units-api.ts` — `CatalogCourseUnit.my_status` type
+  gains `"teaching"`.
+- `web/app/(utility)/courses/page.tsx` — new branch renders a
+  "You teach this" badge (GraduationCap icon) instead of the join button
+  when `my_status === "teaching"`.
+
+**Verified live**: created an instructor account, had them create a
+course unit, confirmed `GET /course-units/catalog` returns
+`my_status: "teaching"` for that unit when queried as that instructor.
+
+Docker image rebuilt (`--no-cache`) with all three fixes and confirmed
+healthy; live HTTP tests re-run against the running container, all
+passed.
+
+— Devin
