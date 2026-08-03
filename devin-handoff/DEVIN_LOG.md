@@ -3067,4 +3067,45 @@ findings).
 3. Sandbox cross-user visibility → **deferred** (scoped for later, needs
    architecture decision about whether students get the code tool)
 
+### Docker rebuild + live API verification
+
+After committing, rebuilt the Docker image from the
+`DeepTutor-security-review` worktree and ran a full live API test suite
+(17 tests) against the running container. All passed:
+
+- Admin login, auth status, create student via admin endpoint
+- List users returns the four new demographics fields (`first_name`,
+  `surname`, `gender`, `course`) on every record
+- Student self-service profile update with all demographics (first name,
+  surname, gender, course, student ID) → saved correctly, verified via
+  `GET /profile`
+- Gender validation: `non_binary` rejected (422), empty string rejected
+  (422) — only `male`/`female` accepted, as specified
+- Course validation: `bachelors` rejected (422) — only `masters`/`phd`/
+  empty accepted
+- Disabled-user feature: admin can disable a student (200), disabled flag
+  shows in user list, disabled user login correctly rejected (401), admin
+  self-disable blocked (400), admin can re-enable, re-enabled user can
+  log in (200), student cannot disable admin (403)
+
+Also had to run `docker exec deeptutor python scripts/init_db.py` to
+initialize the Postgres schema (alembic baseline migration) — the fresh
+Docker volume had no tables yet. This is a one-time setup step, not
+related to the code changes.
+
+The first build used a stale cached frontend layer (image built at 05:19
+UTC but source files were modified at 07:09+). Rebuilt with
+`--no-cache` and confirmed the new code is in the compiled JavaScript
+chunks (`grep -rl "firstNameDraft\|setUserDisabled\|requestToggleDisabled"
+/app/web/.next/static/` returns matches). Browser cache may serve the
+old page until a hard refresh (`Ctrl+Shift+R`) or incognito window is
+used.
+
+**Note for the repo owner**: the "model checkbox" in the admin users
+table (the GrantEditor panel that expands from the `SlidersHorizontal`
+icon) was NOT removed by these changes — it's still in the code and
+confirmed present. It only appears for non-admin users; with only an
+admin account registered it won't show. Created a test `student1` account
+so the icon is visible for testing.
+
 — Devin
