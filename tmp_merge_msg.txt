@@ -1,9 +1,0 @@
-Merge feature/materials-frontend into development
-
-Resolve NotebookViewer.tsx add/add conflict: kept Agent 3's real
-component (react-markdown + react-syntax-highlighter) over Agent 4's
-stub. All other files from the frontend PR merged cleanly.
-
-Generated with [Devin](https://devin.ai)
-
-Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>

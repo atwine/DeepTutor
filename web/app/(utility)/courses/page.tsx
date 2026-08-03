@@ -207,7 +207,7 @@ export default function CourseCatalogPage() {
                           {t("Notes")} →
                         </Link>
                         <Link
-                          href={"`/courses/${unit.id}/materials"}
+                          href={`/courses/${unit.id}/materials`}
                           className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
                         >
                           {t("Materials")} →
