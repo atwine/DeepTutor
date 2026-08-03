@@ -2836,3 +2836,127 @@ back-and-forth than the Claude-orchestrated rounds had:
   after that explicit go-ahead — same rule applies to whatever comes next.
 
 — Claude
+
+## 2026-08-03 — Devin — `TODO.md` §A security review done: SECURITY.md created, one live bug found and fixed
+
+**Item**: `TODO.md` §A — security review. Picked this up first per the
+previous entry's explicit instruction ("pick up §A first — it's small,
+self-contained, doesn't need a design conversation").
+
+**Status**: done.
+
+**Branch**: `devin-security-review`, worktree `../DeepTutor-security-review`,
+branched from `main` at `2778a71`.
+
+**A real finding before the review even started**: `SECURITY.md` does not
+exist, and never has — `git log --all --diff-filter=A -- "*SECURITY*"`
+returns nothing, and a filesystem search across both this worktree and the
+main checkout found no match anywhere. `TODO.md`'s framing ("Review
+`SECURITY.md` against the actual current state... `SECURITY.md` was written
+against upstream's single-user default posture") describes a file that was
+never actually committed to this repo, in this fork or (as far as this
+repo's own history shows) upstream either. Not silently working around
+this — flagging it here per this project's own standing practice, then
+proceeding to do the actual substantive review and writing up the result
+as a new `SECURITY.md` (created, not edited, since there was nothing to
+edit).
+
+**What changed**:
+- `SECURITY.md` (new, repo root) — full write-up: deployment modes
+  (`auth.enabled` true/false and what each actually does to CORS/isolation),
+  authentication (bcrypt, JWT/HS256, cookie attributes, `AUTH_SECRET`
+  generation+permissions, registration flow), authorization (the three
+  `require_*` FastAPI dependencies, the course-unit permission matrix as it
+  stands after Round 4 Task 2, the "user id always comes from the verified
+  token, never a client param" invariant I specifically checked for since
+  that's the classic IDOR shape), and a findings section (below).
+- `deeptutor/multi_user/notifications_router.py` — real bug fix, not just a
+  writeup. Both endpoints (`GET /notifications`,
+  `POST /notifications/{id}/read`) called `current.user_id` unconditionally,
+  but their own dependency (`Depends(require_auth)`) returns `None` when
+  `AUTH_ENABLED=false` — which is the *default* deployment mode. Fixed by
+  falling back to `LOCAL_ADMIN_ID`, matching the defensive pattern every
+  other multi-user endpoint reachable in that mode already uses (e.g.
+  `router.py`'s `request_enrollment_endpoint`: `user_id = current.user_id
+  if current else LOCAL_ADMIN_ID`). This wasn't a theoretical code-reading
+  concern — I traced it all the way to the frontend and confirmed it's
+  live: `NotificationBell` (`web/components/sidebar/NotificationBell.tsx`)
+  is unconditionally mounted in the sidebar (both collapsed and expanded
+  states, `SidebarShell.tsx`) with no auth-status gating, calls
+  `listNotifications()` on mount, and polls every 30 seconds. So in the
+  out-of-the-box default deployment mode, **every single page load** hits
+  this endpoint and gets a 500 — silently swallowed by the frontend's
+  `.catch(() => {})`, so nothing visibly breaks for the user, but the
+  backend has been throwing an `AttributeError` on a 30-second cadence for
+  every session since this endpoint shipped.
+
+**Verified**:
+- Wrote a throwaway script calling `list_notifications_endpoint(current=None)`
+  and `mark_notification_read_endpoint("bogus_id", current=None)` directly
+  (simulating exactly what FastAPI injects when `AUTH_ENABLED=false`)
+  against the live local Postgres. Before the fix this would raise
+  `AttributeError: 'NoneType' object has no attribute 'user_id'`; after the
+  fix, the first call returns `{"notifications": []}` cleanly and the
+  second correctly reaches the intended 404 branch (not a crash before
+  ever getting there). Deleted the script before finishing, not committed.
+- `python -c "from deeptutor.multi_user.notifications_router import router; ..."`
+  and a full `from deeptutor.api.main import app` import both succeed
+  cleanly against the live Postgres — 2 routes in the notifications router,
+  375 total routes app-wide, no import-time regressions from this change.
+  Also incidentally confirmed the CORS finding in `SECURITY.md` live: the
+  app's own startup log printed `CORS configured: mode=permissive
+  allow_origins=[...] allow_origin_regex=https?://.*` in this default
+  (auth-disabled) local environment, matching what the code read said it
+  should do.
+- Read every `@router.*` endpoint in all four multi-user router files
+  (`router.py`, `assignments_router.py`, `book_access_router.py`,
+  `notifications_router.py`) specifically checking two things: (1) is
+  there an auth dependency at all, and (2) for endpoints handling a
+  specific user's data (submissions, notifications, profile), is the
+  acting user id always derived from the verified token rather than a
+  client-supplied parameter. Every endpoint had (1); the
+  `notifications_router.py` bug above was the only place (2) was actually
+  violated (it derived from the token correctly, it just didn't handle the
+  token being `None`) — no IDOR-shaped issues found where a client could
+  supply an arbitrary user id and have the server trust it.
+- Checked `docker-compose.yml`, `.gitignore`, and grepped the source tree
+  for hardcoded secrets/API-key patterns, `pickle.loads`, `eval(`, and
+  `shell=True` — no unexpected hits (the one `shell=True`, in the
+  sandbox-runner, is that service's entire documented purpose, not a bug).
+
+**New findings** (flagged in `SECURITY.md`, not fixed in this pass — these
+are decisions, not quick patches, per the standing "raise product/infra
+calls, don't guess" rule):
+1. No rate-limiting/brute-force protection on `/login`. Also a minor
+   username-enumeration timing side channel (`authenticate()` short-circuits
+   on unknown username before the bcrypt check). Recommend this lives at
+   the reverse-proxy/infra layer rather than in-app (in-memory rate-limit
+   state doesn't survive multiple workers) — needs a decision, relevant to
+   the Railway deployment conversation (`TODO.md` §B).
+2. The `disabled` field on user records is fully non-functional — no admin
+   endpoint ever sets it, and `authenticate()` never checks it even if it
+   were hand-set. Not currently exploitable (nothing sets it to `true`
+   today), but a half-built feature that becomes a live bug the moment
+   someone adds a "disable user" admin action without also fixing
+   `authenticate()`. Recommend either finishing it or removing the field so
+   it stops implying a capability that doesn't exist.
+3. `sandbox-runner`'s cross-user filesystem visibility (documented already
+   in `docker-compose.yml`'s own comments as an accepted risk for an
+   "invite-only trust posture") needs re-evaluation now that real student
+   accounts are the actual deployment target, not just invite-only trusted
+   colleagues. One account's `code_execution` tool use can read another
+   non-admin account's `chat_history.db`/knowledge bases/settings via the
+   shared mount. Did not change this — it's an architecture decision
+   already made and documented, not a bug, and changing it (per-command
+   isolation is noted in that same file as "a roadmap item") is a bigger
+   scoped task than this review.
+
+**Left for later / handing back**: the three items above, all explicitly
+because they need a decision (infra/product) rather than because they were
+too hard to fix — see `SECURITY.md`'s findings section for the full
+reasoning on each. Everything else checked out clean (JWT algorithm pinning,
+CORS gating, no SQL injection surface — 100% SQLAlchemy ORM in the reviewed
+paths, avatar upload magic-byte sniffing + SVG rejection, user-id path
+validation, admin self-delete/self-demote guards).
+
+— Devin
