@@ -33,6 +33,17 @@ services:
       - ./web/i18n:/app/web/i18n:ro
       - ./web/locales:/app/web/locales:ro
       - ./web/public:/app/web/public:ro
+      # tsconfig.json must be mounted so Next.js doesn't auto-generate one
+      # without the @/* path aliases (causes module-not-found errors).
+      - ./web/tsconfig.json:/app/web/tsconfig.json:ro
+      - ./web/next-env.d.ts:/app/web/next-env.d.ts:ro
+      # Root-level config files needed by `next dev` — the Dockerfile's
+      # development stage only copies node_modules/package.json/next.config.js
+      # from the builder, so these must be mounted explicitly.
+      - ./web/proxy.ts:/app/web/proxy.ts:ro
+      - ./web/postcss.config.js:/app/web/postcss.config.js:ro
+      - ./web/tailwind.config.js:/app/web/tailwind.config.js:ro
+      - ./web/eslint.config.mjs:/app/web/eslint.config.mjs:ro
 
       # Mount data directories (writable) - output to local ./data
       - ./data/user:/app/data/user
