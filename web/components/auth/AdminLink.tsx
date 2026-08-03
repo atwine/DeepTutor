@@ -15,19 +15,15 @@ export function AdminLink({ collapsed = false }: AdminLinkProps) {
   const { t } = useTranslation();
   const { enabled, isAdmin, isInstructor } = useAuthStatus();
 
-  if (!enabled || (!isAdmin && !isInstructor)) return null;
+  // Account management moved under the Settings hub (issue #9), so admins
+  // no longer get a standalone sidebar entry here — this footer link is
+  // instructor-only, pointing them at the course units they teach (which
+  // they have no other sidebar entry for).
+  if (!enabled || isAdmin || !isInstructor) return null;
 
-  // Admins land on user management (their primary admin surface, with a
-  // cross-link to Course Units from there); instructors have no access to
-  // user management, so their sidebar entry goes straight to the units
-  // they teach.
-  //
-  // Labeled "Accounts Management" rather than "Admin" — with a separate
-  // admin-only "Settings" nav item already in the sidebar, a plain "Admin"
-  // label here read as a duplicate/ambiguous destination.
-  const href = isAdmin ? "/admin/users" : "/admin/course-units";
-  const label = isAdmin ? t("Accounts Management") : t("Course Units");
-  const title = isAdmin ? t("Manage registered accounts") : t("Course units you teach");
+  const href = "/admin/course-units";
+  const label = t("Course Units");
+  const title = t("Course units you teach");
   const active = pathname.startsWith(href);
 
   if (collapsed) {

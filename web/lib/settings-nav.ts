@@ -17,6 +17,7 @@ import {
   Palette,
   Paperclip,
   Search,
+  ShieldCheck,
   SlidersHorizontal,
   Wrench,
   type LucideIcon,
@@ -338,6 +339,20 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     },
     icon: BrainCircuit,
     href: "/settings/memory",
+  },
+  {
+    // Accounts management lives under Settings (issue #9) rather than as a
+    // standalone top-level sidebar entry. The route is unchanged — this
+    // hub block just cross-links to the existing /admin/users page, which
+    // keeps its own (non-Settings) layout and breadcrumb.
+    key: "accounts",
+    label: { zh: "账户管理", en: "Accounts" },
+    blurb: {
+      zh: "管理注册账户、角色与访问权限",
+      en: "Manage registered accounts, roles, and access",
+    },
+    icon: ShieldCheck,
+    href: "/admin/users",
   },
 ];
 
