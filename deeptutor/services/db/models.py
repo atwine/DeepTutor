@@ -75,6 +75,12 @@ class CourseUnit(Base):
     # join-a-new-course catalog (see router.py's catalog endpoint).
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    # Issue #3: The auto-provisioned KB name for this course unit (e.g.
+    # ``course_cu_abc123``). Nullable for backward compat with existing course
+    # units created before this field existed -- can be provisioned later. The
+    # KB itself lives in the admin workspace's knowledge_bases root (see
+    # ``knowledge_access.admin_kb_base_dir``).
+    kb_name: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
 
     instructors: Mapped[list["CourseUnitInstructor"]] = relationship(
         back_populates="course_unit", cascade="all, delete-orphan"
@@ -86,6 +92,9 @@ class CourseUnit(Base):
         back_populates="course_unit", cascade="all, delete-orphan"
     )
     book_entries: Mapped[list["CourseBookEntry"]] = relationship(
+        back_populates="course_unit", cascade="all, delete-orphan"
+    )
+    materials: Mapped[list["CourseMaterial"]] = relationship(
         back_populates="course_unit", cascade="all, delete-orphan"
     )
 
@@ -337,3 +346,53 @@ class CourseBookEntry(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="book_entries")
+
+
+# ---------------------------------------------------------------------------
+# Issue #3 -- Course materials (instructor uploads + course-specific RAG)
+# ---------------------------------------------------------------------------
+
+
+class CourseMaterial(Base):
+    """An instructor-uploaded course material (PDF, notebook, book, ...) that
+    gets indexed into the course unit's auto-provisioned RAG knowledge base.
+
+    The physical file lives in the course KB's ``raw/`` directory; this table
+    is the index/pointer with a draft/publish workflow (instructors upload as
+    ``draft``, then publish to make it visible/downloadable to enrolled
+    students) and an ingestion-status tracker (``pending`` -> ``indexing`` ->
+    ``ready``/``failed``) for the background RAG indexing task."""
+
+    __tablename__ = "course_materials"
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: f"mat_{uuid.uuid4().hex}"
+    )
+    course_unit_id: Mapped[str] = mapped_column(
+        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Original filename as uploaded by the instructor (sanitized on save).
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    # One of: "ipynb", "pdf", "docx", "pptx", "xlsx", "md", "txt", "other".
+    file_type: Mapped[str] = mapped_column(String, nullable=False)
+    # Relative path within the course KB's raw/ directory (e.g. "lab3.ipynb").
+    file_path: Mapped[str] = mapped_column(String, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 'draft' | 'published' -- publish workflow. Draft materials are only
+    # visible to instructors/admins; published materials are visible (and
+    # downloadable) to enrolled students.
+    status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # 'pending' | 'indexing' | 'ready' | 'failed' -- tracks the background RAG
+    # indexing task. ``pending`` right after upload, ``indexing`` while the
+    # DocumentAdder runs, ``ready`` on success, ``failed`` on error.
+    ingestion_status: Mapped[str] = mapped_column(
+        String, nullable=False, default="pending"
+    )
+
+    course_unit: Mapped[CourseUnit] = relationship(back_populates="materials")
