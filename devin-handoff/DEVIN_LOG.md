@@ -2252,4 +2252,424 @@ Each task's own completion will get its own log entry below, same
 Item/Status/What changed/Verified/New findings/Left-for-later format as
 every other entry in this file.
 
+## 2026-08-02 — Devin — Round 4 Task 1 done: course-notes cascade delete verified live
+
+**Item**: Round 4 Task 1 — verify (and fix if needed) that deleting a course
+unit cascades to its book/notes index (`CourseBookEntry`) the same way it
+already does for assignments/submissions.
+
+**Status**: done, verification-only — no code change needed. The cascade
+already works correctly.
+
+**Branch**: `devin-r4-notes-cascade`, worktree `../DeepTutor-r4-notes-cascade`,
+branched from `main`.
+
+**What changed**: nothing in application code. This was a live-verification
+task; the working tree is clean (confirmed with `git status --short` before
+finishing — no diff to commit).
+
+**Verified**: wrote a throwaway integration script
+(`tmp_test_notes_cascade.py`, deleted before finishing, not committed) that
+exercised the real async storage functions end-to-end against the live local
+Postgres (`deeptutor-postgres` container, reached from the host via
+`DATABASE_URL=postgresql+asyncpg://deeptutor:deeptutor@localhost:5432/deeptutor`
+— `asyncpg` was already installed in this environment):
+
+1. `course_units.create_course_unit(...)` — real course unit.
+2. `course_books.assign_book_to_course_unit(book_id, owner_id, course_unit_id)`
+   — real `CourseBookEntry` row (book manifest on disk not required for this
+   test: the cascade being tested is a DB-level FK concern on the index row
+   itself, independent of the book's physical files).
+3. `course_books.set_book_status(book_id, "published")` — published it.
+4. Confirmed pre-delete state: `list_entries_for_course_unit` returns 1 entry,
+   `get_book_entry(book_id)` resolves with `status="published"`.
+5. `course_units.delete_course_unit(course_unit_id)` — the same function
+   `DELETE /course-units/{id}` calls — returned `True`.
+6. Post-delete: `get_book_entry(book_id)` returns `None` and
+   `list_entries_for_course_unit(course_unit_id)` returns `[]`. This is
+   exactly the condition `book_access_router.py`'s
+   `GET /books/{book_id}/course-content` endpoint checks first (`entry is
+   None` -> raises 404 "This book isn't assigned to a course unit") — so the
+   read endpoint 404s cleanly post-delete rather than resolving a dead
+   `course_unit_id`, confirming the behavior described in the task without
+   needing to drive a full browser/UI session.
+
+All assertions passed on the first correct run. (One debugging detour: an
+early version of the test script printed an em-dash character in a
+diagnostic message, which silently truncated output when redirected to a
+file under this Windows PowerShell environment's default console encoding —
+looked like the process was hanging/dying after the delete step. Not a bug
+in the app; fixed by using plain ASCII in the test script's own print
+statements, unrelated to the actual verification.)
+
+**New findings**: none — the FK's `ondelete="CASCADE")` on
+`CourseBookEntry.course_unit_id` (`deeptutor/services/db/models.py`) behaves
+identically to the already-proven `Assignment`/`Submission` cascade. No
+caching layer or soft-delete path intercepts this — `delete_course_unit`
+does a real `session.delete(unit)` + commit, and Postgres's own FK cascade
+does the rest, same mechanism, no special-casing needed for CourseBookEntry.
+
+**Left for later / handing back**: none for this task specifically. A full
+browser-driven UI verification (as opposed to exercising the underlying
+async functions directly) was not performed — the task's stated fallback
+("if a full UI/browser drive isn't practical... at minimum exercise the real
+async storage functions end-to-end... not a raw SQL DELETE") was used
+instead, which is what was actually done here.
+
+## 2026-08-02 — Devin — Round 4 Task 2 done: course-unit edit/delete permission decision
+
+**Item**: Round 4 Task 2 — resolve the course-unit edit/delete permission
+inconsistency (`update_course_unit_endpoint`/`delete_course_unit_endpoint`
+were both `require_admin`-only, unlike every other course-unit endpoint in
+`router.py`).
+
+**Status**: done. Split decision, not a uniform "open both up" or "leave both
+admin-only" — the two endpoints have different risk profiles and got
+different answers.
+
+**Branch**: `devin-r4-cu-perms`, worktree `../DeepTutor-r4-cu-perms`,
+branched from `main`.
+
+**Decision + reasoning**:
+
+- **`PUT /course-units/{id}` (update) -> opened to `require_instructor_or_admin`**,
+  gated by the same `_require_course_unit_access` ownership check every
+  other instructor-scoped endpoint in this file already uses (archive/
+  unarchive, roster, gradebook, notes, leave-requests, etc.). Editing
+  name/term/description/dates carries the same risk profile as those
+  already-open actions — no reason for this one field-set to be the outlier.
+- **BUT `instructor_ids` reassignment inside that same endpoint stays
+  admin-only** — this is the one field on `CourseUnitUpdate` that's a
+  materially different kind of risk than metadata edits: letting any
+  instructor-of-the-unit freely reassign `instructor_ids` would let them
+  unilaterally drop a co-instructor or hand the course to an arbitrary user
+  id with zero admin involvement. That's privilege-escalation-shaped, not
+  just "a bigger mistake," and it's the same line B4 (Feature Round 2)
+  already drew for course *creation* (an instructor can add themselves, but
+  not freely add/remove others). Implementation: a non-admin caller's
+  `instructor_ids` in the payload is silently ignored (rest of the update
+  still applies) rather than 400/403ing the whole request — the admin-only
+  instructor-picker UI never sends this field for a non-admin caller in the
+  first place, so this is a defense-in-depth backstop, not a normal-path
+  behavior change.
+- **`DELETE /course-units/{id}` stays `require_admin`-only, deliberately, as
+  the one remaining outlier** — unlike archive (fully reversible) or update
+  (metadata-only after the guard above), delete is irreversible and cascades
+  away every assignment/submission/course-book-notes link under the unit
+  (`ON DELETE CASCADE` in `deeptutor/services/db/models.py`, re-verified live
+  in this same round's Task 1). One instructor's mistake or a compromised
+  instructor account permanently destroying another instructor's (on a
+  co-taught unit) grade history with zero admin checkpoint is a materially
+  bigger risk than anything else this router lets an instructor do
+  unilaterally. Archive already covers the reversible "I'm done with this"
+  case for instructors — delete is for admins cleaning up for real, on
+  purpose, not an oversight to "fix."
+
+**What changed**:
+- `deeptutor/multi_user/router.py` — `update_course_unit_endpoint`: dependency
+  changed `require_admin` -> `require_instructor_or_admin`, added
+  `await _require_course_unit_access(current, course_unit_id)`, and
+  `instructor_ids` is forced to `None` (dropped) for non-admin callers before
+  calling `update_course_unit`. `delete_course_unit_endpoint`: no behavior
+  change, but added a docstring spelling out explicitly *why* it stays
+  admin-only (per the task's own instruction: "make the call explicitly
+  rather than leaving it an unexamined inconsistency" — applies to the
+  "leave it as-is" half of the decision too, not just the half that changed).
+  Also fixed a now-stale module comment above `CourseUnitCreate` that still
+  said "(re)assigning [a unit's] instructor(s) is an admin-only action" —
+  true before B4, not true since (create already lets an instructor
+  self-add); reworded to describe the actual current rule (`instructor_ids`
+  reassignment specifically is admin-only, both at create and now at update).
+- `web/app/(admin)/admin/course-units/page.tsx` — Edit button (pencil icon)
+  un-gated from `{isAdmin && ...}` to match the Archive button's existing
+  gating (shown to everyone who can reach this page — the course-unit list
+  itself is already scoped to "units I teach" for a non-admin via
+  `GET /course-units`, confirmed by reading `list_course_units_for_instructor`
+  usage, so no new exposure). Delete button stays `{isAdmin && ...}`-gated.
+  The instructor-picker section's non-admin copy was create-mode-only
+  ("You will be automatically added...") and would have been actively wrong
+  once instructors can reach the edit form too; added a
+  `form.id`-conditional branch so edit mode shows "Only an admin can change
+  who teaches this course unit" instead.
+
+**Verified**:
+- `python -c "from deeptutor.multi_user.router import router; print(len(router.routes))"`
+  against the live local Postgres (`DATABASE_URL=postgresql+asyncpg://
+  deeptutor:deeptutor@localhost:5432/deeptutor`) — imports cleanly, 28 routes.
+- Wrote a throwaway script (`tmp_test_cu_perms.py`, deleted before finishing,
+  not committed) that called `update_course_unit_endpoint` directly (bypassing
+  HTTP, constructing `TokenPayload` the same way `services/auth.py` does) with
+  three real scenarios against the live DB:
+  1. The unit's own instructor updates `name` + attempts to also set
+     `instructor_ids=["t2_intruder"]` in the same request -> name change
+     applied, `instructor_ids` unchanged (verified via the returned record).
+  2. A *different* instructor (not on this unit) attempts the same update ->
+     raises `HTTPException(403)` via `_require_course_unit_access`, confirming
+     ownership is actually enforced, not just role-checked.
+  3. An admin sets `instructor_ids=["t2_new_instructor"]` -> applied
+     successfully, confirming the admin path still has full control.
+  All three assertions passed. Did not additionally re-verify the frontend
+  change with a browser session (no running frontend dev server in this
+  session) — the JSX change was reviewed manually for correct
+  bracket/ternary nesting instead (see diff), and is a straightforward
+  visibility-gating change with no new data flow.
+
+**New findings**: the module-level comment inconsistency (see "What changed"
+above) — worth flagging since it's the kind of stale-comment-as-inconsistency
+this whole task was about, just one level up (a comment describing a rule
+that a *previous* round's code change had already made partially false, and
+nobody caught it until this pass either).
+
+**Left for later / handing back**: none for this task. If a future round
+wants a lighter-weight "let a co-instructor remove themselves from a course
+they no longer want to be listed on" self-service action, that's a
+narrower, safer version of touching `instructor_ids` than a general open-up
+would have been — worth keeping in mind rather than revisiting the general
+"should instructor_ids be instructor-editable" question from scratch.
+
+## 2026-08-02 — Devin — Round 4 Task 3 done: Alembic migration tooling added
+
+**Item**: Round 4 Task 3 — add real Alembic migration tooling, replacing
+`scripts/init_db.py`'s plain `Base.metadata.create_all()` bootstrap.
+
+**Status**: done.
+
+**Branch**: `devin-r4-alembic`, worktree `../DeepTutor-r4-alembic`, branched
+from `main`.
+
+**What changed**:
+- `pyproject.toml` — added `"alembic>=1.13.0,<2.0.0"` to the base
+  `dependencies` list (next to `sqlalchemy[asyncio]`/`asyncpg`, the same
+  place those already live — this isn't behind an extras group, it's a core
+  dependency of the always-installed package). Updated the neighboring
+  comment, which explicitly said "No Alembic yet... add Alembic the first
+  time this schema needs a real migration" — that sentence is now false,
+  so it was rewritten to describe the current state instead of the old plan.
+- `alembic.ini` (new) — `script_location = alembic` and `prepend_sys_path = .`
+  (both were already the generated defaults and didn't need changing).
+  `sqlalchemy.url` is a placeholder — see below, it's not actually used for
+  the normal `alembic upgrade head` path in this project.
+- `alembic/env.py` (new) — imports `Base` from
+  `deeptutor/services/db/models.py` for `target_metadata` (autogenerate
+  support), and — this is the one deliberate deviation from Alembic's
+  stock async template — calls `deeptutor.services.db.engine.get_engine()`
+  directly instead of building a fresh engine from `alembic.ini`'s
+  `sqlalchemy.url` via `async_engine_from_config`. Reason: `get_engine()`
+  already encodes this project's `DATABASE_URL` resolution order (env var,
+  the `postgres://` -> `postgresql+asyncpg://` rewrite) *and* the local-dev
+  SSL-disable workaround for the docker-compose postgres service (see that
+  function's own comments in `engine.py`) — reimplementing that in `env.py`
+  from the ini file's URL would be a second, driftable copy of the same
+  logic. `alembic.ini`'s `sqlalchemy.url` is consequently just a placeholder
+  that only matters for `--sql` (offline) mode, which this project doesn't
+  use; said so explicitly in both files so a future reader doesn't wonder
+  why changing it has no effect.
+- `alembic/versions/65b81544bdc8_baseline_current_schema.py` (new) — the
+  initial baseline migration. `upgrade()` creates all 9 current tables
+  (`course_units`, `course_unit_instructors`, `enrollments`, `assignments`,
+  `submissions`, `course_book_entries`, `notifications`,
+  `notification_reads`, `assignment_access_grants`) with every column/FK/
+  index/unique-constraint currently in `models.py` — including the three
+  rounds' worth of hand-applied additions this task's own background
+  mentioned (`CourseUnit.start_date`/`end_date`/`is_archived`,
+  `Assignment.is_timed`/`time_limit_minutes`/`is_major`/`passing_score`,
+  the `assignment_access_grants`/`notifications`/`notification_reads`
+  tables). `downgrade()` drops everything in reverse order (Alembic
+  autogenerate wrote both directions; not manually hand-edited beyond
+  reviewing for correctness).
+- `scripts/init_db.py` — rewritten to shell out to
+  `alembic upgrade head` (run with `cwd` set to the repo root, so
+  `alembic.ini`'s relative `script_location` resolves regardless of the
+  caller's own working directory) instead of calling `create_all()`
+  directly. Kept the same "read `DATABASE_URL` the same way `engine.py`
+  does" framing in the docstring since that's still true — it's just
+  Alembic's `env.py` doing that read now, one layer down.
+- `deeptutor/services/db/migrations/002_track_a_assignment_lifecycle.sql` —
+  NOT deleted (see "New findings" below for why), but prefixed with a
+  `SUPERSEDED` comment block pointing at the new Alembic baseline and
+  explicitly saying not to run it again.
+- `deeptutor/services/db/migrations/README.md` (new) — one-paragraph pointer
+  so a future reader landing in this now-legacy directory immediately finds
+  `alembic/` instead.
+
+**Verified** (this is the actual deliverable — schema parity, not just "the
+commands ran"):
+1. Ran `alembic revision --autogenerate -m "baseline current schema"`
+   **against the live, already-populated local Postgres first** — this
+   produced an EMPTY migration (`upgrade()`/`downgrade()` both just `pass`).
+   That's expected, not a bug: autogenerate diffs the target `Base.metadata`
+   against the CURRENT state of whatever database it's pointed at, and the
+   live DB already matches `models.py` exactly (the whole reason three
+   rounds of hand-applied `ALTER`s existed was to keep it that way) — so
+   there was nothing to diff. Documenting this because it's a genuine gotcha
+   for whoever writes the *next* migration: autogenerate must be run against
+   a database that's actually behind the target metadata, not the live one,
+   or it will silently produce a no-op migration.
+2. Created a fresh empty database (`deeptutor_alembic_baseline`, dropped
+   after) via `docker exec deeptutor-postgres psql ... CREATE DATABASE`,
+   pointed `DATABASE_URL` at it, and re-ran the same autogenerate command.
+   This time it correctly detected all 9 tables as new
+   (`alembic.autogenerate.compare` logged each `Detected added table`/
+   `Detected added index` line — captured in this entry's own session, not
+   just inferred from the file). Ran `alembic upgrade head` against that
+   same fresh database to actually apply it.
+3. Created a second fresh database (`deeptutor_createall_check`, dropped
+   after), ran the **old** `create_all()` path directly (temporarily, to get
+   a "ground truth" — not the final `init_db.py`, which by this point had
+   already been rewritten) against it.
+4. Diffed the two databases' schemas with
+   `pg_dump --schema-only --no-owner --no-privileges` on both, piped through
+   PowerShell's `Compare-Object`. The only differences were: (a) the
+   `alembic_version` bookkeeping table itself (expected — that's Alembic's
+   own tracking table, not part of the application schema, and
+   intentionally absent from the `create_all()`-only side), and (b) the
+   `pg_dump`-generated `\restrict`/`\unrestrict` session tokens (a
+   pg_dump-version artifact, not a schema difference). Zero differences in
+   actual tables/columns/types/nullability/FKs/indexes/constraints.
+5. Re-ran the exact final `scripts/init_db.py` (post-rewrite, no manual
+   `PYTHONPATH` set) against a third fresh database
+   (`deeptutor_initdb_check`, dropped after) to confirm the real
+   entrypoint — not just raw `alembic` CLI calls — works end-to-end
+   unmodified from a clean checkout's perspective; `\dt` afterward showed
+   all 9 application tables + `alembic_version`.
+6. `python -c "from deeptutor.multi_user.router import router; ..."` against
+   the live (untouched, real) local Postgres still imports cleanly (28
+   routes) — confirms this change didn't touch anything the rest of the app
+   depends on at import time.
+
+All temporary databases (`deeptutor_alembic_baseline`,
+`deeptutor_createall_check`, `deeptutor_initdb_check`) were dropped after
+verification; the live `deeptutor` database was never touched by any of
+this task's DDL.
+
+**New findings**:
+- The three "manually-applied schema changes" mentioned in this task's brief
+  are folded into ONE baseline migration rather than replayed as three
+  separate migration files reproducing history. This is an intentional
+  simplification, not an oversight: replaying them as separate revisions
+  would require reconstructing the *exact* intermediate schema states
+  (including ones that may never have existed cleanly in isolation, since
+  they were applied by hand over time, possibly out of the order the
+  columns were introduced in `models.py`'s own history) purely for
+  cosmetic history — with zero actual migration-ordering benefit, since
+  nobody is upgrading a real database that's sitting at one of those
+  intermediate states. A single baseline matching today's live schema is
+  simpler, verifiably correct (per the diff above), and is exactly what
+  Alembic's own docs recommend for "adopting Alembic into an existing,
+  already-migrated-by-hand project."
+- Decided NOT to delete the old raw `.sql` file
+  (`002_track_a_assignment_lifecycle.sql`) even though it's now fully
+  superseded — it's historical documentation of *why* certain columns/
+  tables exist (its own header comments explain the feature intent behind
+  `is_timed`/`assignment_access_grants` better than a bare Alembic
+  `create_table` call does), and deleting it destroys that context for a
+  net-zero behavioral gain. Marked it superseded instead, with an explicit
+  "do not run this again" and a pointer to the real migration path.
+
+**Left for later / handing back**:
+- No CI step currently runs `alembic upgrade head` against a fresh database
+  as a regression check (mentioned as a nice-to-have in this task's brief).
+  Not done here — this task's scope was the tooling + baseline + verified
+  parity, not a CI pipeline change, and there was no existing CI config
+  in-scope to extend cleanly without guessing at infra this repo may or may
+  not have.
+- From now on: any schema change should be authored as
+  `alembic revision --autogenerate -m "..."` (against a database state that
+  actually differs from the target — see the autogenerate gotcha in
+  "Verified" above) after editing `deeptutor/services/db/models.py`, review
+  the generated file, then `alembic upgrade head` — not another manual
+  `ALTER TABLE`/drop-and-recreate. This should be added to whatever
+  onboarding doc future schema-change authors read first (not done as part
+  of this task — didn't want to guess which doc that is without checking
+  with the repo owner).
+
 — Devin
+
+## 2026-08-03 — Claude — Round 4 merge + regression pass complete
+
+**Item**: merge all three Round 4 branches (`devin-r4-notes-cascade`,
+`devin-r4-cu-perms`, `devin-r4-alembic`), verify live, report results.
+
+**Status**: done.
+
+**What changed**: merged all three into `feature-round4-integration`, cut
+from `main`. Three merges, three conflicts total — all three in this file
+(each track appended after the same point, same pattern every round has
+hit), resolved by keeping every entry in full. Every other file merged with
+zero conflicts, confirming the parallel split held (Task 1 touched nothing,
+Task 2 touched only `router.py` + the admin course-units page, Task 3
+touched only new files + `scripts/init_db.py` + `pyproject.toml`).
+
+**A real deployment bug found and fixed during this pass, not by any of
+the three tracks**: Task 3's Alembic tooling was built and verified
+entirely via local CLI runs — never inside an actual container build. The
+Dockerfile's `COPY` list never learned about the new `alembic.ini`/
+`alembic/` files, so `scripts/init_db.py`'s `alembic upgrade head` failed
+inside the real deployed container with "No 'script_location' key found in
+configuration" — the files simply weren't there. Fixed by adding both to
+the Dockerfile's production-stage `COPY` list. **Also caught the
+now-familiar sibling bug**: Task 3 added `alembic` to `pyproject.toml` but
+not `requirements/server.txt`, which is what the Dockerfile actually
+installs from — the exact same gotcha that bit `asyncpg` during the
+original Postgres migration. Fixed both before rebuilding; confirmed
+`alembic upgrade head` now runs successfully inside the real container
+against a freshly-dropped schema, producing all 9 application tables plus
+`alembic_version`.
+
+**Verified**: rebuilt the Docker image twice (once to discover the Dockerfile
+gap, once after fixing it), reset the Postgres schema fully (including
+dropping `alembic_version` itself) and confirmed `scripts/init_db.py` now
+runs `alembic upgrade head` end-to-end through the real container entrypoint,
+not just a local CLI invocation. Then ran a live regression pass via API +
+browser with fresh throwaway accounts (`r4_instr_a`, `r4_instr_b`, `r4_stud`,
+all deleted afterward):
+
+- **Task 1 (course-notes cascade)** — Devin's own verification exercised the
+  underlying async storage functions directly, not the HTTP layer. Added an
+  independent check through the actual layer Devin's approach didn't cover:
+  inserted a real `CourseBookEntry` row, deleted the course unit via the
+  live `DELETE /course-units/{id}` HTTP endpoint (not a direct Python call),
+  confirmed the entry was gone via `psql` afterward. Cascades cleanly
+  through the real request path, not just the storage layer.
+- **Task 2 (permission decision)** — confirmed every branch of the decision
+  live: the unit's own instructor can edit metadata (name/description
+  applied), a smuggled `instructor_ids` field in that same request is
+  silently dropped (unchanged after), a *different* instructor gets a clean
+  403, delete stays admin-only for the unit's own instructor (403), and
+  admin retains full `instructor_ids` reassignment. Also confirmed in the
+  browser: the instructor now sees an "Edit" button (no "Delete"), and the
+  edit form correctly shows "Only an admin can change who teaches this
+  course unit" + "Previously taught by: r4_instr_b" rather than the
+  create-mode copy.
+- **Task 3 (Alembic)** — see the Dockerfile/requirements fixes above; once
+  fixed, confirmed end-to-end via the real deployment path.
+- **K1 re-verified**, with an unplanned but informative wrinkle: the local
+  vLLM endpoint was unreachable for part of this pass (the repo owner's own
+  machine had lost its VPN connection after a restart, unrelated to any
+  code in this round), which meant several submit requests hung on LLM
+  retries and one client-side `curl` timeout landed while a server-side
+  retry was still in flight. Once the VPN was restored, exactly one
+  submission had been recorded despite multiple overlapping/retried
+  requests across the outage — arguably a stronger proof than a clean
+  two-request test, since it held up under real overlapping retries, not
+  just one deliberately-timed pair. No regression; `assignments.py`'s
+  submit-flow locking wasn't touched by any Round 4 task.
+- C1 (cascade delete) was re-covered by the Task 1 verification above,
+  same DELETE endpoint, same mechanism.
+
+**New findings**: the Dockerfile/requirements gaps above — both now fixed,
+both worth remembering for any future round that adds new top-level
+files or dependencies: local CLI verification does not prove a container
+build actually ships the thing.
+
+**Left for later / handing back**: everything the three tracks themselves
+flagged (no CI step re-running `alembic upgrade head`; the "let a
+co-instructor remove themselves" narrower self-service idea; documenting
+the Alembic workflow in onboarding docs). All test data (3 throwaway
+accounts, 4 course units across this pass, their assignments/submissions)
+has been deleted; verified the system is back to its pre-test state.
+Branch `feature-round4-integration` is merged locally, **not yet pushed**
+— per the repo owner's explicit instruction this round, push happens only
+once they say so, same standing rule as every round before this one.
+
+— Claude

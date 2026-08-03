@@ -34,3 +34,8 @@ croniter>=6.0.0,<7.0.0
 # entries (deeptutor/services/db) — see devin-handoff/DATABASE_MIGRATION_PLAN.md.
 sqlalchemy[asyncio]>=2.0.0
 asyncpg>=0.29.0
+
+# --- Schema migrations (Round 4 Task 3) — scripts/init_db.py shells out to
+# `alembic upgrade head`, so this must be installed at runtime, not just a
+# dev-time tool. Mirrors pyproject.toml's dependencies list.
+alembic>=1.13.0,<2.0.0

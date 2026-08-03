@@ -323,25 +323,29 @@ export default function CourseUnitsPage() {
                   <Archive size={15} />
                 )}
               </button>
+              {/* Round 4 Task 2: Edit opened to instructor-or-admin on the
+                  backend (PUT /course-units/{id}), matching Archive above —
+                  shown to everyone who can reach this page, since the list
+                  itself is already scoped to "units I teach" for a non-admin.
+                  Delete stays admin-only (irreversible cascade — see the
+                  backend endpoint's docstring for the full reasoning). */}
+              <button
+                onClick={() => openEdit(unit)}
+                title={t("Edit")}
+                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                         hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
+              >
+                <Pencil size={15} />
+              </button>
               {isAdmin && (
-                <>
-                  <button
-                    onClick={() => openEdit(unit)}
-                    title={t("Edit")}
-                    className="rounded-lg p-1.5 text-[var(--muted-foreground)]
-                             hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
-                  >
-                    <Pencil size={15} />
-                  </button>
-                  <button
-                    onClick={() => setDeleteTarget(unit)}
-                    title={t("Delete")}
-                    className="rounded-lg p-1.5 text-[var(--muted-foreground)]
-                             hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </>
+                <button
+                  onClick={() => setDeleteTarget(unit)}
+                  title={t("Delete")}
+                  className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                           hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 size={15} />
+                </button>
               )}
             </div>
           </td>
@@ -660,6 +664,10 @@ export default function CourseUnitsPage() {
                   ))}
                 </div>
                 )
+              ) : form.id ? (
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  {t("Only an admin can change who teaches this course unit.")}
+                </p>
               ) : (
                 <p className="text-xs text-[var(--muted-foreground)]">
                   {t("You will be automatically added as the instructor for this course unit.")}

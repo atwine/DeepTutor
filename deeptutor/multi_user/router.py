@@ -260,8 +260,10 @@ async def multi_user_list_users(_: object = Depends(require_admin)) -> dict[str,
 
 # ---------------------------------------------------------------------------
 # Course units — instructors manage only the units they're attached to;
-# admins manage all of them. Creating a unit and (re)assigning its
-# instructor(s) is an admin-only action, mirroring how grants are assigned.
+# admins manage all of them. (Re)assigning a unit's instructor_ids is
+# admin-only (see update_course_unit_endpoint below); B4 lets an instructor
+# create a unit with themselves auto-added, but they can't hand it to/take
+# it from someone else afterward without an admin.
 # ---------------------------------------------------------------------------
 
 
@@ -416,20 +418,48 @@ async def get_course_unit_endpoint(
 async def update_course_unit_endpoint(
     course_unit_id: str,
     payload: CourseUnitUpdate,
-    _: TokenPayload = Depends(require_admin),
+    current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
+    """Round 4 Task 2 decision: opened up to instructor-or-admin (was
+    admin-only), with the standard ``_require_course_unit_access`` ownership
+    check — matching every other course-unit-scoped endpoint in this file
+    (archive/unarchive, roster, gradebook, notes, leave-requests, etc.), all
+    of which already let an instructor manage their own unit without an
+    admin in the loop. Metadata edits (name/term/description/dates) carry
+    the same risk profile as those already-open actions.
+
+    ``instructor_ids`` reassignment is the one field on this payload that's
+    NOT extended to instructors: it's the same "who has the keys to this
+    course" concern B4 already drew a line around for creation (an
+    instructor can add themselves when creating, but not freely add/remove
+    others). Letting any instructor-of-the-unit silently reassign
+    instructor_ids would let them unilaterally drop a co-instructor or hand
+    the course to an arbitrary user id with no admin involved — a real
+    privilege-escalation-shaped risk, not just a "bigger blast radius"
+    inconvenience. So: non-admin callers have any ``instructor_ids`` in
+    their payload ignored (the rest of the update still applies) rather than
+    rejecting the whole request — the admin-only course-unit form is the
+    only UI surface that shows the instructor picker at all (see
+    ``web/app/(admin)/admin/course-units/page.tsx``), so a non-admin client
+    should never legitimately be sending this field in the first place.
+    """
+    await _require_course_unit_access(current, course_unit_id)
+    instructor_ids = payload.instructor_ids if current.role == "admin" else None
     record = await update_course_unit(
         course_unit_id,
         name=payload.name,
         term=payload.term,
         description=payload.description,
-        instructor_ids=payload.instructor_ids,
+        instructor_ids=instructor_ids,
         start_date=payload.start_date,
         end_date=payload.end_date,
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
-    log_admin_action("course_unit_update", summary={"course_unit_id": course_unit_id})
+    log_admin_action(
+        "course_unit_update",
+        summary={"course_unit_id": course_unit_id, "by_role": current.role},
+    )
     return {"course_unit": _with_instructor_names(record)}
 
 
@@ -438,6 +468,21 @@ async def delete_course_unit_endpoint(
     course_unit_id: str,
     _: TokenPayload = Depends(require_admin),
 ) -> dict[str, Any]:
+    """Round 4 Task 2 decision: stays admin-only, deliberately NOT opened to
+    instructor-or-admin like every other course-unit endpoint in this file.
+    Unlike archive (fully reversible) or the update endpoint above (metadata
+    only, instructor_ids guarded separately), delete is irreversible and
+    cascades away every assignment, submission, and course-book/notes link
+    under the unit (see CourseUnit's ON DELETE CASCADE relationships in
+    deeptutor/services/db/models.py) — a single instructor's mistake or
+    account compromise can destroy another instructor's (on a co-taught
+    unit) grade history with no undo. That asymmetry — one instructor
+    action permanently destroying another instructor's data with no admin
+    checkpoint — is enough to keep this admin-gated even though it's an
+    outlier next to the rest of this file's instructor-or-admin pattern.
+    Archive already covers the reversible "I'm done with this course"
+    case for instructors; delete is for admins cleaning up for real.
+    """
     removed = await delete_course_unit(course_unit_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Course unit not found")

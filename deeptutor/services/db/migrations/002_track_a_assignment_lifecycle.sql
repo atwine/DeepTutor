@@ -1,3 +1,13 @@
+-- SUPERSEDED (Round 4 Task 3): this raw SQL file was never run by any
+-- script/CI step — it was applied by hand at merge time and is kept here
+-- only as a historical record. Its effect (is_timed/time_limit_minutes on
+-- assignments, the assignment_access_grants table) is already captured in
+-- the Alembic baseline migration (alembic/versions/*_baseline_current_schema.py),
+-- generated from and verified against the live schema this file produced.
+-- Do NOT run this file again; use `alembic upgrade head` (scripts/init_db.py)
+-- instead. Kept for history, not deleted, since it documents *why* those
+-- columns/table exist (see devin-handoff/DEVIN_LOG.md's Round 4 Task 3 entry).
+--
 -- Track A (Feature Round 2) — Assignment lifecycle & integrity
 -- Adds:
 --   1. is_timed + time_limit_minutes columns to assignments (A4)

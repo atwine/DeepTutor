@@ -71,12 +71,13 @@ dependencies = [
     # Postgres-backed storage for course units/assignments/submissions/course-book
     # entries (replacing the flat-JSON store under data/system/courses/) — see
     # devin-handoff/DATABASE_MIGRATION_PLAN.md. SQLAlchemy async engine + asyncpg
-    # driver, matching this codebase's async-first router style. No Alembic yet —
-    # this is a brand-new schema with no production data to migrate around, so
-    # scripts/init_db.py's plain create_all() is enough tooling for now; add
-    # Alembic the first time this schema needs a real migration against live data.
+    # driver, matching this codebase's async-first router style. Alembic drives
+    # all schema changes now (see alembic/ + scripts/init_db.py) — the
+    # create_all()-only era ended once this schema needed its first real
+    # migration against live data (Round 4 Task 3).
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
+    "alembic>=1.13.0,<2.0.0",
 ]
 
 [project.scripts]
