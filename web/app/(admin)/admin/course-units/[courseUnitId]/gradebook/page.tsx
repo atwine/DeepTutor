@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { fetchAuthStatus } from "@/lib/auth";
 import { getGradebook, gradebookExportUrl, type Gradebook } from "@/lib/gradebook-api";
-import { ArrowLeft, Download, GraduationCap, RefreshCw } from "lucide-react";
+import { ArrowLeft, Check, Download, GraduationCap, RefreshCw } from "lucide-react";
 import Link from "next/link";
 
 function formatScore(result: { score: number | null; max_score: number } | undefined): string {
@@ -132,6 +132,7 @@ export default function CourseUnitGradebookPage() {
                       </th>
                     ))}
                     <th className="px-4 py-3 font-medium">{t("Final Grade")}</th>
+                    <th className="px-4 py-3 font-medium">{t("Completed")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
@@ -155,6 +156,21 @@ export default function CourseUnitGradebookPage() {
                         ))}
                         <td className="px-4 py-3 font-medium text-[var(--foreground)]">
                           {row.final_grade === null ? "—" : `${row.final_grade.toFixed(1)}%`}
+                        </td>
+                        {/* Issue #4: completion status — checked when all
+                         * published assignments are submitted+graded. */}
+                        <td className="px-4 py-3 text-[var(--muted-foreground)]">
+                          {row.completed_at ? (
+                            <span
+                              className="flex items-center gap-1 text-blue-600 dark:text-blue-400"
+                              title={new Date(row.completed_at).toLocaleString()}
+                            >
+                              <Check size={14} strokeWidth={2} />
+                              {new Date(row.completed_at).toLocaleDateString()}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                       </tr>
                     );

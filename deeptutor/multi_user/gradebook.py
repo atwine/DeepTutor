@@ -21,7 +21,11 @@ import io
 from typing import Any
 
 from .assignments import get_latest_submission, list_assignments_for_course
-from .course_units import list_course_units_for_instructor, list_enrollments_for_course
+from .course_units import (
+    check_and_mark_completion,
+    list_course_units_for_instructor,
+    list_enrollments_for_course,
+)
 from .identity import get_user_by_id
 
 
@@ -80,6 +84,10 @@ async def build_gradebook(course_unit_id: str) -> dict[str, Any]:
                 weight_total += assignment["weight"]
 
         final_grade = (weighted_sum / weight_total) if weight_total > 0 else None
+        # Issue #4: keep completion status fresh for the instructor view —
+        # check_and_mark_completion is idempotent and only sets completed_at
+        # once (when all published assignments are submitted+graded).
+        completed_at = await check_and_mark_completion(course_unit_id, user_id)
         rows.append(
             {
                 "user_id": user_id,
@@ -88,6 +96,7 @@ async def build_gradebook(course_unit_id: str) -> dict[str, Any]:
                 "registration_number": registration_number,
                 "assignments": per_assignment,
                 "final_grade": final_grade,
+                "completed_at": completed_at,
             }
         )
 

@@ -71,6 +71,9 @@ def _enrollment_to_dict(enrollment: Enrollment) -> dict[str, Any]:
         "status": enrollment.status,
         "created_at": enrollment.created_at.isoformat() if enrollment.created_at else "",
         "approved_at": enrollment.approved_at.isoformat() if enrollment.approved_at else "",
+        # Issue #4: when the student completed the unit (all published
+        # assignments submitted+graded). "" means not yet completed.
+        "completed_at": enrollment.completed_at.isoformat() if enrollment.completed_at else "",
     }
 
 
@@ -545,6 +548,57 @@ async def list_enrollments_for_student(user_id: str) -> list[dict[str, Any]]:
         )
         enrollments = result.scalars().all()
     return [_enrollment_to_dict(e) for e in enrollments]
+
+
+# ---------------------------------------------------------------------------
+# Issue #4: Automatic course-unit completion tracking
+# ---------------------------------------------------------------------------
+
+
+async def check_and_mark_completion(course_unit_id: str, user_id: str) -> str:
+    """Issue #4: A student is automatically marked complete with a course
+    unit when every published assignment for it has a graded submission from
+    them. Submissions are always graded at submit time (``Submission.score``
+    is NOT NULL — see assignments.py's submit flow), so "submitted AND
+    graded" reduces to "has a latest submission". A unit with no published
+    assignments is never auto-completed (there's no work to finish).
+
+    When the check passes, ``enrollment.completed_at`` is set to now (if not
+    already set — idempotent) and the ISO timestamp is returned. Returns ""
+    when the student is not yet complete or has no enrollment. Completion is
+    additive: it never revokes the student's read access to course materials.
+    """
+    # Local import to keep the module's import graph unchanged at load time
+    # (assignments.py does not import this module, so there's no cycle, but
+    # mirroring the lazy-import pattern already used elsewhere in this layer
+    # keeps the diff minimal and avoids any load-order surprise).
+    from .assignments import get_latest_submission, list_assignments_for_course
+
+    published = [
+        a for a in await list_assignments_for_course(course_unit_id) if a["status"] == "published"
+    ]
+    if not published:
+        return ""
+    for assignment in published:
+        submission = await get_latest_submission(assignment["id"], user_id)
+        if submission is None:
+            return ""  # not all published assignments submitted+graded yet
+    # All published assignments have a graded submission — mark complete.
+    now = datetime.now(timezone.utc)
+    async with session_scope() as session:
+        result = await session.execute(
+            select(Enrollment).where(
+                Enrollment.course_unit_id == course_unit_id,
+                Enrollment.user_id == str(user_id),
+            )
+        )
+        enrollment = result.scalar_one_or_none()
+        if enrollment is None:
+            return ""
+        if enrollment.completed_at is None:
+            enrollment.completed_at = now
+            await session.flush()
+        return enrollment.completed_at.isoformat() if enrollment.completed_at else ""
 
 
 # ---------------------------------------------------------------------------

@@ -45,6 +45,12 @@ interface NavEntry {
   /** Roles that can see this item at all. Omit to show to every role
    * (including a signed-out/auth-disabled deployment). */
   roles?: ("admin" | "instructor" | "user")[];
+  /** When true the item is always visible but rendered in a locked state
+   * (greyed out, padlock, non-clickable) for anyone who isn't an admin —
+   * students and instructors see the feature exists but can't open it.
+   * Ignored when auth is disabled (solo/local use, where the single user
+   * is effectively the admin). */
+  adminOnly?: boolean;
 }
 
 const PRIMARY_NAV: NavEntry[] = [
@@ -84,6 +90,10 @@ const PRIMARY_NAV: NavEntry[] = [
     icon: HeartHandshake,
     tooltipKey: "Partners tooltip",
     requires: "llm",
+    // Admin-only feature: shown to everyone but locked (greyed + padlock,
+    // non-clickable) for students and instructors. Direct URL access is
+    // blocked by the partners route RoleGuard.
+    adminOnly: true,
   },
   {
     // My Agents is its own top-level feature (pulled out of the Learning
@@ -91,12 +101,15 @@ const PRIMARY_NAV: NavEntry[] = [
     // and manage imported agent conversations. Ungated on model capability —
     // managing connections and imports needs no per-user model grant — but
     // it's a developer-facing feature (its own config page under
-    // /settings/agents is already admin-only), so students don't see it.
+    // /settings/agents is already admin-only), so it's admin-only: shown to
+    // every role but locked (greyed + padlock, non-clickable) for students
+    // and instructors. Direct URL access is blocked by the agents route
+    // RoleGuard.
     href: "/agents",
     label: "My Agents",
     icon: Bot,
     tooltipKey: "Agents tooltip",
-    roles: ["admin", "instructor"],
+    adminOnly: true,
   },
   {
     href: "/co-writer",
@@ -127,21 +140,28 @@ const SECONDARY_NAV: NavEntry[] = [
     // knowledge/memory stores rather than daily workspaces, so they're
     // grouped together right after it. Ungated on model capability, but
     // creating/deleting KBs and connecting a LightRAG server is
-    // admin-level system configuration — admin-only.
+    // admin-level system configuration — admin-only: shown to every role
+    // but locked (greyed + padlock, non-clickable) for students and
+    // instructors. Direct URL access is blocked by the knowledge route
+    // RoleGuard.
     href: "/knowledge",
     label: "Knowledge Center",
     icon: BookOpen,
     tooltipKey: "Knowledge tooltip",
-    roles: ["admin"],
+    adminOnly: true,
   },
   {
     // Memory is its own top-level console (pulled out of the Learning Space):
     // a place to inspect and curate the tutor's long-term memory, not a daily
-    // workspace. Never gated — memory has no per-user model requirement.
+    // workspace. Never gated on model capability, but it's admin-only: shown
+    // to every role but locked (greyed + padlock, non-clickable) for students
+    // and instructors. Direct URL access is blocked by the memory route
+    // RoleGuard.
     href: "/memory",
     label: "Memory",
     icon: Brain,
     tooltipKey: "Memory tooltip",
+    adminOnly: true,
   },
   {
     // A plain-language guide to the whole platform, for every role — the
@@ -221,8 +241,18 @@ export function SidebarShell({
     drawer?.close();
   };
 
+  // adminOnly items are locked (greyed + padlock, non-clickable) for anyone
+  // who isn't an admin. Auth-disabled deployments never lock — the single
+  // user is effectively the admin. While the role is still resolving (auth
+  // on, role unknown) we render locked too, so a non-admin never sees a
+  // clickable item flash before the lock applies.
+  const roleLocked = (item: NavEntry) => {
+    if (!item.adminOnly) return false;
+    if (!authEnabled) return false;
+    return role !== "admin";
+  };
   const navLocked = (item: NavEntry) =>
-    item.requires ? !has(item.requires) : false;
+    (item.requires ? !has(item.requires) : false) || roleLocked(item);
   const lockedTooltip = t("Locked — contact your administrator to get access.");
   const renderedFooter =
     typeof footerSlot === "function" ? footerSlot(collapsed) : footerSlot;
@@ -353,6 +383,33 @@ export function SidebarShell({
           <div className="my-1 h-px w-7 bg-[var(--border)]/40" />
           {visibleSecondaryNav.map((item) => {
             const active = pathname.startsWith(item.href);
+            const locked = navLocked(item);
+            // Locked secondary items mirror the locked primary rendering:
+            // greyed icon + padlock badge, wrapped in a non-interactive div
+            // (no Link) so they can't be clicked.
+            if (locked) {
+              return (
+                <Tooltip
+                  key={item.href}
+                  label={t(item.label)}
+                  description={lockedTooltip}
+                  side="right"
+                >
+                  <div
+                    aria-label={`${t(item.label)} — ${lockedTooltip}`}
+                    aria-disabled
+                    className="relative flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-xl text-[var(--muted-foreground)]/40"
+                  >
+                    <item.icon size={18} strokeWidth={1.6} />
+                    <Lock
+                      size={10}
+                      strokeWidth={2}
+                      className="absolute bottom-1 right-1 text-[var(--muted-foreground)]/70"
+                    />
+                  </div>
+                </Tooltip>
+              );
+            }
             return (
               <Link
                 key={item.href}
@@ -516,6 +573,30 @@ export function SidebarShell({
       <div className="border-t border-[var(--border)]/40 px-2 py-2">
         {visibleSecondaryNav.map((item) => {
           const active = pathname.startsWith(item.href);
+          const locked = navLocked(item);
+          // Locked secondary items mirror the locked primary rendering:
+          // greyed label + padlock, wrapped in a non-interactive div (no
+          // Link) so they can't be clicked.
+          if (locked) {
+            return (
+              <Tooltip
+                key={item.href}
+                label={t(item.label)}
+                description={lockedTooltip}
+                side="right"
+              >
+                <div
+                  aria-label={`${t(item.label)} — ${lockedTooltip}`}
+                  aria-disabled
+                  className="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2 text-[13.5px] text-[var(--muted-foreground)]/40"
+                >
+                  <item.icon size={16} strokeWidth={1.5} />
+                  <span>{t(item.label)}</span>
+                  <Lock size={13} strokeWidth={1.8} className="ml-auto" />
+                </div>
+              </Tooltip>
+            );
+          }
           return (
             <Link
               key={item.href}

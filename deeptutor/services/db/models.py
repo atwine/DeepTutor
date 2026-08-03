@@ -128,6 +128,12 @@ class Enrollment(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="approved")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Issue #4: Automatic course-unit completion tracking. Set when a student
+    # has submitted+graded every published assignment for the unit (see
+    # course_units.py's check_and_mark_completion). Nullable so existing
+    # enrollments default to "not completed" — completion is additive and
+    # never revokes read access to course materials.
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="enrollments")
 
