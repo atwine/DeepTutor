@@ -1946,7 +1946,7 @@ export default function ChatPage() {
                 </span>
               ) : null}
             </div>
-            <div className="flex shrink-0 items-center gap-0.5">
+            <div className="flex shrink-0 items-center gap-1.5">
               <HeaderActionButton
                 onClick={() => setShowSaveModal(true)}
                 disabled={!chatSavePayload}
@@ -2300,8 +2300,11 @@ function SubagentTabWatcher({
  * what it does. Optional `active` flag paints the button with a primary
  * tint, used by the panel-toggle buttons to surface their on/off state.
  */
-// Claude-style icon-only header action: bare 16px glyph, function revealed
-// by an instant tooltip; active state gets a primary tint.
+// Icon-only header action: 18px glyph in a 36px button, function revealed
+// by an instant tooltip; active state gets a primary tint. Sized up from an
+// earlier 16px-in-32px "bare minimal" pass — that read as too easy to miss
+// in the corner of the screen, so this trades a little of that starkness
+// for a target that's actually easy to see and click.
 function HeaderActionButton({
   onClick,
   disabled,
@@ -2324,13 +2327,13 @@ function HeaderActionButton({
         disabled={disabled}
         aria-label={label}
         aria-pressed={active}
-        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-[background-color,color,transform] duration-150 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 ${
+        className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-[background-color,color,transform] duration-150 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 ${
           active
             ? "bg-[var(--primary)]/10 text-[var(--primary)]"
             : "text-[var(--muted-foreground)] hover:bg-[var(--muted)]/55 hover:text-[var(--foreground)] disabled:hover:bg-transparent disabled:hover:text-[var(--muted-foreground)]"
         }`}
       >
-        <Icon size={16} strokeWidth={1.7} className="shrink-0" />
+        <Icon size={18} strokeWidth={1.7} className="shrink-0" />
       </button>
     </Tooltip>
   );
