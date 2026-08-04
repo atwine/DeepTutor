@@ -662,15 +662,18 @@ async def check_and_mark_completion(
         published = [
             a for a in await list_assignments_for_course(course_unit_id) if a["status"] == "published"
         ]
-    if not published:
+    # Issue #32: optional/bonus assignments don't block completion — only
+    # required (non-optional) published assignments must be submitted.
+    required = [a for a in published if not a.get("is_optional", False)]
+    if not required:
         return ""
-    for assignment in published:
+    for assignment in required:
         if submission_batch is not None:
             submission = submission_batch.get((assignment["id"], str(user_id)))
         else:
             submission = await get_latest_submission(assignment["id"], user_id)
         if submission is None:
-            return ""  # not all published assignments submitted+graded yet
+            return ""  # not all required assignments submitted+graded yet
     # All published assignments have a graded submission — mark complete.
     now = datetime.now(timezone.utc)
     async with session_scope() as session:
@@ -707,7 +710,13 @@ async def check_and_mark_completion_batch(
     if not published_assignments or not user_ids:
         return {uid: "" for uid in user_ids}
 
-    assignment_ids = [a["id"] for a in published_assignments]
+    # Issue #32: optional/bonus assignments don't block completion — only
+    # required (non-optional) published assignments must be submitted.
+    required_assignments = [a for a in published_assignments if not a.get("is_optional", False)]
+    if not required_assignments:
+        return {uid: "" for uid in user_ids}
+
+    assignment_ids = [a["id"] for a in required_assignments]
 
     # Determine which students have submitted all published assignments —
     # pure dict lookups, no DB access.

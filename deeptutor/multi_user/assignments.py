@@ -101,6 +101,7 @@ def _assignment_to_dict(a: Assignment) -> dict[str, Any]:
         "time_limit_minutes": a.time_limit_minutes,
         "is_major": a.is_major,
         "passing_score": a.passing_score,
+        "is_optional": a.is_optional,
     }
 
 
@@ -139,6 +140,7 @@ async def create_assignment(
     time_limit_minutes: int | None = None,
     is_major: bool = False,
     passing_score: float | None = None,
+    is_optional: bool = False,
 ) -> dict[str, Any]:
     record = Assignment(
         id=new_assignment_id(),
@@ -155,6 +157,7 @@ async def create_assignment(
         time_limit_minutes=time_limit_minutes,
         is_major=is_major,
         passing_score=passing_score,
+        is_optional=is_optional,
     )
     async with session_scope() as session:
         session.add(record)
@@ -194,6 +197,7 @@ async def update_assignment(
     time_limit_minutes: int | None = _UNSET,  # type: ignore[assignment]
     is_major: bool | None = None,
     passing_score: float | None = _UNSET,  # type: ignore[assignment]
+    is_optional: bool | None = None,
 ) -> dict[str, Any] | None:
     """Questions can only be edited while the assignment is still a draft —
     once published, a student may already be looking at them, and changing
@@ -230,6 +234,8 @@ async def update_assignment(
             record.is_major = is_major
         if passing_score is not _UNSET:
             record.passing_score = passing_score
+        if is_optional is not None:
+            record.is_optional = is_optional
         await session.flush()
         return _assignment_to_dict(record)
 
