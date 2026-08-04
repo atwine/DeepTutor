@@ -194,6 +194,10 @@ class Assignment(Base):
     # (current behavior: attempt_limit is the only gate).
     is_major: Mapped[bool] = mapped_column(nullable=False, default=False)
     passing_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Issue #32: Optional/bonus assignments don't block course completion.
+    # A student who skips an optional assignment is still marked complete
+    # as long as they've submitted all required (non-optional) assignments.
+    is_optional: Mapped[bool] = mapped_column(nullable=False, default=False)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="assignments")
     submissions: Mapped[list["Submission"]] = relationship(

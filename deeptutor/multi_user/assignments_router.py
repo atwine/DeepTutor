@@ -74,6 +74,8 @@ class AssignmentCreate(BaseModel):
     # percentage; None means no pass/fail gating.
     is_major: bool = False
     passing_score: float | None = None
+    # Issue #32: optional/bonus assignments don't block course completion.
+    is_optional: bool = False
 
 
 class AssignmentUpdate(BaseModel):
@@ -87,6 +89,7 @@ class AssignmentUpdate(BaseModel):
     time_limit_minutes: int | None = None
     is_major: bool | None = None
     passing_score: float | None = None
+    is_optional: bool | None = None
 
 
 class AnswerPayload(BaseModel):
@@ -148,6 +151,7 @@ def _assignment_summary(assignment: dict[str, Any]) -> dict[str, Any]:
         "time_limit_minutes": assignment.get("time_limit_minutes"),
         "is_major": assignment.get("is_major", False),
         "passing_score": assignment.get("passing_score"),
+        "is_optional": assignment.get("is_optional", False),
         "question_count": len(assignment.get("questions", [])),
         "created_at": assignment["created_at"],
     }
@@ -176,6 +180,7 @@ async def create_assignment_endpoint(
         time_limit_minutes=payload.time_limit_minutes,
         is_major=payload.is_major,
         passing_score=payload.passing_score,
+        is_optional=payload.is_optional,
     )
     return {"assignment": record}
 
@@ -272,6 +277,7 @@ async def update_assignment_endpoint(
                 if "passing_score" in payload.model_fields_set
                 else _UNSET
             ),
+            is_optional=payload.is_optional,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

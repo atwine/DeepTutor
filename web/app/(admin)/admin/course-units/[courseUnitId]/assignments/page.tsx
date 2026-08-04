@@ -92,6 +92,8 @@ export default function CourseUnitAssignmentsPage() {
   // briefing screen; this form previously had no way to set them at all.
   const [isTimed, setIsTimed] = useState(false);
   const [timeLimitMinutes, setTimeLimitMinutes] = useState("30");
+  // Issue #32: optional/bonus assignments don't block course completion.
+  const [isOptional, setIsOptional] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<AssignmentSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -158,6 +160,7 @@ export default function CourseUnitAssignmentsPage() {
     setPassingScore("70");
     setIsTimed(false);
     setTimeLimitMinutes("30");
+    setIsOptional(false);
     setCreateError("");
   }
 
@@ -234,6 +237,7 @@ export default function CourseUnitAssignmentsPage() {
         passing_score: !isMajor && passingScoreEnabled ? parseFloat(passingScore) || 0 : null,
         is_timed: isTimed,
         time_limit_minutes: isTimed ? parseInt(timeLimitMinutes, 10) || 1 : null,
+        is_optional: isOptional,
       };
       await createAssignment(courseUnitId, draft);
       setShowCreate(false);
@@ -400,6 +404,9 @@ export default function CourseUnitAssignmentsPage() {
                             : ""}
                         {a.is_timed && a.time_limit_minutes
                           ? ` · ${t("{{min}} min timed", { min: a.time_limit_minutes })}`
+                          : ""}
+                        {a.is_optional
+                          ? ` · ${t("optional")}`
                           : ""}
                       </p>
                     </div>
@@ -683,6 +690,24 @@ export default function CourseUnitAssignmentsPage() {
                     />
                   </label>
                 )}
+              </div>
+
+              <div className="mb-4 space-y-2 rounded-lg border border-[var(--border)] p-3">
+                <p className="text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+                  {t("Optional / Bonus")}
+                </p>
+                <label className="flex items-center gap-2 text-sm text-[var(--foreground)]">
+                  <input
+                    type="checkbox"
+                    checked={isOptional}
+                    onChange={(e) => setIsOptional(e.target.checked)}
+                    disabled={creating}
+                  />
+                  {t("Optional assignment (doesn't block completion)")}
+                </label>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  {t("Students who skip this assignment can still be marked complete for the course.")}
+                </p>
               </div>
 
               <div className="mb-2 flex items-center justify-between">

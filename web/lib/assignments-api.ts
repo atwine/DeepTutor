@@ -73,6 +73,8 @@ export interface AssignmentSummary {
   is_major: boolean;
   /** Round 3: 0-100 percentage; null means no pass/fail retake gating. */
   passing_score: number | null;
+  /** Issue #32: optional/bonus assignments don't block course completion. */
+  is_optional: boolean;
   question_count: number;
   created_at: string;
 }
@@ -117,6 +119,7 @@ export interface AssignmentDraft {
   time_limit_minutes?: number | null;
   is_major?: boolean;
   passing_score?: number | null;
+  is_optional?: boolean;
 }
 
 export async function createAssignment(
