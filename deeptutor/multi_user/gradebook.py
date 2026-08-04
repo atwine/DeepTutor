@@ -20,13 +20,18 @@ import csv
 import io
 from typing import Any
 
-from .assignments import get_latest_submission, list_assignments_for_course
+from .assignments import (
+    get_latest_submission,
+    get_latest_submissions_batch,
+    list_assignments_for_course,
+)
 from .course_units import (
     check_and_mark_completion,
+    check_and_mark_completion_batch,
     list_course_units_for_instructor,
     list_enrollments_for_course,
 )
-from .identity import get_user_by_id
+from .identity import get_user_by_id, get_users_by_ids
 
 
 def assignment_max_points(assignment: dict[str, Any]) -> float:
@@ -53,10 +58,31 @@ async def build_gradebook(course_unit_id: str) -> dict[str, Any]:
         for a in assignments
     ]
 
+    # Issue #31: batched submission lookup — one query for all assignments
+    # at once, instead of N_students × N_assignments individual queries.
+    # The dict is keyed by (assignment_id, user_id) for O(1) lookups below.
+    submission_batch = await get_latest_submissions_batch(
+        [a["id"] for a in assignments]
+    )
+
+    # Issue #31: batched completion check — one query for all students,
+    # instead of one session per student inside check_and_mark_completion.
+    user_ids = [e["user_id"] for e in enrollments]
+    completion_map = await check_and_mark_completion_batch(
+        course_unit_id,
+        user_ids,
+        published_assignments=assignments,
+        submission_batch=submission_batch,
+    )
+
+    # Issue #31: batched user identity lookup — load the JSON store once
+    # instead of N_students times (each get_user_by_id re-reads the file).
+    user_records = get_users_by_ids(user_ids)
+
     rows: list[dict[str, Any]] = []
     for enrollment in enrollments:
         user_id = enrollment["user_id"]
-        user_record = get_user_by_id(user_id)
+        user_record = user_records.get(user_id)
         username = user_record[0] if user_record else user_id
         full_name = str(user_record[1].get("full_name") or "") if user_record else ""
         registration_number = (
@@ -67,7 +93,7 @@ async def build_gradebook(course_unit_id: str) -> dict[str, Any]:
         weighted_sum = 0.0
         weight_total = 0.0
         for assignment in assignments:
-            submission = await get_latest_submission(assignment["id"], user_id)
+            submission = submission_batch.get((assignment["id"], user_id))
             max_points = assignment_max_points(assignment)
             score = submission["score"] if submission else None
             percentage = (score / max_points * 100) if submission and max_points else None
@@ -84,10 +110,8 @@ async def build_gradebook(course_unit_id: str) -> dict[str, Any]:
                 weight_total += assignment["weight"]
 
         final_grade = (weighted_sum / weight_total) if weight_total > 0 else None
-        # Issue #4: keep completion status fresh for the instructor view —
-        # check_and_mark_completion is idempotent and only sets completed_at
-        # once (when all published assignments are submitted+graded).
-        completed_at = await check_and_mark_completion(course_unit_id, user_id)
+        # Issue #4: completion status from the batched check above.
+        completed_at = completion_map.get(user_id, "")
         rows.append(
             {
                 "user_id": user_id,

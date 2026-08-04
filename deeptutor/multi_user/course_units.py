@@ -624,7 +624,13 @@ async def list_enrollments_for_student(user_id: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-async def check_and_mark_completion(course_unit_id: str, user_id: str) -> str:
+async def check_and_mark_completion(
+    course_unit_id: str,
+    user_id: str,
+    *,
+    published_assignments: list[dict[str, Any]] | None = None,
+    submission_batch: dict[tuple[str, str], dict[str, Any]] | None = None,
+) -> str:
     """Issue #4: A student is automatically marked complete with a course
     unit when every published assignment for it has a graded submission from
     them. Submissions are always graded at submit time (``Submission.score``
@@ -636,6 +642,13 @@ async def check_and_mark_completion(course_unit_id: str, user_id: str) -> str:
     already set — idempotent) and the ISO timestamp is returned. Returns ""
     when the student is not yet complete or has no enrollment. Completion is
     additive: it never revokes the student's read access to course materials.
+
+    Issue #31: The optional ``published_assignments`` and ``submission_batch``
+    parameters let callers that already have this data (e.g.
+    ``build_gradebook``) skip the per-student re-fetch — eliminating the
+    secondary N+1 that was the real bottleneck. When omitted, the function
+    falls back to fetching them itself (the original behavior, used by the
+    submit flow where only one student is checked).
     """
     # Local import to keep the module's import graph unchanged at load time
     # (assignments.py does not import this module, so there's no cycle, but
@@ -643,13 +656,19 @@ async def check_and_mark_completion(course_unit_id: str, user_id: str) -> str:
     # keeps the diff minimal and avoids any load-order surprise).
     from .assignments import get_latest_submission, list_assignments_for_course
 
-    published = [
-        a for a in await list_assignments_for_course(course_unit_id) if a["status"] == "published"
-    ]
+    if published_assignments is not None:
+        published = published_assignments
+    else:
+        published = [
+            a for a in await list_assignments_for_course(course_unit_id) if a["status"] == "published"
+        ]
     if not published:
         return ""
     for assignment in published:
-        submission = await get_latest_submission(assignment["id"], user_id)
+        if submission_batch is not None:
+            submission = submission_batch.get((assignment["id"], str(user_id)))
+        else:
+            submission = await get_latest_submission(assignment["id"], user_id)
         if submission is None:
             return ""  # not all published assignments submitted+graded yet
     # All published assignments have a graded submission — mark complete.
@@ -668,6 +687,65 @@ async def check_and_mark_completion(course_unit_id: str, user_id: str) -> str:
             enrollment.completed_at = now
             await session.flush()
         return enrollment.completed_at.isoformat() if enrollment.completed_at else ""
+
+
+async def check_and_mark_completion_batch(
+    course_unit_id: str,
+    user_ids: list[str],
+    published_assignments: list[dict[str, Any]],
+    submission_batch: dict[tuple[str, str], dict[str, Any]],
+) -> dict[str, str]:
+    """Issue #31: Batched version of :func:`check_and_mark_completion` —
+    checks and marks completion for *all* students in a course unit in a
+    **single DB query** (one SELECT for all enrollments + one UPDATE for
+    newly-complete ones), instead of one session per student.
+
+    Returns a dict mapping ``user_id`` → ``completed_at`` ISO string (or
+    ``""`` if not complete). The caller (``build_gradebook``) uses this to
+    avoid the per-student N+1 that was the real bottleneck.
+    """
+    if not published_assignments or not user_ids:
+        return {uid: "" for uid in user_ids}
+
+    assignment_ids = [a["id"] for a in published_assignments]
+
+    # Determine which students have submitted all published assignments —
+    # pure dict lookups, no DB access.
+    complete_user_ids: list[str] = []
+    for uid in user_ids:
+        all_submitted = all(
+            submission_batch.get((aid, uid)) is not None
+            for aid in assignment_ids
+        )
+        if all_submitted:
+            complete_user_ids.append(uid)
+
+    if not complete_user_ids:
+        return {uid: "" for uid in user_ids}
+
+    # Single query: fetch all enrollments for complete students, and mark
+    # the ones that aren't already marked in the same transaction.
+    now = datetime.now(timezone.utc)
+    result_map: dict[str, str] = {uid: "" for uid in user_ids}
+
+    async with session_scope() as session:
+        rows = (
+            await session.execute(
+                select(Enrollment).where(
+                    Enrollment.course_unit_id == course_unit_id,
+                    Enrollment.user_id.in_([str(uid) for uid in complete_user_ids]),
+                )
+            )
+        ).scalars().all()
+
+        for enrollment in rows:
+            if enrollment.completed_at is None:
+                enrollment.completed_at = now
+                await session.flush()
+            if enrollment.completed_at:
+                result_map[enrollment.user_id] = enrollment.completed_at.isoformat()
+
+    return result_map
 
 
 # ---------------------------------------------------------------------------

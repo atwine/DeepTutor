@@ -368,6 +368,62 @@ async def get_latest_submission(assignment_id: str, user_id: str) -> dict[str, A
         return _submission_to_dict(record) if record else None
 
 
+async def get_latest_submissions_batch(
+    assignment_ids: list[str],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Batched version of :func:`get_latest_submission` — fetches the latest
+    submission per ``(assignment_id, user_id)`` pair for *all* given
+    assignments in a **single query**, eliminating the N+1 pattern in
+    ``build_gradebook()`` (issue #31).
+
+    Uses ``ROW_NUMBER() OVER (PARTITION BY assignment_id, user_id ORDER BY
+    submitted_at DESC)`` to pick the latest submission per pair, then
+    filters to ``row_number = 1``. This is portable SQL (works on Postgres
+    and SQLite) and reduces N×M queries to **1 query**.
+
+    Returns a dict keyed by ``(assignment_id, user_id)`` with the
+    submission dict as the value — the same shape ``build_gradebook``
+    consumes, just looked up from a dict instead of fetched per pair.
+    """
+    if not assignment_ids:
+        return {}
+
+    from sqlalchemy import literal_column, text
+
+    # Use a subquery with ROW_NUMBER() to pick the latest submission per
+    # (assignment_id, user_id) pair, then join back to get full rows.
+    # This is a single SQL query regardless of how many assignments/students
+    # there are — the O(N×M) Python loop is replaced by an O(1) dict lookup.
+    subq = (
+        select(
+            Submission.id.label("latest_id"),
+            Submission.assignment_id,
+            Submission.user_id,
+            func.row_number()
+            .over(
+                partition_by=[Submission.assignment_id, Submission.user_id],
+                order_by=Submission.submitted_at.desc(),
+            )
+            .label("rn"),
+        )
+        .where(Submission.assignment_id.in_(assignment_ids))
+        .subquery()
+    )
+
+    async with session_scope() as session:
+        result = await session.execute(
+            select(Submission)
+            .join(subq, Submission.id == subq.c.latest_id)
+            .where(subq.c.rn == 1)
+        )
+        records = result.scalars().all()
+
+    return {
+        (record.assignment_id, record.user_id): _submission_to_dict(record)
+        for record in records
+    }
+
+
 # ---------------------------------------------------------------------------
 # Advisory-lock helpers for the submit flow's attempt-limit guard
 # ---------------------------------------------------------------------------
