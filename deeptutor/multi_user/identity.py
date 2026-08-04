@@ -277,6 +277,26 @@ def get_user_by_id(user_id: str) -> tuple[str, dict[str, Any]] | None:
     return None
 
 
+def get_users_by_ids(user_ids: list[str]) -> dict[str, tuple[str, dict[str, Any]]]:
+    """Issue #31: Batched version of :func:`get_user_by_id` — loads the JSON
+    identity store **once** and returns a dict keyed by ``user_id``, instead
+    of re-reading the file and scanning all users N times.
+
+    Returns ``{user_id: (username, record)}`` for each ID that was found.
+    Missing IDs are simply absent from the result.
+    """
+    if not user_ids:
+        return {}
+    users = load_users()
+    id_set = set(user_ids)
+    result: dict[str, tuple[str, dict[str, Any]]] = {}
+    for username, record in users.items():
+        uid = str(record.get("id") or "")
+        if uid in id_set:
+            result[uid] = (username, record)
+    return result
+
+
 async def delete_user(username: str) -> bool:
     """Delete a user from the JSON store AND sweep their Postgres rows.
 
