@@ -27,6 +27,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -130,9 +131,9 @@ class Enrollment(Base):
         String, primary_key=True, default=lambda: f"en_{uuid.uuid4().hex}"
     )
     course_unit_id: Mapped[str] = mapped_column(
-        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # 'pending' | 'approved' — matches Enrollment.status in course_units.py today.
     status: Mapped[str] = mapped_column(String, nullable=False, default="approved")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -210,6 +211,14 @@ class Assignment(Base):
 
 class Submission(Base):
     __tablename__ = "submissions"
+    __table_args__ = (
+        # Issue #38: Composite index for queries that filter by both
+        # assignment_id AND user_id (get_latest_submission, count_submissions,
+        # get_latest_submissions_batch). The two single-column indexes below
+        # help individual filters but can't be combined efficiently by the
+        # planner for AND queries on both columns.
+        Index("ix_submissions_assignment_user", "assignment_id", "user_id"),
+    )
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True, default=lambda: f"sub_{uuid.uuid4().hex}"
@@ -227,7 +236,7 @@ class Submission(Base):
     )
     score: Mapped[float] = mapped_column(Float, nullable=False)
     max_score: Mapped[float] = mapped_column(Float, nullable=False)
-    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
 
     assignment: Mapped[Assignment] = relationship(back_populates="submissions")
 
@@ -295,7 +304,7 @@ class Notification(Base):
         String, primary_key=True, default=lambda: f"notif_{uuid.uuid4().hex}"
     )
     course_unit_id: Mapped[str] = mapped_column(
-        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # e.g. "assignment_published" | "notes_published"
     kind: Mapped[str] = mapped_column(String, nullable=False)
@@ -324,9 +333,9 @@ class NotificationRead(Base):
         String, primary_key=True, default=lambda: f"nread_{uuid.uuid4().hex}"
     )
     notification_id: Mapped[str] = mapped_column(
-        ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
 
@@ -342,7 +351,7 @@ class CourseBookEntry(Base):
     book_id: Mapped[str] = mapped_column(String, primary_key=True)
     owner_id: Mapped[str] = mapped_column(String, nullable=False)
     course_unit_id: Mapped[str] = mapped_column(
-        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # 'draft' | 'published'
     status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
