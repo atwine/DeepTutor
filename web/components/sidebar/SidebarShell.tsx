@@ -85,6 +85,19 @@ const PRIMARY_NAV: NavEntry[] = [
     roles: ["instructor"],
   },
   {
+    // Instructor's student dashboard (issue #34): bird's-eye view of
+    // students enrolled in the instructor's own courses — enrollment
+    // counts, course names, submission counts, and completion status.
+    // Searchable and filterable. Placed right after "My Course Units"
+    // so course-related instructor tools stay grouped. Reuses the same
+    // table component as the admin dashboard (#33).
+    href: "/instructor/students",
+    label: "My Students",
+    icon: Users,
+    tooltipKey: "My Students tooltip",
+    roles: ["instructor"],
+  },
+  {
     // Admin's global course catalog administration: create course units,
     // assign instructors, manage rosters, archive/delete old units. Labeled
     // "Course Units" (not "My Course Units" — the admin doesn't teach any)
