@@ -8,7 +8,7 @@ import {
   createAssignment,
   deleteAssignment,
   listAssignments,
-  listSubmissions,
+  listSubmissionsPaged,
   publishAssignment,
   unpublishAssignment,
   type AssignmentDraft,
@@ -18,6 +18,7 @@ import {
   type SubmissionWithStudent,
 } from "@/lib/assignments-api";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import Pagination from "@/components/common/Pagination";
 import {
   ArrowLeft,
   ClipboardList,
@@ -106,6 +107,9 @@ export default function CourseUnitAssignmentsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<SubmissionWithStudent[]>([]);
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
+  const [submissionsTotal, setSubmissionsTotal] = useState(0);
+  const [submissionsOffset, setSubmissionsOffset] = useState(0);
+  const SUBMISSIONS_PAGE_LIMIT = 50;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -297,9 +301,26 @@ export default function CourseUnitAssignmentsPage() {
       return;
     }
     setExpandedId(assignment.id);
+    setSubmissionsOffset(0);
     setSubmissionsLoading(true);
     try {
-      setSubmissions(await listSubmissions(assignment.id));
+      const paged = await listSubmissionsPaged(assignment.id, SUBMISSIONS_PAGE_LIMIT, 0);
+      setSubmissions(paged.items);
+      setSubmissionsTotal(paged.total);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : t("Failed to load submissions"));
+    } finally {
+      setSubmissionsLoading(false);
+    }
+  }
+
+  async function loadSubmissionsPage(assignmentId: string, offset: number) {
+    setSubmissionsLoading(true);
+    try {
+      const paged = await listSubmissionsPaged(assignmentId, SUBMISSIONS_PAGE_LIMIT, offset);
+      setSubmissions(paged.items);
+      setSubmissionsTotal(paged.total);
+      setSubmissionsOffset(offset);
     } catch (e) {
       setActionError(e instanceof Error ? e.message : t("Failed to load submissions"));
     } finally {
@@ -457,7 +478,7 @@ export default function CourseUnitAssignmentsPage() {
                   {expandedId === a.id && (
                     <div className="border-t border-[var(--border)] bg-[var(--background)]/40 p-4">
                       <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
-                        {t("Submissions")} {!submissionsLoading && `(${submissions.length})`}
+                        {t("Submissions")} {!submissionsLoading && `(${submissionsTotal})`}
                       </p>
                       {submissionsLoading ? (
                         <p className="text-xs text-[var(--muted-foreground)]">{t("Loading…")}</p>
@@ -488,6 +509,19 @@ export default function CourseUnitAssignmentsPage() {
                               </span>
                             </div>
                           ))}
+                        </div>
+                      )}
+                      {submissionsTotal > SUBMISSIONS_PAGE_LIMIT && expandedId && (
+                        <div className="mt-2">
+                          <Pagination
+                            total={submissionsTotal}
+                            limit={SUBMISSIONS_PAGE_LIMIT}
+                            offset={submissionsOffset}
+                            disabled={submissionsLoading}
+                            onPageChange={(newOffset) => {
+                              if (expandedId) void loadSubmissionsPage(expandedId, newOffset);
+                            }}
+                          />
                         </div>
                       )}
                     </div>

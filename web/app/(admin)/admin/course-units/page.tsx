@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { fetchAuthStatus } from "@/lib/auth";
 import { listUsers, type UserRecord } from "@/lib/admin-api";
 import {
-  listCourseUnits,
+  listCourseUnitsPaged,
   createCourseUnit,
   updateCourseUnit,
   deleteCourseUnit,
@@ -15,6 +15,7 @@ import {
   type CourseUnit,
 } from "@/lib/course-units-api";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import Pagination from "@/components/common/Pagination";
 import { RosterEditor } from "./RosterEditor";
 import {
   Archive,
@@ -78,6 +79,9 @@ export default function CourseUnitsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [totalCount, setTotalCount] = useState(0);
+  const [pageOffset, setPageOffset] = useState(0);
+  const PAGE_LIMIT = 50;
 
   const [form, setForm] = useState<FormState | null>(null);
   const [formSubmitting, setFormSubmitting] = useState(false);
@@ -88,15 +92,16 @@ export default function CourseUnitsPage() {
   const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
-  const load = useCallback(async (admin: boolean) => {
+  const load = useCallback(async (admin: boolean, offset: number = 0) => {
     setLoading(true);
     setError("");
     try {
-      const [unitList, userList] = await Promise.all([
-        listCourseUnits(),
+      const [paged, userList] = await Promise.all([
+        listCourseUnitsPaged(PAGE_LIMIT, offset),
         admin ? listUsers() : Promise.resolve<UserRecord[]>([]),
       ]);
-      setUnits(unitList);
+      setUnits(paged.items);
+      setTotalCount(paged.total);
       setInstructors(userList.filter((u) => u.role === "instructor"));
     } catch (e) {
       setError(e instanceof Error ? e.message : t("Failed to load course units"));
@@ -496,6 +501,16 @@ export default function CourseUnitsPage() {
               </tbody>
             </table>
           )}
+          <Pagination
+            total={totalCount}
+            limit={PAGE_LIMIT}
+            offset={pageOffset}
+            disabled={loading}
+            onPageChange={(newOffset) => {
+              setPageOffset(newOffset);
+              void load(isAdmin, newOffset);
+            }}
+          />
         </div>
 
         {archivedUnits.length > 0 && (

@@ -16,6 +16,7 @@ import {
 import { GrantEditor } from "@/features/multi-user/components/GrantEditor";
 import { UserAvatar } from "@/components/UserAvatar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import Pagination from "@/components/common/Pagination";
 import { filterUsersByQuery } from "@/lib/admin-users";
 import {
   Search,
@@ -81,6 +82,8 @@ export default function AdminUsersPage() {
   const [createPassword, setCreatePassword] = useState("");
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [pageOffset, setPageOffset] = useState(0);
+  const USERS_PAGE_LIMIT = 50;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -219,6 +222,8 @@ export default function AdminUsersPage() {
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredUsers = filterUsersByQuery(users, query);
+  // Issue #42: Client-side pagination over the filtered user list.
+  const pagedUsers = filteredUsers.slice(pageOffset, pageOffset + USERS_PAGE_LIMIT);
 
   return (
     <div className="h-screen overflow-y-auto bg-[var(--background)] px-4 py-10 [scrollbar-gutter:stable]">
@@ -301,7 +306,10 @@ export default function AdminUsersPage() {
               <input
                 type="search"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setPageOffset(0);
+                }}
                 placeholder={t("Search users…")}
                 aria-label={t("Search users")}
                 className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] py-2 pl-9 pr-3 text-sm
@@ -398,7 +406,7 @@ export default function AdminUsersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
-                {filteredUsers.map((user) => {
+                {pagedUsers.map((user) => {
                   const isSelf = user.username === currentUser;
                   const isAdmin = user.role === "admin";
                   const canManageAssignments = !isAdmin && Boolean(user.id);
@@ -544,6 +552,13 @@ export default function AdminUsersPage() {
               </tbody>
             </table>
           )}
+          <Pagination
+            total={filteredUsers.length}
+            limit={USERS_PAGE_LIMIT}
+            offset={pageOffset}
+            disabled={loading}
+            onPageChange={(newOffset) => setPageOffset(newOffset)}
+          />
         </div>
 
         <p className="mt-8 text-center text-xs text-[var(--muted-foreground)]">
