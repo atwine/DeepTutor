@@ -858,14 +858,43 @@ async def _run_material_indexing(
     """
     try:
         await update_ingestion_status(material_id, "indexing")
-        from deeptutor.knowledge.add_documents import DocumentAdder
         from deeptutor.knowledge.progress_tracker import ProgressTracker
+        from deeptutor.services.rag.factory import has_ready_provider_index
+        from deeptutor.services.rag.service import RAGService
 
         # ProgressTracker.__init__ does base_dir / kb_name, so base_dir
         # must be a Path, not str (same fix as commit 1442ab2 for the
         # auto-provisioning path).
         base_dir = admin_kb_base_dir().resolve()
         progress_tracker = ProgressTracker(kb_name, base_dir)
+        kb_dir = base_dir / kb_name
+
+        # Course KBs are provisioned empty (create_directory_structure only --
+        # no index is built at creation time because there are no documents
+        # yet). So the first material upload must *initialize* the index
+        # rather than *add to* it. DocumentAdder.__init__ checks for an
+        # existing provider index and raises "Knowledge base not initialized"
+        # if none exists, so we branch here: initialize on first upload,
+        # add_documents on subsequent ones.
+        if not has_ready_provider_index(kb_dir, None):
+            rag_service = RAGService(kb_base_dir=str(base_dir))
+            success = await rag_service.initialize(
+                kb_name=kb_name,
+                file_paths=[file_path],
+            )
+            if success:
+                await update_ingestion_status(material_id, "ready")
+            else:
+                logger.warning(
+                    "Material %s indexing failed: RAG initialize returned False",
+                    material_id,
+                )
+                await update_ingestion_status(material_id, "failed")
+            return
+
+        # Subsequent uploads: incremental add via DocumentAdder.
+        from deeptutor.knowledge.add_documents import DocumentAdder
+
         adder = DocumentAdder(
             kb_name=kb_name,
             base_dir=str(base_dir),
