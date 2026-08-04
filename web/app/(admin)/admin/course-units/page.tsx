@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Fragment, useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { fetchAuthStatus } from "@/lib/auth";
 import { listUsers, type UserRecord } from "@/lib/admin-api";
 import {
-  listCourseUnits,
+  listCourseUnitsPaged,
   createCourseUnit,
   updateCourseUnit,
   deleteCourseUnit,
@@ -15,12 +15,14 @@ import {
   type CourseUnit,
 } from "@/lib/course-units-api";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import Pagination from "@/components/common/Pagination";
 import { RosterEditor } from "./RosterEditor";
 import {
   Archive,
   ArchiveRestore,
   BookOpen,
   ClipboardList,
+  Files,
   GraduationCap,
   RefreshCw,
   ArrowLeft,
@@ -34,11 +36,11 @@ import Link from "next/link";
 import { formatDate as formatLocaleDate, type Language } from "@/lib/datetime";
 
 function formatDate(iso: string, lang: Language): string {
-  if (!iso) return "—";
+  if (!iso) return "â€”";
   try {
     return formatLocaleDate(new Date(iso), lang);
   } catch {
-    return "—";
+    return "â€”";
   }
 }
 
@@ -77,6 +79,9 @@ export default function CourseUnitsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [totalCount, setTotalCount] = useState(0);
+  const [pageOffset, setPageOffset] = useState(0);
+  const PAGE_LIMIT = 50;
 
   const [form, setForm] = useState<FormState | null>(null);
   const [formSubmitting, setFormSubmitting] = useState(false);
@@ -87,15 +92,16 @@ export default function CourseUnitsPage() {
   const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
-  const load = useCallback(async (admin: boolean) => {
+  const load = useCallback(async (admin: boolean, offset: number = 0) => {
     setLoading(true);
     setError("");
     try {
-      const [unitList, userList] = await Promise.all([
-        listCourseUnits(),
+      const [paged, userList] = await Promise.all([
+        listCourseUnitsPaged(PAGE_LIMIT, offset),
         admin ? listUsers() : Promise.resolve<UserRecord[]>([]),
       ]);
-      setUnits(unitList);
+      setUnits(paged.items);
+      setTotalCount(paged.total);
       setInstructors(userList.filter((u) => u.role === "instructor"));
     } catch (e) {
       setError(e instanceof Error ? e.message : t("Failed to load course units"));
@@ -263,7 +269,7 @@ export default function CourseUnitsPage() {
             </div>
           </td>
           <td className="px-5 py-3 text-[var(--muted-foreground)]">
-            {unit.term || "—"}
+            {unit.term || "â€”"}
           </td>
           <td className="px-5 py-3 text-[var(--muted-foreground)]">
             {instructorNames(unit)}
@@ -309,6 +315,14 @@ export default function CourseUnitsPage() {
               >
                 <BookOpen size={15} />
               </Link>
+              <Link
+                href={`/admin/course-units/${unit.id}/materials`}
+                title={t("Course Materials")}
+                className="rounded-lg p-1.5 text-[var(--muted-foreground)]
+                         hover:bg-[var(--background)] hover:text-[var(--foreground)] transition-colors"
+              >
+                <Files size={15} />
+              </Link>
               <button
                 onClick={() => void handleToggleArchive(unit)}
                 disabled={archiveBusyId === unit.id}
@@ -324,10 +338,10 @@ export default function CourseUnitsPage() {
                 )}
               </button>
               {/* Round 4 Task 2: Edit opened to instructor-or-admin on the
-                  backend (PUT /course-units/{id}), matching Archive above —
+                  backend (PUT /course-units/{id}), matching Archive above â€”
                   shown to everyone who can reach this page, since the list
                   itself is already scoped to "units I teach" for a non-admin.
-                  Delete stays admin-only (irreversible cascade — see the
+                  Delete stays admin-only (irreversible cascade â€” see the
                   backend endpoint's docstring for the full reasoning). */}
               <button
                 onClick={() => openEdit(unit)}
@@ -378,7 +392,7 @@ export default function CourseUnitsPage() {
                 href="/admin/users"
                 className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
               >
-                {t("User Management")} →
+                {t("User Management")} â†’
               </Link>
             )}
           </div>
@@ -468,7 +482,7 @@ export default function CourseUnitsPage() {
                 {t("No active course units")}
               </p>
               <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                {t("Every course unit here is archived — see the archived section below.")}
+                {t("Every course unit here is archived â€” see the archived section below.")}
               </p>
             </div>
           ) : (
@@ -487,6 +501,16 @@ export default function CourseUnitsPage() {
               </tbody>
             </table>
           )}
+          <Pagination
+            total={totalCount}
+            limit={PAGE_LIMIT}
+            offset={pageOffset}
+            disabled={loading}
+            onPageChange={(newOffset) => {
+              setPageOffset(newOffset);
+              void load(isAdmin, newOffset);
+            }}
+          />
         </div>
 
         {archivedUnits.length > 0 && (
@@ -522,7 +546,7 @@ export default function CourseUnitsPage() {
         )}
 
         <p className="mt-8 text-center text-xs text-[var(--muted-foreground)]">
-          {t("DeepTutor Admin · Course Units")}
+          {t("DeepTutor Admin Â· Course Units")}
         </p>
       </div>
 
@@ -531,7 +555,7 @@ export default function CourseUnitsPage() {
         title={t("Delete course unit")}
         tone="danger"
         confirmLabel={t("Delete")}
-        busyLabel={t("Deleting…")}
+        busyLabel={t("Deletingâ€¦")}
         busy={deleteBusy}
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteTarget(null)}
@@ -540,7 +564,7 @@ export default function CourseUnitsPage() {
           <div className="space-y-2">
             <p>
               {t(
-                "This permanently removes “{{name}}” along with all its enrollments, assignments, and student submissions. This cannot be undone.",
+                "This permanently removes â€œ{{name}}â€ along with all its enrollments, assignments, and student submissions. This cannot be undone.",
                 { name: deleteTarget.name },
               )}
             </p>
@@ -609,7 +633,7 @@ export default function CourseUnitsPage() {
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
                 disabled={formSubmitting}
                 rows={3}
-                placeholder={t("What this course unit covers — shown to students browsing the catalog.")}
+                placeholder={t("What this course unit covers â€” shown to students browsing the catalog.")}
                 className="mt-1 w-full resize-none rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
               />
             </label>
@@ -644,7 +668,7 @@ export default function CourseUnitsPage() {
               {isAdmin ? (
                 instructors.length === 0 ? (
                   <p className="text-xs text-[var(--muted-foreground)]">
-                    {t("No instructor accounts yet — promote a user to instructor first.")}
+                    {t("No instructor accounts yet â€” promote a user to instructor first.")}
                   </p>
                 ) : (
                 <div className="max-h-36 space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] p-2">
@@ -699,7 +723,7 @@ export default function CourseUnitsPage() {
                 className="rounded-lg bg-[var(--foreground)] px-3 py-1.5 text-sm font-medium text-[var(--background)] hover:opacity-90 disabled:opacity-40"
               >
                 {formSubmitting
-                  ? t("Saving…")
+                  ? t("Savingâ€¦")
                   : form.id
                     ? t("Save")
                     : t("Create")}

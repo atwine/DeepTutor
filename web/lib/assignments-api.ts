@@ -73,6 +73,8 @@ export interface AssignmentSummary {
   is_major: boolean;
   /** Round 3: 0-100 percentage; null means no pass/fail retake gating. */
   passing_score: number | null;
+  /** Issue #32: optional/bonus assignments don't block course completion. */
+  is_optional: boolean;
   question_count: number;
   created_at: string;
 }
@@ -117,6 +119,7 @@ export interface AssignmentDraft {
   time_limit_minutes?: number | null;
   is_major?: boolean;
   passing_score?: number | null;
+  is_optional?: boolean;
 }
 
 export async function createAssignment(
@@ -231,6 +234,24 @@ export async function listSubmissions(
     "Failed to load submissions",
   );
   return data.submissions;
+}
+
+/** Issue #42: Paginated submissions — returns items + total count. */
+export async function listSubmissionsPaged(
+  assignmentId: string,
+  limit: number = 50,
+  offset: number = 0,
+): Promise<{ items: SubmissionWithStudent[]; total: number }> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/submissions?limit=${limit}&offset=${offset}`,
+    ),
+  );
+  const data = await unwrap<{ submissions: SubmissionWithStudent[]; total: number; limit: number; offset: number }>(
+    res,
+    "Failed to load submissions",
+  );
+  return { items: data.submissions, total: data.total };
 }
 
 export async function getMySubmission(assignmentId: string): Promise<Submission | null> {

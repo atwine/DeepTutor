@@ -172,6 +172,8 @@ class FileTypeRouter:
         ".hcl",
         ".nginxconf",
         ".dockerfile",
+        # Notebooks (parsed via the dedicated notebook parser, not raw JSON)
+        ".ipynb",
     }
 
     IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
@@ -277,7 +279,27 @@ class FileTypeRouter:
 
     @classmethod
     async def read_text_file(cls, file_path: str) -> str:
-        """Read a text file with automatic encoding detection."""
+        """Read a text file with automatic encoding detection.
+
+        ``.ipynb`` files are routed through the dedicated notebook parser
+        (``deeptutor.utils.notebook_parser``) so cells, code, and text outputs
+        are extracted as structured text rather than raw JSON.
+        """
+        # Jupyter notebooks are JSON; parse them into readable cell text
+        # instead of returning the raw JSON source. [src: notebook_parser]
+        if Path(file_path).suffix.lower() == ".ipynb":
+            from deeptutor.utils.notebook_parser import (
+                NotebookParseError,
+                notebook_to_text,
+            )
+
+            try:
+                text = notebook_to_text(file_path)
+            except NotebookParseError as exc:
+                logger.warning(f"Failed to parse notebook {file_path}: {exc}")
+                return ""
+            return text
+
         for encoding in cls.TEXT_DECODING_CANDIDATES:
             try:
                 with open(file_path, "r", encoding=encoding) as f:

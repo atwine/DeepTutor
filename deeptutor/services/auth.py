@@ -208,12 +208,27 @@ def set_avatar(username: str, avatar: str) -> bool:
     return True
 
 
-def get_user_info(username: str) -> dict | None:
-    """Return the public info dict for a single user, or None if unknown."""
-    for item in list_users():
-        if item.get("username") == username:
-            return item
-    return None
+def get_user_info(username: str) -> dict[str, Any] | None:
+    from deeptutor.multi_user.identity import get_user
+
+    user = get_user(username)
+    if user is None:
+        return None
+
+    return {
+        "id": user.get("id", ""),
+        "username": username,
+        "role": user.get("role", "user"),
+        "created_at": user.get("created_at", ""),
+        "disabled": bool(user.get("disabled", False)),
+        "avatar": str(user.get("avatar") or ""),
+        "full_name": str(user.get("full_name") or ""),
+        "registration_number": str(user.get("registration_number") or ""),
+        "first_name": str(user.get("first_name") or ""),
+        "surname": str(user.get("surname") or ""),
+        "gender": str(user.get("gender") or ""),
+        "course": str(user.get("course") or ""),
+    }
 
 
 def set_disabled(username: str, disabled: bool) -> bool:

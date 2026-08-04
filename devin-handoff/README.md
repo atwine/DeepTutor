@@ -17,6 +17,22 @@ stepping on each other. Read in this order:
    This is the mechanism that lets Claude and Devin work in parallel without a live sync —
    Claude will read this log before starting new work each session.
 
+## Current state (2026-08-04)
+
+- **Branch**: `development` (commit `a7706db`), pushed to `origin/development`
+- **Local branches**: `development`, `main`, `staging` (only 3 — all feature/worktree
+  branches cleaned up)
+- **Remote branches**: `development`, `main`, `staging` + `Deeptutor-v0.6.0-archive`,
+  `eval`, `guide2.0`, `multi-user` (kept, have unique commits)
+- **Worktrees**: only the main one (`DeepTutor/` on `development`) — all 10 worktrees
+  removed
+- **GitHub issues** (atwine/DeepTutor): 6 closed, 15 open (11 docs, 3 decisions, 1
+  enhancement). Use `gh issue list --repo atwine/DeepTutor` (NOT bare `gh issue list`,
+  which shows upstream HKUDS issues)
+- **Test data**: seeded multi-user environment with 2 instructors + 5 students, 3 courses,
+  3 assignments, 4 submissions, 3 materials. See DEVIN_LOG 2026-08-04 entry for login
+  credentials and UI test scenarios.
+
 ## Ground rules for parallel work
 
 - **This is a real, currently-deployed instance**, not a sandbox — a research/teaching
@@ -49,5 +65,8 @@ stepping on each other. Read in this order:
   existing pattern over introducing a new one, even if you'd design it differently from
   scratch.
 - **Push only when asked.** The owner reviews and explicitly says "push" before anything
-  goes to `origin/main` (`atwine/DeepTutor`). Commit locally as you go; don't assume push
-  authorization carries over between sessions.
+  goes to `origin/development` or `origin/main` (`atwine/DeepTutor`). Commit locally as you
+  go; don't assume push authorization carries over between sessions.
+- **Branch from `development`, not `main`.** The workflow is
+  `feature/* → development → staging → main` (see `AGENTS.md`). Never push directly to
+  `main` — it's protected on GitHub.

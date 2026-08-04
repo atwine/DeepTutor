@@ -8,7 +8,7 @@ import {
   approveLeaveRequest,
   enrollStudent,
   getCourseUnitRequests,
-  getCourseUnitRoster,
+  getCourseUnitRosterPaged,
   getLeaveRequests,
   rejectEnrollmentRequest,
   rejectLeaveRequest,
@@ -17,10 +17,15 @@ import {
   type RosterEntry,
   type StudentSearchResult,
 } from "@/lib/course-units-api";
+import Pagination from "@/components/common/Pagination";
+
+const ROSTER_PAGE_LIMIT = 50;
 
 export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
   const { t } = useTranslation();
   const [roster, setRoster] = useState<RosterEntry[]>([]);
+  const [rosterTotal, setRosterTotal] = useState(0);
+  const [rosterOffset, setRosterOffset] = useState(0);
   const [requests, setRequests] = useState<RosterEntry[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<RosterEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,16 +35,17 @@ export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
   const [searching, setSearching] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
-  const loadAll = useCallback(async () => {
+  const loadAll = useCallback(async (offset: number = 0) => {
     setLoading(true);
     setError("");
     try {
-      const [rosterList, requestList, leaveList] = await Promise.all([
-        getCourseUnitRoster(courseUnitId),
+      const [rosterPaged, requestList, leaveList] = await Promise.all([
+        getCourseUnitRosterPaged(courseUnitId, ROSTER_PAGE_LIMIT, offset),
         getCourseUnitRequests(courseUnitId),
         getLeaveRequests(courseUnitId),
       ]);
-      setRoster(rosterList);
+      setRoster(rosterPaged.items);
+      setRosterTotal(rosterPaged.total);
       setRequests(requestList);
       setLeaveRequests(leaveList);
     } catch (e) {
@@ -50,8 +56,8 @@ export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
   }, [courseUnitId, t]);
 
   useEffect(() => {
-    void loadAll();
-  }, [loadAll]);
+    void loadAll(rosterOffset);
+  }, [loadAll, rosterOffset]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -392,6 +398,13 @@ export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
             ))}
           </div>
         )}
+        <Pagination
+          total={rosterTotal}
+          limit={ROSTER_PAGE_LIMIT}
+          offset={rosterOffset}
+          disabled={loading}
+          onPageChange={(newOffset) => setRosterOffset(newOffset)}
+        />
       </div>
     </div>
   );
