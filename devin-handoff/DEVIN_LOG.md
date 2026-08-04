@@ -3599,3 +3599,137 @@ docker exec deeptutor python /app/_verify.py
 ```
 
 — Devin
+
+## 2026-08-04 — Devin — Load simulation: 7 assignments × 30 students — gradebook capacity test
+
+**Item**: not in TODO.md — proactive capacity test. The repo owner asked:
+"An instructor might want to give students 2-4 quizzes, 2 tests, and a
+final exam. Can the system handle that load and still track properly with
+a correct gradebook output?"
+
+**Status**: done — system handles it, gradebook is correct, two design
+findings flagged below.
+
+### What was tested
+
+Created a realistic course with:
+- **7 assignments**: 3 quizzes (weight 1.0 each), 2 tests (weight 3.0
+  each, is_major=True, passing_score=50%), 1 final exam (weight 5.0,
+  is_major=True, passing_score=60%), 1 makeup/bonus quiz (weight 0.5)
+- **30 students** with deterministic score distributions:
+  - Students 1-10: high performers (82-100% per assignment)
+  - Students 11-20: average (53-80%)
+  - Students 21-30: low performers (24-60%)
+- **200 submissions** (30×7 minus 10 skips):
+  - Students 26-30 skipped the final exam (incomplete)
+  - Students 21-25 skipped the makeup quiz (to test "optional" handling)
+- All submissions inserted directly into the DB (bypassing the LLM
+  grading path) with pre-computed scores and question_results
+
+Script: `_simulate_load.py` (run: `docker exec deeptutor python
+/app/_simulate_load.py`)
+
+### Results
+
+**Gradebook correctness: PASS**
+- Weighted average math is exact: `final_grade = sum(percentage × weight) / sum(weight)` verified to 2 decimal places
+- Total weight = 14.5 (1+1+1+3+3+5+0.5) — correctly aggregated
+- CSV export: 31 lines (1 header + 30 rows), correct column format
+  (`Quiz 1: Basics (/10.0), Quiz 2: Data Structures (/10.0), ...`)
+- Cross-course instructor report: correctly includes the load test
+  course alongside the 2 seed courses (3 total, 35 students, 9
+  assignments)
+
+**Completion tracking: PASS (but with a design finding — see below)**
+- 20 students marked completed (all 7 assignments submitted)
+- 10 students marked incomplete (6 assignments submitted)
+- Students 26-30 correctly incomplete (skipped final exam)
+- Students 21-25 correctly incomplete (skipped makeup quiz) — **this
+  is the design finding**: there's no "optional" or "bonus" assignment
+  concept. ALL published assignments must have a submission for
+  completion, even ones labeled "bonus" or "makeup."
+
+**Performance: ACCEPTABLE for current scale, will need optimization for larger classes**
+
+| Class size | Assignments | DB lookups | Projected time |
+|---|---|---|---|
+| 30 students | 7 | 210 | 2.7s (measured) |
+| 50 students | 7 | 350 | ~4.4s |
+| 100 students | 7 | 700 | ~8.9s |
+| 200 students | 7 | 1400 | ~17.8s |
+
+The gradebook uses an **N+1 query pattern**: `build_gradebook()` calls
+`get_latest_submission()` individually for each (assignment, student)
+pair — that's `N_assignments × N_students` separate DB queries. At
+~12.7ms per lookup, this is fine for a single class of 30 (2.7s), but
+a 200-student class would take ~18s, which would feel slow in the UI.
+
+### Design findings
+
+**Finding 1: No "optional" or "bonus" assignment concept**
+`check_and_mark_completion()` requires a submission for EVERY published
+assignment. An instructor who creates a "bonus quiz" or "optional makeup"
+and doesn't want it to block completion has no way to mark it as optional.
+The assignment model has `is_major` (which gates retake policy) but no
+`is_optional` or `counts_toward_completion` flag.
+
+**Recommendation**: Add an `is_optional` boolean to the Assignment model
+(default False). `check_and_mark_completion()` would skip optional
+assignments when checking if all work is submitted. This is a small
+schema change (one column + one filter) but needs a design decision
+before implementing — should optional assignments still appear in the
+gradebook's weighted average? (Probably yes — they just shouldn't block
+completion.)
+
+**Finding 2: N+1 query in gradebook (performance)**
+`build_gradebook()` in `deeptutor/multi_user/gradebook.py` does:
+```python
+for enrollment in enrollments:        # N students
+    for assignment in assignments:     # × M assignments
+        submission = await get_latest_submission(...)  # = N×M queries
+```
+
+**Recommendation**: Replace with a single batched query that fetches all
+latest submissions for the course at once:
+```sql
+SELECT DISTINCT ON (assignment_id, user_id) *
+FROM submissions
+WHERE assignment_id = ANY($1)
+ORDER BY assignment_id, user_id, submitted_at DESC
+```
+This would reduce N×M queries to 1, making the gradebook O(1) regardless
+of class size. The fix is ~15 lines in `gradebook.py` — replace the
+inner loop with a pre-fetched dict lookup.
+
+### What the instructor sees in the UI
+
+Log in as `instr_a` (password `testpass123`) → Course Units → "Load
+Test: Intro to Computer Science" → Gradebook. You'll see:
+- 30 student rows with per-assignment scores
+- 7 assignment columns (Quiz 1, Quiz 2, Quiz 3, Test 1, Test 2, Final
+  Exam, Makeup Quiz)
+- Final Grade (%) column with weighted average
+- Completion status per student
+- CSV export button
+
+### Test accounts for this simulation
+
+All 30 students have password `testpass123`:
+- `load_stud_01` through `load_stud_30`
+- Students 1-10: high grades (73-100% final)
+- Students 11-20: average grades (50-73% final)
+- Students 21-25: low grades + incomplete (skipped makeup)
+- Students 26-30: low grades + incomplete (skipped final)
+
+**Left for later / handing back**:
+1. **Optional/bonus assignment concept** — needs a design decision from
+   the repo owner before implementing. Should be a small schema change
+   (`is_optional` column) + filter in `check_and_mark_completion()`.
+2. **Gradebook N+1 query optimization** — not urgent at 30 students
+   (2.7s is acceptable), but should be done before classes exceed ~100
+   students. ~15 line change in `gradebook.py`.
+3. **Assignment submit event loop blocking** (from previous entry) —
+   still the most urgent performance issue. The N+1 is a slow page load;
+   the submit blocking is a server-wide outage.
+
+— Devin

@@ -85,6 +85,17 @@ concurrent throughput) — don't guess ahead of the evidence. No action item her
   This makes the server unresponsive during any student submission. Matches upstream issue
   #761. Fix: move grading to a background task or thread pool. Found during multi-user test
   harness verification (2026-08-04).
+- **No "optional" or "bonus" assignment concept** — `check_and_mark_completion()` requires a
+  submission for EVERY published assignment. An instructor who creates a "bonus quiz" or
+  "optional makeup" has no way to exclude it from completion tracking. Needs an `is_optional`
+  column on Assignment + filter in the completion check. Found during load simulation
+  (2026-08-04). Needs a design decision: should optional assignments still count toward the
+  weighted gradebook average? (Probably yes — they just shouldn't block completion.)
+- **Gradebook N+1 query** — `build_gradebook()` calls `get_latest_submission()` individually
+  for each (assignment, student) pair = N×M DB queries. Measured: 2.7s for 30 students × 7
+  assignments. Projected: ~9s for 100 students, ~18s for 200. Fix: single batched query
+  with `DISTINCT ON (assignment_id, user_id)`. ~15 line change in `gradebook.py`. Not
+  urgent at current class sizes but should be done before scaling beyond ~100 students.
 
 ---
 
