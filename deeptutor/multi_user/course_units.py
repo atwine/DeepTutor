@@ -21,6 +21,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import delete, select
+from sqlalchemy.orm import selectinload
 
 from deeptutor.services.db import session_scope
 from deeptutor.services.db.models import (
@@ -186,12 +187,11 @@ async def create_course_unit(
 async def list_course_units() -> list[dict[str, Any]]:
     async with session_scope() as session:
         result = await session.execute(
-            select(CourseUnit).order_by(CourseUnit.created_at)
+            select(CourseUnit)
+            .options(selectinload(CourseUnit.instructors))
+            .order_by(CourseUnit.created_at)
         )
         units = result.scalars().unique().all()
-        # Eagerly load instructors
-        for u in units:
-            await session.refresh(u, ["instructors"])
     return [_unit_to_dict(u) for u in units]
 
 
@@ -369,13 +369,12 @@ async def list_course_units_for_instructor(user_id: str) -> list[dict[str, Any]]
     async with session_scope() as session:
         result = await session.execute(
             select(CourseUnit)
+            .options(selectinload(CourseUnit.instructors))
             .join(CourseUnitInstructor)
             .where(CourseUnitInstructor.instructor_id == str(user_id))
             .order_by(CourseUnit.created_at)
         )
         units = result.scalars().unique().all()
-        for u in units:
-            await session.refresh(u, ["instructors"])
     return [_unit_to_dict(u) for u in units]
 
 
@@ -385,6 +384,7 @@ async def list_course_units_for_student(user_id: str) -> list[dict[str, Any]]:
     async with session_scope() as session:
         result = await session.execute(
             select(CourseUnit)
+            .options(selectinload(CourseUnit.instructors))
             .join(Enrollment)
             .where(
                 Enrollment.user_id == str(user_id),
@@ -393,8 +393,6 @@ async def list_course_units_for_student(user_id: str) -> list[dict[str, Any]]:
             .order_by(CourseUnit.created_at)
         )
         units = result.scalars().unique().all()
-        for u in units:
-            await session.refresh(u, ["instructors"])
     return [_unit_to_dict(u) for u in units]
 
 
