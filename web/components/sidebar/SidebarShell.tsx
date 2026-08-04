@@ -72,6 +72,17 @@ const PRIMARY_NAV: NavEntry[] = [
     tooltipKey: "Courses tooltip",
   },
   {
+    // Issue #54: Student-facing "My Course Units" — shows only courses
+    // the student has applied to or is enrolled in, with status badges
+    // and quick links to assignments/notes/materials. Placed right after
+    // "Browse Courses" so students see their own courses first.
+    href: "/courses/my",
+    label: "My Course Units",
+    icon: ClipboardList,
+    tooltipKey: "My Course Units tooltip",
+    roles: ["user"],
+  },
+  {
     // Instructors manage the course units they teach from here. Labeled
     // "My Course Units" to distinguish it from the admin's global catalog
     // and placed directly below "Browse Courses" so an instructor's own
