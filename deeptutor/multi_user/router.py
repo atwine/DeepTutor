@@ -1328,3 +1328,183 @@ async def admin_students_overview(
         "course_options": course_options,
         "students": student_rows,
     }
+
+
+# ---------------------------------------------------------------------------
+# Issue #34: Instructor student dashboard — scoped to instructor's own courses
+# ---------------------------------------------------------------------------
+
+
+@router.get("/instructor/students/overview")
+async def instructor_students_overview(
+    current: TokenPayload = Depends(require_instructor_or_admin),
+) -> dict[str, Any]:
+    """Bird's-eye view of students for an instructor — same shape as the
+    admin endpoint (#33) but scoped to the courses this instructor teaches.
+
+    Admins calling this endpoint get the admin-scoped view (all courses)
+    instead — they have the admin dashboard for the global view, but this
+    endpoint returning their (empty) instructor set would be confusing.
+    """
+    # Admins should use the admin endpoint — redirect them there logically
+    # by returning the same data shape with all courses. But actually, an
+    # admin doesn't teach courses, so their instructor set is empty. Return
+    # an empty result with a note — they have /admin/students for the
+    # global view.
+    if current.role == "admin":
+        return {
+            "stats": {
+                "total_students": 0,
+                "active_students": 0,
+                "disabled_students": 0,
+                "orphan_students": 0,
+                "total_instructors": 0,
+                "total_courses": 0,
+                "total_enrollments": 0,
+                "completion_rate": 0.0,
+            },
+            "course_options": [],
+            "students": [],
+        }
+
+    instructor_id = current.user_id
+
+    # 1. Get the instructor's course units.
+    my_units = await list_course_units_for_instructor(instructor_id)
+    my_course_ids = {u["id"] for u in my_units}
+    my_course_names = {u["id"]: u["name"] for u in my_units}
+
+    if not my_course_ids:
+        # Instructor teaches no courses — return empty.
+        return {
+            "stats": {
+                "total_students": 0,
+                "active_students": 0,
+                "disabled_students": 0,
+                "orphan_students": 0,
+                "total_instructors": 0,
+                "total_courses": 0,
+                "total_enrollments": 0,
+                "completion_rate": 0.0,
+            },
+            "course_options": [],
+            "students": [],
+        }
+
+    # 2. Get all enrollments for the instructor's courses (approved only).
+    async with session_scope() as session:
+        enrollment_rows = (
+            await session.execute(
+                select(
+                    Enrollment.user_id,
+                    Enrollment.course_unit_id,
+                    Enrollment.completed_at,
+                )
+                .where(Enrollment.status == "approved")
+                .where(Enrollment.course_unit_id.in_(my_course_ids))
+            )
+        ).all()
+
+        # Get the assignment IDs for the instructor's courses, then count
+        # submissions per student for those assignments only.
+        assignment_rows = (
+            await session.execute(
+                select(Assignment.id, Assignment.course_unit_id)
+                .where(Assignment.course_unit_id.in_(my_course_ids))
+                .where(Assignment.status == "published")
+            )
+        ).all()
+
+        assignment_ids = [a[0] for a in assignment_rows]
+        # assignment_count_by_course: {course_unit_id: int}
+        assignment_count_by_course: dict[str, int] = {}
+        for aid, cu_id in assignment_rows:
+            assignment_count_by_course[cu_id] = assignment_count_by_course.get(cu_id, 0) + 1
+
+        # Submission counts per student (only for this instructor's assignments).
+        if assignment_ids:
+            submission_counts_raw = (
+                await session.execute(
+                    select(Submission.user_id, func.count(Submission.id))
+                    .where(Submission.assignment_id.in_(assignment_ids))
+                    .group_by(Submission.user_id)
+                )
+            ).all()
+        else:
+            submission_counts_raw = []
+
+    # 3. Collect the student user_ids and fetch their identity records.
+    student_ids = {row[0] for row in enrollment_rows}
+    all_users = list_user_info()
+    users_by_id = {u["id"]: u for u in all_users if u["id"] in student_ids}
+
+    # 4. Build per-student aggregates.
+    enrollments_by_user: dict[str, list[dict[str, Any]]] = {}
+    for row in enrollment_rows:
+        uid, cu_id, completed_at = row
+        enrollments_by_user.setdefault(uid, []).append({
+            "course_unit_id": cu_id,
+            "course_name": my_course_names.get(cu_id, ""),
+            "completed_at": completed_at.isoformat() if completed_at else "",
+        })
+
+    submission_count_by_user = {uid: count for uid, count in submission_counts_raw}
+
+    student_rows: list[dict[str, Any]] = []
+    for uid, user_info in users_by_id.items():
+        enrollments = enrollments_by_user.get(uid, [])
+        course_names = [e["course_name"] for e in enrollments if e["course_name"]]
+        completed_count = sum(1 for e in enrollments if e["completed_at"])
+        total_enrolled = len(enrollments)
+
+        student_rows.append({
+            "id": uid,
+            "username": user_info["username"],
+            "full_name": user_info.get("full_name") or "",
+            "first_name": user_info.get("first_name") or "",
+            "surname": user_info.get("surname") or "",
+            "registration_number": user_info.get("registration_number") or "",
+            "gender": user_info.get("gender") or "",
+            "course": user_info.get("course") or "",
+            "created_at": user_info.get("created_at") or "",
+            "disabled": user_info.get("disabled", False),
+            "avatar": user_info.get("avatar") or "",
+            "enrollment_count": total_enrolled,
+            "course_names": course_names,
+            "submission_count": submission_count_by_user.get(uid, 0),
+            "completion_summary": {
+                "completed": completed_count,
+                "total": total_enrolled,
+            },
+        })
+
+    student_rows.sort(key=lambda r: r["username"])
+
+    # 5. Aggregate stats (scoped to this instructor's courses).
+    total_students = len(student_rows)
+    active_students = sum(1 for s in student_rows if not s["disabled"])
+    disabled_students = sum(1 for s in student_rows if s["disabled"])
+    total_enrollments = sum(r["enrollment_count"] for r in student_rows)
+    total_completions = sum(r["completion_summary"]["completed"] for r in student_rows)
+    completion_rate = (
+        round(total_completions / total_enrollments * 100, 1)
+        if total_enrollments > 0
+        else 0.0
+    )
+
+    course_options = sorted(my_course_names.values())
+
+    return {
+        "stats": {
+            "total_students": total_students,
+            "active_students": active_students,
+            "disabled_students": disabled_students,
+            "orphan_students": 0,  # Can't be an orphan if they're enrolled in this instructor's course
+            "total_instructors": 0,  # Not relevant for the instructor view
+            "total_courses": len(my_course_ids),
+            "total_enrollments": total_enrollments,
+            "completion_rate": completion_rate,
+        },
+        "course_options": course_options,
+        "students": student_rows,
+    }

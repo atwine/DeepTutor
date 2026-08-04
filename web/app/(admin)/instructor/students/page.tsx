@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { fetchAuthStatus } from "@/lib/auth";
 import {
-  getStudentsOverview,
+  getInstructorStudentsOverview,
   type StudentOverviewRow,
   type StudentOverviewStats,
 } from "@/lib/admin-api";
@@ -13,7 +13,7 @@ import { StudentDashboard } from "@/components/admin/StudentDashboard";
 import { RefreshCw, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
-export default function AdminStudentsPage() {
+export default function InstructorStudentsPage() {
   const router = useRouter();
   const { t } = useTranslation();
 
@@ -27,7 +27,7 @@ export default function AdminStudentsPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await getStudentsOverview();
+      const data = await getInstructorStudentsOverview();
       setStats(data.stats);
       setCourseOptions(data.course_options);
       setStudents(data.students);
@@ -44,7 +44,7 @@ export default function AdminStudentsPage() {
         router.replace("/login");
         return;
       }
-      if (status.role !== "admin") {
+      if (status.role !== "instructor") {
         router.replace("/");
         return;
       }
@@ -65,28 +65,20 @@ export default function AdminStudentsPage() {
               <ArrowLeft size={16} />
               {t("Back")}
             </Link>
-            <div className="flex items-center gap-4">
-              <Link
-                href="/admin/users"
-                className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
-              >
-                {t("Accounts Management")} →
-              </Link>
-              <Link
-                href="/admin/course-units"
-                className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
-              >
-                {t("Course Units")} →
-              </Link>
-            </div>
+            <Link
+              href="/admin/course-units"
+              className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+            >
+              {t("My Course Units")} →
+            </Link>
           </div>
           <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="font-serif text-xl font-semibold text-[var(--foreground)]">
-                {t("Student Dashboard")}
+                {t("My Students")}
               </h1>
               <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
-                {t("Overview of all students, their enrollments, and completion status")}
+                {t("Overview of students enrolled in your courses")}
               </p>
             </div>
             <button
@@ -113,6 +105,7 @@ export default function AdminStudentsPage() {
           loading={loading}
           error={error}
           onRefresh={load}
+          hideIrrelevantStats
         />
       </div>
     </div>

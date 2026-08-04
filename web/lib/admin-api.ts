@@ -150,3 +150,13 @@ export async function getStudentsOverview(): Promise<StudentsOverviewResponse> {
   if (!res.ok) throw new Error("Failed to fetch students overview");
   return res.json();
 }
+
+/** Issue #34: Instructor-scoped student overview — same response shape as
+ * the admin endpoint but filtered to the calling instructor's courses. */
+export async function getInstructorStudentsOverview(): Promise<StudentsOverviewResponse> {
+  const res = await apiFetch(
+    apiUrl("/api/v1/multi-user/instructor/students/overview"),
+  );
+  if (!res.ok) throw new Error("Failed to fetch students overview");
+  return res.json();
+}
