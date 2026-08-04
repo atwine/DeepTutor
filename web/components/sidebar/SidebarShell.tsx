@@ -10,6 +10,7 @@ import {
   Bot,
   Brain,
   ChevronDown,
+  ClipboardList,
   GraduationCap,
   HeartHandshake,
   HelpCircle,
@@ -21,6 +22,7 @@ import {
   PanelLeftOpen,
   PenLine,
   Settings,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -44,6 +46,12 @@ interface NavEntry {
   /** Roles that can see this item at all. Omit to show to every role
    * (including a signed-out/auth-disabled deployment). */
   roles?: ("admin" | "instructor" | "user")[];
+  /** When true the item is always visible but rendered in a locked state
+   * (greyed out, padlock, non-clickable) for anyone who isn't an admin —
+   * students and instructors see the feature exists but can't open it.
+   * Ignored when auth is disabled (solo/local use, where the single user
+   * is effectively the admin). */
+  adminOnly?: boolean;
 }
 
 const PRIMARY_NAV: NavEntry[] = [
@@ -64,11 +72,76 @@ const PRIMARY_NAV: NavEntry[] = [
     tooltipKey: "Courses tooltip",
   },
   {
+    // Issue #54: Student-facing "My Course Units" — shows only courses
+    // the student has applied to or is enrolled in, with status badges
+    // and quick links to assignments/notes/materials. Placed right after
+    // "Browse Courses" so students see their own courses first.
+    href: "/courses/my",
+    label: "My Course Units",
+    icon: ClipboardList,
+    tooltipKey: "My Course Units tooltip",
+    roles: ["user"],
+  },
+  {
+    // Instructors manage the course units they teach from here. Labeled
+    // "My Course Units" to distinguish it from the admin's global catalog
+    // and placed directly below "Browse Courses" so an instructor's own
+    // units sit right under the catalog. The route is unchanged — only the
+    // label and ordering differ. Admins have their own "Course Units" entry
+    // below (global catalog administration, not "my" units).
+    href: "/admin/course-units",
+    label: "My Course Units",
+    icon: ClipboardList,
+    tooltipKey: "My Course Units tooltip",
+    roles: ["instructor"],
+  },
+  {
+    // Instructor's student dashboard (issue #34): bird's-eye view of
+    // students enrolled in the instructor's own courses — enrollment
+    // counts, course names, submission counts, and completion status.
+    // Searchable and filterable. Placed right after "My Course Units"
+    // so course-related instructor tools stay grouped. Reuses the same
+    // table component as the admin dashboard (#33).
+    href: "/instructor/students",
+    label: "My Students",
+    icon: Users,
+    tooltipKey: "My Students tooltip",
+    roles: ["instructor"],
+  },
+  {
+    // Admin's global course catalog administration: create course units,
+    // assign instructors, manage rosters, archive/delete old units. Labeled
+    // "Course Units" (not "My Course Units" — the admin doesn't teach any)
+    // and placed right after the instructor's entry so course-related nav
+    // items stay grouped. The two entries are mutually exclusive (a user
+    // has one role), so there's no visual conflict.
+    href: "/admin/course-units",
+    label: "Course Units",
+    icon: ClipboardList,
+    tooltipKey: "Course Units tooltip",
+    roles: ["admin"],
+  },
+  {
+    // Admin's student dashboard (issue #33): bird's-eye view of all
+    // students with enrollment counts, course names, submission counts,
+    // and completion status. Searchable and filterable. Placed right
+    // after "Course Units" so course-related admin tools stay grouped.
+    href: "/admin/students",
+    label: "Student Dashboard",
+    icon: Users,
+    tooltipKey: "Student Dashboard tooltip",
+    roles: ["admin"],
+  },
+  {
     href: "/partners",
     label: "Partners",
     icon: HeartHandshake,
     tooltipKey: "Partners tooltip",
     requires: "llm",
+    // Admin-only feature: shown to everyone but locked (greyed + padlock,
+    // non-clickable) for students and instructors. Direct URL access is
+    // blocked by the partners route RoleGuard.
+    adminOnly: true,
   },
   {
     // My Agents is its own top-level feature (pulled out of the Learning
@@ -76,12 +149,15 @@ const PRIMARY_NAV: NavEntry[] = [
     // and manage imported agent conversations. Ungated on model capability —
     // managing connections and imports needs no per-user model grant — but
     // it's a developer-facing feature (its own config page under
-    // /settings/agents is already admin-only), so students don't see it.
+    // /settings/agents is already admin-only), so it's admin-only: shown to
+    // every role but locked (greyed + padlock, non-clickable) for students
+    // and instructors. Direct URL access is blocked by the agents route
+    // RoleGuard.
     href: "/agents",
     label: "My Agents",
     icon: Bot,
     tooltipKey: "Agents tooltip",
-    roles: ["admin", "instructor"],
+    adminOnly: true,
   },
   {
     href: "/co-writer",
@@ -91,17 +167,25 @@ const PRIMARY_NAV: NavEntry[] = [
     requires: "llm",
   },
   {
+    // Book is an admin/instructor feature for creating curated course
+    // content. Locked (greyed + padlock, non-clickable) for students —
+    // they access published books via course notes, not the Book builder.
     href: "/book",
     label: "Book",
     icon: Library,
     tooltipKey: "Book tooltip",
     requires: "llm",
+    adminOnly: true,
   },
   {
+    // Learning Space is an admin/instructor workspace for managing
+    // notebooks and agent configurations. Locked for students — they
+    // don't have workspace management capabilities.
     href: "/space",
     label: "Learning Space",
     icon: LayoutGrid,
     tooltipKey: "Space tooltip",
+    adminOnly: true,
   },
 ];
 
@@ -112,21 +196,28 @@ const SECONDARY_NAV: NavEntry[] = [
     // knowledge/memory stores rather than daily workspaces, so they're
     // grouped together right after it. Ungated on model capability, but
     // creating/deleting KBs and connecting a LightRAG server is
-    // admin-level system configuration — admin-only.
+    // admin-level system configuration — admin-only: shown to every role
+    // but locked (greyed + padlock, non-clickable) for students and
+    // instructors. Direct URL access is blocked by the knowledge route
+    // RoleGuard.
     href: "/knowledge",
     label: "Knowledge Center",
     icon: BookOpen,
     tooltipKey: "Knowledge tooltip",
-    roles: ["admin"],
+    adminOnly: true,
   },
   {
     // Memory is its own top-level console (pulled out of the Learning Space):
     // a place to inspect and curate the tutor's long-term memory, not a daily
-    // workspace. Never gated — memory has no per-user model requirement.
+    // workspace. Never gated on model capability, but it's admin-only: shown
+    // to every role but locked (greyed + padlock, non-clickable) for students
+    // and instructors. Direct URL access is blocked by the memory route
+    // RoleGuard.
     href: "/memory",
     label: "Memory",
     icon: Brain,
     tooltipKey: "Memory tooltip",
+    adminOnly: true,
   },
   {
     // A plain-language guide to the whole platform, for every role — the
@@ -180,14 +271,15 @@ export function SidebarShell({
   const drawer = useSidebarDrawer();
   const { enabled: authEnabled, role } = useAuthStatus();
 
-  // Auth disabled (solo/local use, no real accounts) never hides anything —
-  // the single user is effectively the admin. With auth enabled, hide a
-  // role-gated item until the role is actually known (mirrors AdminLink,
-  // which likewise renders nothing until resolved) rather than flashing it
-  // and then pulling it away.
+  // Auth disabled (solo/local use, no real accounts) — the single user is
+  // effectively the admin, so role-gated items are shown only if the admin
+  // role would see them (e.g. "Course Units" yes, "My Course Units" no).
+  // With auth enabled, hide a role-gated item until the role is actually
+  // known (mirrors AdminLink, which likewise renders nothing until resolved)
+  // rather than flashing it and then pulling it away.
   const visibleForRole = (item: NavEntry) => {
     if (!item.roles) return true;
-    if (!authEnabled) return true;
+    if (!authEnabled) return item.roles.includes("admin");
     if (!role) return false;
     return item.roles.includes(role as "admin" | "instructor" | "user");
   };
@@ -206,8 +298,18 @@ export function SidebarShell({
     drawer?.close();
   };
 
+  // adminOnly items are locked (greyed + padlock, non-clickable) for anyone
+  // who isn't an admin. Auth-disabled deployments never lock — the single
+  // user is effectively the admin. While the role is still resolving (auth
+  // on, role unknown) we render locked too, so a non-admin never sees a
+  // clickable item flash before the lock applies.
+  const roleLocked = (item: NavEntry) => {
+    if (!item.adminOnly) return false;
+    if (!authEnabled) return false;
+    return role !== "admin";
+  };
   const navLocked = (item: NavEntry) =>
-    item.requires ? !has(item.requires) : false;
+    (item.requires ? !has(item.requires) : false) || roleLocked(item);
   const lockedTooltip = t("Locked — contact your administrator to get access.");
   const renderedFooter =
     typeof footerSlot === "function" ? footerSlot(collapsed) : footerSlot;
@@ -287,7 +389,7 @@ export function SidebarShell({
             if (locked) {
               return (
                 <Tooltip
-                  key={item.href}
+                  key={item.label}
                   label={t(item.label)}
                   description={description}
                   side="right"
@@ -309,7 +411,7 @@ export function SidebarShell({
             }
             return (
               <Tooltip
-                key={item.href}
+                key={item.label}
                 label={t(item.label)}
                 description={description}
                 side="right"
@@ -338,9 +440,36 @@ export function SidebarShell({
           <div className="my-1 h-px w-7 bg-[var(--border)]/40" />
           {visibleSecondaryNav.map((item) => {
             const active = pathname.startsWith(item.href);
+            const locked = navLocked(item);
+            // Locked secondary items mirror the locked primary rendering:
+            // greyed icon + padlock badge, wrapped in a non-interactive div
+            // (no Link) so they can't be clicked.
+            if (locked) {
+              return (
+                <Tooltip
+                  key={item.label}
+                  label={t(item.label)}
+                  description={lockedTooltip}
+                  side="right"
+                >
+                  <div
+                    aria-label={`${t(item.label)} — ${lockedTooltip}`}
+                    aria-disabled
+                    className="relative flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-xl text-[var(--muted-foreground)]/40"
+                  >
+                    <item.icon size={18} strokeWidth={1.6} />
+                    <Lock
+                      size={10}
+                      strokeWidth={2}
+                      className="absolute bottom-1 right-1 text-[var(--muted-foreground)]/70"
+                    />
+                  </div>
+                </Tooltip>
+              );
+            }
             return (
               <Link
-                key={item.href}
+                key={item.label}
                 href={item.href}
                 title={t(item.label) as string}
                 className={`relative flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 ${
@@ -404,7 +533,7 @@ export function SidebarShell({
             if (locked) {
               return (
                 <Tooltip
-                  key={item.href}
+                  key={item.label}
                   label={t(item.label)}
                   description={lockedTooltip}
                   side="right"
@@ -423,7 +552,7 @@ export function SidebarShell({
             }
             return (
               <Link
-                key={item.href}
+                key={item.label}
                 href={item.href}
                 onClick={
                   item.href === "/home" ? handleHomeClick : closeDrawerOnNav
@@ -501,9 +630,33 @@ export function SidebarShell({
       <div className="border-t border-[var(--border)]/40 px-2 py-2">
         {visibleSecondaryNav.map((item) => {
           const active = pathname.startsWith(item.href);
+          const locked = navLocked(item);
+          // Locked secondary items mirror the locked primary rendering:
+          // greyed label + padlock, wrapped in a non-interactive div (no
+          // Link) so they can't be clicked.
+          if (locked) {
+            return (
+              <Tooltip
+                key={item.label}
+                label={t(item.label)}
+                description={lockedTooltip}
+                side="right"
+              >
+                <div
+                  aria-label={`${t(item.label)} — ${lockedTooltip}`}
+                  aria-disabled
+                  className="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2 text-[13.5px] text-[var(--muted-foreground)]/40"
+                >
+                  <item.icon size={16} strokeWidth={1.5} />
+                  <span>{t(item.label)}</span>
+                  <Lock size={13} strokeWidth={1.8} className="ml-auto" />
+                </div>
+              </Tooltip>
+            );
+          }
           return (
             <Link
-              key={item.href}
+              key={item.label}
               href={item.href}
               onClick={closeDrawerOnNav}
               className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13.5px] transition-colors ${

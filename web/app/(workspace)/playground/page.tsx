@@ -33,6 +33,8 @@ import {
   extractBase64FromDataUrl,
   readFileAsDataUrl,
 } from "@/lib/file-attachments";
+import { formatBytes } from "@/lib/doc-attachments";
+import { useAttachmentLimits } from "@/lib/attachment-limits";
 import { listKnowledgeBases } from "@/lib/knowledge-api";
 import type { StreamEvent } from "@/lib/unified-ws";
 import {
@@ -735,6 +737,7 @@ function DeepQuestionTester({
   const [messages, setMessages] = useState<TesterMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [uploadedPdf, setUploadedPdf] = useState<File | null>(null);
+  const attachmentLimits = useAttachmentLimits();
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(
@@ -1068,6 +1071,11 @@ function DeepQuestionTester({
                   }}
                 />
               </label>
+              <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+                {t("Max {{size}} per file", {
+                  size: formatBytes(attachmentLimits.maxFileBytes),
+                })}
+              </p>
             </div>
             <div className="text-center text-[11px] uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
               {t("Or")}

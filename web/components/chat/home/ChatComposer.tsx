@@ -42,6 +42,7 @@ import type { SelectedQuestionEntry } from "@/components/chat/QuestionBankPicker
 import type { SelectedRecord } from "@/lib/notebook-selection-types";
 import type { LLMSelection } from "@/lib/unified-ws";
 import type { LLMOption } from "@/lib/llm-options";
+import { useAttachmentLimits } from "@/lib/attachment-limits";
 import ChatSpaceMenu from "@/components/chat/space/ChatSpaceMenu";
 import type { SpaceMemoryFile } from "@/lib/space-items";
 import type { SelectedBookReference } from "@/lib/book-references";
@@ -364,6 +365,7 @@ export default memo(function ChatComposer({
 }) {
   const { t } = useTranslation();
   const CapIcon = activeCap.icon;
+  const attachmentLimits = useAttachmentLimits();
 
   const [hasContent, setHasContent] = useState(false);
   const [moreCapsOpen, setMoreCapsOpen] = useState(false);
@@ -708,7 +710,10 @@ export default memo(function ChatComposer({
                   {t("Drop files here")}
                 </span>
                 <span className="text-[11px] text-[var(--primary)]/70">
-                  {t("Images, Office docs, code & text")}
+                  {t("Images, Office docs, code & text")} ·{" "}
+                  {t("Max {{size}} per file", {
+                    size: formatBytes(attachmentLimits.maxFileBytes),
+                  })}
                 </span>
               </div>
             </div>
@@ -1020,7 +1025,7 @@ export default memo(function ChatComposer({
                   ref={spaceBtnRef}
                   type="button"
                   onClick={() => onSetSpaceMenuOpen((v) => !v)}
-                  title={t("Add files & context")}
+                  title={`${t("Add files & context")} · ${t("Images, Office docs, code & text")} · ${t("Max {{size}} per file", { size: formatBytes(attachmentLimits.maxFileBytes) })}`}
                   aria-label={t("Add files & context")}
                   className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-[background-color,color,transform] duration-150 active:scale-90 ${
                     spaceMenuOpen

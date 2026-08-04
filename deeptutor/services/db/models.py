@@ -27,6 +27,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -75,6 +76,12 @@ class CourseUnit(Base):
     # join-a-new-course catalog (see router.py's catalog endpoint).
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    # Issue #3: The auto-provisioned KB name for this course unit (e.g.
+    # ``course_cu_abc123``). Nullable for backward compat with existing course
+    # units created before this field existed -- can be provisioned later. The
+    # KB itself lives in the admin workspace's knowledge_bases root (see
+    # ``knowledge_access.admin_kb_base_dir``).
+    kb_name: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
 
     instructors: Mapped[list["CourseUnitInstructor"]] = relationship(
         back_populates="course_unit", cascade="all, delete-orphan"
@@ -86,6 +93,9 @@ class CourseUnit(Base):
         back_populates="course_unit", cascade="all, delete-orphan"
     )
     book_entries: Mapped[list["CourseBookEntry"]] = relationship(
+        back_populates="course_unit", cascade="all, delete-orphan"
+    )
+    materials: Mapped[list["CourseMaterial"]] = relationship(
         back_populates="course_unit", cascade="all, delete-orphan"
     )
 
@@ -121,13 +131,19 @@ class Enrollment(Base):
         String, primary_key=True, default=lambda: f"en_{uuid.uuid4().hex}"
     )
     course_unit_id: Mapped[str] = mapped_column(
-        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # 'pending' | 'approved' — matches Enrollment.status in course_units.py today.
     status: Mapped[str] = mapped_column(String, nullable=False, default="approved")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Issue #4: Automatic course-unit completion tracking. Set when a student
+    # has submitted+graded every published assignment for the unit (see
+    # course_units.py's check_and_mark_completion). Nullable so existing
+    # enrollments default to "not completed" — completion is additive and
+    # never revokes read access to course materials.
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="enrollments")
 
@@ -179,6 +195,10 @@ class Assignment(Base):
     # (current behavior: attempt_limit is the only gate).
     is_major: Mapped[bool] = mapped_column(nullable=False, default=False)
     passing_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Issue #32: Optional/bonus assignments don't block course completion.
+    # A student who skips an optional assignment is still marked complete
+    # as long as they've submitted all required (non-optional) assignments.
+    is_optional: Mapped[bool] = mapped_column(nullable=False, default=False)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="assignments")
     submissions: Mapped[list["Submission"]] = relationship(
@@ -191,6 +211,14 @@ class Assignment(Base):
 
 class Submission(Base):
     __tablename__ = "submissions"
+    __table_args__ = (
+        # Issue #38: Composite index for queries that filter by both
+        # assignment_id AND user_id (get_latest_submission, count_submissions,
+        # get_latest_submissions_batch). The two single-column indexes below
+        # help individual filters but can't be combined efficiently by the
+        # planner for AND queries on both columns.
+        Index("ix_submissions_assignment_user", "assignment_id", "user_id"),
+    )
 
     id: Mapped[str] = mapped_column(
         String, primary_key=True, default=lambda: f"sub_{uuid.uuid4().hex}"
@@ -208,7 +236,7 @@ class Submission(Base):
     )
     score: Mapped[float] = mapped_column(Float, nullable=False)
     max_score: Mapped[float] = mapped_column(Float, nullable=False)
-    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
 
     assignment: Mapped[Assignment] = relationship(back_populates="submissions")
 
@@ -276,7 +304,7 @@ class Notification(Base):
         String, primary_key=True, default=lambda: f"notif_{uuid.uuid4().hex}"
     )
     course_unit_id: Mapped[str] = mapped_column(
-        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # e.g. "assignment_published" | "notes_published"
     kind: Mapped[str] = mapped_column(String, nullable=False)
@@ -305,9 +333,9 @@ class NotificationRead(Base):
         String, primary_key=True, default=lambda: f"nread_{uuid.uuid4().hex}"
     )
     notification_id: Mapped[str] = mapped_column(
-        ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
 
@@ -323,7 +351,7 @@ class CourseBookEntry(Base):
     book_id: Mapped[str] = mapped_column(String, primary_key=True)
     owner_id: Mapped[str] = mapped_column(String, nullable=False)
     course_unit_id: Mapped[str] = mapped_column(
-        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # 'draft' | 'published'
     status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
@@ -331,3 +359,53 @@ class CourseBookEntry(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="book_entries")
+
+
+# ---------------------------------------------------------------------------
+# Issue #3 -- Course materials (instructor uploads + course-specific RAG)
+# ---------------------------------------------------------------------------
+
+
+class CourseMaterial(Base):
+    """An instructor-uploaded course material (PDF, notebook, book, ...) that
+    gets indexed into the course unit's auto-provisioned RAG knowledge base.
+
+    The physical file lives in the course KB's ``raw/`` directory; this table
+    is the index/pointer with a draft/publish workflow (instructors upload as
+    ``draft``, then publish to make it visible/downloadable to enrolled
+    students) and an ingestion-status tracker (``pending`` -> ``indexing`` ->
+    ``ready``/``failed``) for the background RAG indexing task."""
+
+    __tablename__ = "course_materials"
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: f"mat_{uuid.uuid4().hex}"
+    )
+    course_unit_id: Mapped[str] = mapped_column(
+        ForeignKey("course_units.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Original filename as uploaded by the instructor (sanitized on save).
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    # One of: "ipynb", "pdf", "docx", "pptx", "xlsx", "md", "txt", "other".
+    file_type: Mapped[str] = mapped_column(String, nullable=False)
+    # Relative path within the course KB's raw/ directory (e.g. "lab3.ipynb").
+    file_path: Mapped[str] = mapped_column(String, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 'draft' | 'published' -- publish workflow. Draft materials are only
+    # visible to instructors/admins; published materials are visible (and
+    # downloadable) to enrolled students.
+    status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # 'pending' | 'indexing' | 'ready' | 'failed' -- tracks the background RAG
+    # indexing task. ``pending`` right after upload, ``indexing`` while the
+    # DocumentAdder runs, ``ready`` on success, ``failed`` on error.
+    ingestion_status: Mapped[str] = mapped_column(
+        String, nullable=False, default="pending"
+    )
+
+    course_unit: Mapped[CourseUnit] = relationship(back_populates="materials")

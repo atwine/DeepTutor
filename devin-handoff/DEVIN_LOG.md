@@ -3377,3 +3377,386 @@ they're learning, unlocking these progressively rather than exposing
 the full feature set immediately. Not started yet — revisit next.
 
 — Devin
+
+## 2026-08-04 — Devin — Upload hints, PDF indexing fix, branch cleanup, multi-user test harness
+
+**Item**: Multiple follow-ups from the previous session: file upload bugs,
+UI hints for supported file types/sizes, git hygiene, GitHub issue sync,
+and a multi-user test environment for Claude to use for UI testing.
+
+**Status**: all done.
+
+### 1. Course material upload — "Knowledge base not initialized" fix
+
+**What changed**: `deeptutor/multi_user/course_units.py` —
+`_run_material_indexing()` now calls `RAGService.initialize()` to create
+the LlamaIndex index from scratch when the course KB doesn't have one yet,
+instead of assuming it already exists. Previously the first upload to a
+freshly-provisioned course KB failed because the index directory was empty.
+
+**Verified**: PDF upload to a course unit with no prior materials now
+succeeds — material record created, ingestion status transitions from
+pending → indexing → ready.
+
+### 2. Course material delete fix
+
+**What changed**: `web/lib/course-units-api.ts` — `deleteMaterial()` now
+parses the 204 No Content response correctly (was trying `res.json()` on
+an empty body, causing a JSON parse error that surfaced as "Failed to
+delete" in the UI). The backend delete logic was already correct; this was
+a frontend-only bug.
+
+**Verified**: Delete button in the admin materials page now removes
+materials without error.
+
+### 3. Upload hints — file types + max sizes on all upload surfaces
+
+**What changed** (5 files):
+- `web/app/(admin)/admin/course-units/[courseUnitId]/materials/page.tsx`
+  — persistent hint: "Supported: PDF, Word, PowerPoint, Excel, Markdown,
+  Text, Notebook (.ipynb), images. Max 200 MB per file. Videos and audio
+  are not indexed."
+- `web/components/chat/home/ChatComposer.tsx` — drag overlay + attach
+  button tooltip now show "Images, Office docs, code & text · Max 20.0 MB
+  per file" (dynamic from `useAttachmentLimits()`).
+- `web/components/partners/PartnerComposer.tsx` — same hint pattern.
+- `web/app/(workspace)/book/components/BookChatPanel.tsx` — same pattern.
+- `web/app/(workspace)/playground/page.tsx` — "Max 20.0 MB per file" hint
+  under the PDF upload label.
+- `web/locales/en/app.json`, `web/locales/zh/app.json` — i18n keys for all
+  new strings (English + Chinese).
+
+**Max size constants**:
+- Course materials: 200 MB per file (`_COURSE_MATERIAL_MAX_BYTES` in
+  `course_units.py`)
+- Chat/partner/book/playground attachments: 20 MB per file, 25 MB total
+  (from `useAttachmentLimits()` defaults, overridable via
+  `data/user/settings/system.json`)
+
+### 4. Embedding model configuration (Ollama)
+
+**What was done**: Guided the repo owner through configuring a local
+Ollama instance as the embedding provider for course KB RAG indexing:
+- **Binding**: Ollama
+- **Base URL**: `http://host.docker.internal:11434/api/embed`
+- **Model**: `nomic-embed-text:v1.5`
+- **Dimensions**: 768
+- **API Key**: blank
+
+Verified container reachability to the host Ollama instance via
+`host.docker.internal`. Without this, uploads succeed but indexing fails
+with "No active embedding model is configured."
+
+### 5. Git branch + worktree cleanup
+
+**What was done**:
+- Removed 10 git worktrees (DeepTutor-security-review, DeepTutor-devin,
+  DeepTutor-docs-conventions, DeepTutor-docs-services-agents,
+  DeepTutor-fix-archive, DeepTutor-fix-assignments,
+  DeepTutor-fix-notifications, DeepTutor-r4-alembic,
+  DeepTutor-r4-cu-perms, DeepTutor-r4-notes-cascade)
+- Deleted 30 local branches (all merged into `development`)
+- Deleted 3 stale remote branches (`dev`, `db-migration-integration`,
+  `feature/materials-frontend`)
+- Pruned stale remote-tracking ref for `feature/ipynb-rag-parser`
+- Fixed corrupted `.git/config` fetch refspec (was only fetching the
+  deleted `feature/ipynb-rag-parser` branch instead of all branches —
+  this caused `git fetch` to fail silently and `origin/development` to
+  appear stale even though pushes were landing correctly)
+
+**Remaining branches** (local + remote):
+- `development` — active integration branch (118 commits)
+- `main` — production (protected, PR-only)
+- `staging` — stabilization (currently identical to main)
+- Remote-only: `Deeptutor-v0.6.0-archive`, `eval`, `guide2.0`,
+  `multi-user` (all have unique commits, kept deliberately)
+
+**Verified**: All 30 deleted branch tips confirmed as ancestors of
+`development` (via `git merge-base --is-ancestor`). The one exception
+(`feature/course-materials-backend`, commit `f22147f`) was a parallel/
+earlier version of the same work that landed via a different merge path
+(`feature/materials-frontend` → `merge-materials-frontend`); `development`
+has the newer version (428 lines vs 419 in `course-units-api.ts`).
+
+### 6. GitHub issue sync (atwine/DeepTutor fork)
+
+**Closed with summary comments**:
+- **#3** — Instructor course-material uploads for RAG (books + Jupyter
+  notebooks). All functionality delivered: upload, indexing, delete,
+  publish/unpublish, student view, notebook preview, upload hints.
+  5 commits: `9f5831c`, `5ee5f8c`, `95f6fb9`, `6c45a02`, `874cf5d`.
+- **#8** — Housekeeping: decide fate of old 'dev' branch. Resolved: `dev`
+  fully merged into `development`, deleted from remote along with 2 other
+  stale branches.
+
+**Still open** (15 issues on the fork):
+- #1 — Student: request additional LLM model access (enhancement, not started)
+- #5 — Co-Writer / Book max-w-6xl layout decision (question)
+- #6 — Extend 18px/36px icon-button sizing app-wide? (question)
+- #7 — Re-evaluate sandbox-runner cross-user filesystem visibility (question)
+- #11–#22 — Documentation audit (11 issues, partial progress, comments posted)
+
+**Note**: The 48 issues visible via `gh issue list` without `--repo` belong
+to the upstream `HKUDS/DeepTutor` repo, not this fork. Always use
+`gh issue list --repo atwine/DeepTutor` to see this fork's issues.
+
+### 7. Multi-user test harness (seed + verify scripts)
+
+**What was built**: Two scripts for creating and verifying a realistic
+multi-user test environment:
+
+**`_seed.py`** (run: `docker exec deeptutor python /app/_seed.py`):
+- Creates 2 instructors + 5 students (password: `testpass123`)
+- 3 course units with overlapping enrollments:
+  - Data Structures (instr_a): stud1, stud2, stud3
+  - Algorithms (instr_a): stud3, stud4
+  - Databases (instr_b): stud4, stud5
+- 3 published assignments with questions (MCQ + short answer)
+- 4 pre-graded submissions (stud1: 10/10, stud2: 5/10, stud3: 0/10,
+  stud5: 15/15)
+- 3 course material records (1 published + 1 draft in Course 0,
+  1 published in Course 2)
+- Idempotent: cleans up all seed data before re-creating
+
+**`_verify.py`** (run: `docker exec deeptutor python /app/_verify.py`):
+- 36 tests across 8 scenarios, all via the real HTTP API:
+  1. Role isolation — students blocked from admin/instructor endpoints
+  2. Assignment lifecycle — list, view, submit permissions, submission view
+  3. Materials visibility — draft hidden from students, published visible
+  4. Cross-course isolation — unenrolled students blocked
+  5. Completion tracking — enrollment data queryable
+  6. Instructor scope — instructors only see their own courses
+  7. Admin access — admin sees all courses, rosters, gradebooks
+  8. Submission integrity — seeded scores match
+
+**Result**: 36/36 tests pass.
+
+**Known issue found during testing**: The assignment submit endpoint
+(`/assignments/{id}/submit`) blocks the FastAPI event loop when calling
+the LLM for AI grading — a single submit can make the entire server
+unresponsive for 30+ seconds. This matches upstream issue #761 (Event
+Loop blocked by CPU-bound JSON serialization). The verify script
+intentionally skips live submission to avoid hanging the server;
+pre-graded submissions are inserted directly into the DB instead.
+
+### 8. Push to GitHub
+
+All changes were committed to `development` and pushed to
+`origin/development`. The `.git/config` fetch refspec fix (section 5
+above) was necessary to confirm the push had actually landed — the
+remote was already up to date, but the broken refspec prevented
+`git fetch` from updating the local tracking ref.
+
+**Current sync state**: local `development` = `origin/development` =
+`a7706db` (0 ahead, 0 behind).
+
+---
+
+## How to use the test environment for UI testing (for Claude)
+
+The seed data is live in the running Docker instance. Log in via the web
+UI at `http://localhost:3782` (or `http://localhost:3000` for the local
+dev server) with any of these accounts:
+
+| Username | Role | Password | What to test |
+|---|---|---|---|
+| `admin` | admin | (existing) | All courses, rosters, gradebooks, user management |
+| `instr_a` | instructor | `testpass123` | Data Structures + Algorithms courses, gradebook, materials |
+| `instr_b` | instructor | `testpass123` | Databases course only |
+| `stud1` | student | `testpass123` | Course 0 (DS) — has 10/10 submission |
+| `stud2` | student | `testpass123` | Course 0 (DS) — has 5/10 submission |
+| `stud3` | student | `testpass123` | Course 0 (DS) + Course 1 (Algorithms) — cross-course |
+| `stud4` | student | `testpass123` | Course 1 (Algorithms) + Course 2 (DB) — cross-course, no submissions |
+| `stud5` | student | `testpass123` | Course 2 (DB) — has 15/15 submission |
+
+**UI test scenarios to try**:
+1. Log in as `instr_a` → verify sidebar shows "Course Units" → click it
+   → see Data Structures + Algorithms (not Databases)
+2. Log in as `stud1` → Browse Courses → see only Data Structures →
+   verify no "Request to join" on own course, no access to Databases
+3. Log in as `instr_a` → Course Units → Data Structures → Materials →
+   verify 2 materials visible (1 published, 1 draft with "Draft" badge)
+4. Log in as `stud1` → Courses → Data Structures → Materials → verify
+   only 1 published material visible (draft hidden)
+5. Log in as `instr_a` → Data Structures → gradebook → verify stud1
+   (10/10) and stud2 (5/10) appear with correct scores
+6. Log in as `admin` → Accounts Management → verify all 9 users listed
+   with correct roles
+7. Log in as `stud3` → verify can see both Data Structures and
+   Algorithms but NOT Databases
+8. Test upload hints: log in as `instr_a` → Materials → drag overlay
+   should show "Supported: PDF, Word, PowerPoint, Excel, Markdown, Text,
+   Notebook (.ipynb), images. Max 200 MB per file."
+
+**To re-seed** (wipes and recreates all test data):
+```bash
+docker exec deeptutor python /app/_seed.py
+```
+
+**To verify** (runs 36 automated API tests):
+```bash
+docker exec deeptutor python /app/_verify.py
+```
+
+— Devin
+
+## 2026-08-04 — Devin — Load simulation: 7 assignments × 30 students — gradebook capacity test
+
+**Item**: not in TODO.md — proactive capacity test. The repo owner asked:
+"An instructor might want to give students 2-4 quizzes, 2 tests, and a
+final exam. Can the system handle that load and still track properly with
+a correct gradebook output?"
+
+**Status**: done — system handles it, gradebook is correct, two design
+findings flagged below.
+
+### What was tested
+
+Created a realistic course with:
+- **7 assignments**: 3 quizzes (weight 1.0 each), 2 tests (weight 3.0
+  each, is_major=True, passing_score=50%), 1 final exam (weight 5.0,
+  is_major=True, passing_score=60%), 1 makeup/bonus quiz (weight 0.5)
+- **30 students** with deterministic score distributions:
+  - Students 1-10: high performers (82-100% per assignment)
+  - Students 11-20: average (53-80%)
+  - Students 21-30: low performers (24-60%)
+- **200 submissions** (30×7 minus 10 skips):
+  - Students 26-30 skipped the final exam (incomplete)
+  - Students 21-25 skipped the makeup quiz (to test "optional" handling)
+- All submissions inserted directly into the DB (bypassing the LLM
+  grading path) with pre-computed scores and question_results
+
+Script: `_simulate_load.py` (run: `docker exec deeptutor python
+/app/_simulate_load.py`)
+
+### Results
+
+**Gradebook correctness: PASS**
+- Weighted average math is exact: `final_grade = sum(percentage × weight) / sum(weight)` verified to 2 decimal places
+- Total weight = 14.5 (1+1+1+3+3+5+0.5) — correctly aggregated
+- CSV export: 31 lines (1 header + 30 rows), correct column format
+  (`Quiz 1: Basics (/10.0), Quiz 2: Data Structures (/10.0), ...`)
+- Cross-course instructor report: correctly includes the load test
+  course alongside the 2 seed courses (3 total, 35 students, 9
+  assignments)
+
+**Completion tracking: PASS (but with a design finding — see below)**
+- 20 students marked completed (all 7 assignments submitted)
+- 10 students marked incomplete (6 assignments submitted)
+- Students 26-30 correctly incomplete (skipped final exam)
+- Students 21-25 correctly incomplete (skipped makeup quiz) — **this
+  is the design finding**: there's no "optional" or "bonus" assignment
+  concept. ALL published assignments must have a submission for
+  completion, even ones labeled "bonus" or "makeup."
+
+**Performance: ACCEPTABLE for current scale, will need optimization for larger classes**
+
+| Class size | Assignments | DB lookups | Projected time |
+|---|---|---|---|
+| 30 students | 7 | 210 | 2.7s (measured) |
+| 50 students | 7 | 350 | ~4.4s |
+| 100 students | 7 | 700 | ~8.9s |
+| 200 students | 7 | 1400 | ~17.8s |
+
+The gradebook uses an **N+1 query pattern**: `build_gradebook()` calls
+`get_latest_submission()` individually for each (assignment, student)
+pair — that's `N_assignments × N_students` separate DB queries. At
+~12.7ms per lookup, this is fine for a single class of 30 (2.7s), but
+a 200-student class would take ~18s, which would feel slow in the UI.
+
+### Design findings
+
+**Finding 1: No "optional" or "bonus" assignment concept**
+`check_and_mark_completion()` requires a submission for EVERY published
+assignment. An instructor who creates a "bonus quiz" or "optional makeup"
+and doesn't want it to block completion has no way to mark it as optional.
+The assignment model has `is_major` (which gates retake policy) but no
+`is_optional` or `counts_toward_completion` flag.
+
+**Recommendation**: Add an `is_optional` boolean to the Assignment model
+(default False). `check_and_mark_completion()` would skip optional
+assignments when checking if all work is submitted. This is a small
+schema change (one column + one filter) but needs a design decision
+before implementing — should optional assignments still appear in the
+gradebook's weighted average? (Probably yes — they just shouldn't block
+completion.)
+
+**Finding 2: N+1 query in gradebook (performance)**
+`build_gradebook()` in `deeptutor/multi_user/gradebook.py` does:
+```python
+for enrollment in enrollments:        # N students
+    for assignment in assignments:     # × M assignments
+        submission = await get_latest_submission(...)  # = N×M queries
+```
+
+**Recommendation**: Replace with a single batched query that fetches all
+latest submissions for the course at once:
+```sql
+SELECT DISTINCT ON (assignment_id, user_id) *
+FROM submissions
+WHERE assignment_id = ANY($1)
+ORDER BY assignment_id, user_id, submitted_at DESC
+```
+This would reduce N×M queries to 1, making the gradebook O(1) regardless
+of class size. The fix is ~15 lines in `gradebook.py` — replace the
+inner loop with a pre-fetched dict lookup.
+
+### What the instructor sees in the UI
+
+Log in as `instr_a` (password `testpass123`) → Course Units → "Load
+Test: Intro to Computer Science" → Gradebook. You'll see:
+- 30 student rows with per-assignment scores
+- 7 assignment columns (Quiz 1, Quiz 2, Quiz 3, Test 1, Test 2, Final
+  Exam, Makeup Quiz)
+- Final Grade (%) column with weighted average
+- Completion status per student
+- CSV export button
+
+### Test accounts for this simulation
+
+All 30 students have password `testpass123`:
+- `load_stud_01` through `load_stud_30`
+- Students 1-10: high grades (73-100% final)
+- Students 11-20: average grades (50-73% final)
+- Students 21-25: low grades + incomplete (skipped makeup)
+- Students 26-30: low grades + incomplete (skipped final)
+
+**Left for later / handing back**:
+1. **Optional/bonus assignment concept** — needs a design decision from
+   the repo owner before implementing. Should be a small schema change
+   (`is_optional` column) + filter in `check_and_mark_completion()`.
+2. **Gradebook N+1 query optimization** — not urgent at 30 students
+   (2.7s is acceptable), but should be done before classes exceed ~100
+   students. ~15 line change in `gradebook.py`.
+3. **Assignment submit event loop blocking** (from previous entry) —
+   still the most urgent performance issue. The N+1 is a slow page load;
+   the submit blocking is a server-wide outage.
+
+— Devin
+
+---
+
+## 2026-08-04 � Devin � Full-codebase scalability audit (100x stress)
+
+**Item**: not in TODO.md � proactive audit prompted by issue #31 (gradebook N+1).
+**Status**: investigated-not-fixed (audit only; no code changes).
+**What changed**: no application code touched. Full audit report saved to
+devin-handoff/SCALABILITY_AUDIT.md (this entry is a pointer to it).
+**Verified**: n/a � audit only.
+**New findings**: 5 parallel subagents audited the entire codebase for
+scaling bottlenecks at 100x (students, assignments, submissions, courses,
+users, documents, sessions). Found **26 CRITICAL**, **15 HIGH**, **12 MEDIUM**,
+**12 LOW** issues across 5 layers. The single biggest theme: the JSON
+file-based identity store (identity.py) is the root cause of ~10 of the
+CRITICAL issues � every get_user_by_id() call reads the entire users.json
+from disk and linear-scans it, and it's called inside loops in 7 places.
+The second biggest theme: missing DB indexes on enrollment/notification
+tables and missing composite index on submissions. The third: no pagination
+on any list endpoint or frontend table. See SCALABILITY_AUDIT.md for the
+full prioritized list with file/line references and fixes.
+**Left for later / handing back**: all 65+ findings are unfixed. The audit
+is a planning document � the user should decide which to tackle first.
+Recommended top 5: (1) replace get_user_by_id() loops with
+get_users_by_ids() (already exists), (2) add missing DB indexes, (3) add
+pagination to list endpoints, (4) replace session.refresh loops with
+selectinload, (5) add virtualization to gradebook/student tables.

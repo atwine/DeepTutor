@@ -24,15 +24,18 @@ services:
       - ./deeptutor_cli:/app/deeptutor_cli:ro
       - ./scripts:/app/scripts:ro
 
-      # Mount frontend source for hot-reload
-      - ./web/app:/app/web/app:ro
-      - ./web/components:/app/web/components:ro
-      - ./web/lib:/app/web/lib:ro
-      - ./web/hooks:/app/web/hooks:ro
-      - ./web/context:/app/web/context:ro
-      - ./web/i18n:/app/web/i18n:ro
-      - ./web/locales:/app/web/locales:ro
-      - ./web/public:/app/web/public:ro
+      # Mount the entire frontend source tree for hot-reload. Mounting the
+      # whole ./web directory (rather than cherry-picking subdirectories)
+      # avoids repeated "module not found" errors every time a new top-level
+      # dir/file is added (features/, types/, proxy.ts, tsconfig.json, etc.
+      # all bit us individually before this). node_modules and .next are
+      # re-mounted as anonymous volumes immediately after so the image's
+      # own copies (installed at build time) win over the (probably absent
+      # or stale) host versions — Compose applies volumes in order, so the
+      # more specific mounts below take precedence over the bind mount above.
+      - ./web:/app/web:ro
+      - /app/web/node_modules
+      - /app/web/.next
 
       # Mount data directories (writable) - output to local ./data
       - ./data/user:/app/data/user
