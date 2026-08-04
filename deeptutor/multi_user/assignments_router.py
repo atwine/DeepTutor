@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
@@ -23,6 +23,7 @@ from .assignments import (
     check_attempt_limit,
     check_due_at,
     count_submissions,
+    count_submissions_for_assignment,
     create_assignment,
     create_submission_checked,
     delete_assignment,
@@ -400,11 +401,14 @@ async def submit_assignment_endpoint(
 @router.get("/assignments/{assignment_id}/submissions")
 async def list_submissions_endpoint(
     assignment_id: str,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
     assignment = await _get_assignment_or_404(assignment_id)
     await _require_manage_access(current, assignment)
-    records = await list_submissions_for_assignment(assignment_id)
+    records = await list_submissions_for_assignment(assignment_id, limit=limit, offset=offset)
+    total = await count_submissions_for_assignment(assignment_id)
     # Issue #37: batch user lookup — one file read instead of N (one per
     # submission). get_users_by_ids loads users.json once and returns a
     # dict keyed by user_id for O(1) lookups.
@@ -425,7 +429,7 @@ async def list_submissions_endpoint(
                 "registration_number": registration_number,
             }
         )
-    return {"submissions": submissions}
+    return {"submissions": submissions, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/assignments/{assignment_id}/my-submission")

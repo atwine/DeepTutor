@@ -14,6 +14,7 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Query,
     UploadFile,
 )
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -36,6 +37,10 @@ from .course_units import (
     approve_leave,
     archive_course_unit,
     check_and_mark_completion,
+    count_course_units,
+    count_course_units_for_instructor,
+    count_course_units_for_student,
+    count_enrollments_for_course,
     create_course_unit,
     create_material_record,
     delete_course_unit,
@@ -401,15 +406,19 @@ async def create_course_unit_endpoint(
 
 @router.get("/course-units")
 async def list_course_units_endpoint(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
     """Management view: admins see every course unit, instructors see only
     the ones they're attached to."""
     if current.role == "admin":
-        units = await list_course_units()
+        units = await list_course_units(limit=limit, offset=offset)
+        total = await count_course_units()
     else:
-        units = await list_course_units_for_instructor(current.user_id)
-    return {"course_units": _with_instructor_names_batch(units)}
+        units = await list_course_units_for_instructor(current.user_id, limit=limit, offset=offset)
+        total = await count_course_units_for_instructor(current.user_id)
+    return {"course_units": _with_instructor_names_batch(units), "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/course-units/catalog")
@@ -476,18 +485,23 @@ async def course_unit_catalog_endpoint(
 
 @router.get("/my/course-units")
 async def my_course_units_endpoint(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     current: TokenPayload | None = Depends(require_auth),
 ) -> dict[str, Any]:
     """Any authenticated account's own view: admins see everything,
     instructors see the units they teach, students see the units they're
     enrolled in."""
     if current is None or current.role == "admin":
-        units = await list_course_units()
+        units = await list_course_units(limit=limit, offset=offset)
+        total = await count_course_units()
     elif current.role == "instructor":
-        units = await list_course_units_for_instructor(current.user_id)
+        units = await list_course_units_for_instructor(current.user_id, limit=limit, offset=offset)
+        total = await count_course_units_for_instructor(current.user_id)
     else:
-        units = await list_course_units_for_student(current.user_id)
-    return {"course_units": _with_instructor_names_batch(units)}
+        units = await list_course_units_for_student(current.user_id, limit=limit, offset=offset)
+        total = await count_course_units_for_student(current.user_id)
+    return {"course_units": _with_instructor_names_batch(units), "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/course-units/{course_unit_id}")
@@ -671,15 +685,18 @@ def _enrollment_with_student_info(
 @router.get("/course-units/{course_unit_id}/roster")
 async def course_unit_roster_endpoint(
     course_unit_id: str,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
     """Approved enrollments only — a pending request belongs on the
     /requests endpoint until an instructor decides on it."""
     await _require_course_unit_access(current, course_unit_id)
     enrollments = [
-        e for e in await list_enrollments_for_course(course_unit_id)
+        e for e in await list_enrollments_for_course(course_unit_id, limit=limit, offset=offset)
         if e.get("status", "approved") == "approved"
     ]
+    total = await count_enrollments_for_course(course_unit_id, status="approved")
     # Issue #37: batch user lookup — one file read instead of N.
     user_records = get_users_by_ids([e["user_id"] for e in enrollments])
     roster = [
@@ -687,7 +704,7 @@ async def course_unit_roster_endpoint(
         for enrollment in enrollments
         if (info := _enrollment_with_student_info(enrollment, user_records)) is not None
     ]
-    return {"roster": roster}
+    return {"roster": roster, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/course-units/{course_unit_id}/requests")

@@ -347,14 +347,31 @@ async def get_submission(submission_id: str) -> dict[str, Any] | None:
         return _submission_to_dict(record) if record else None
 
 
-async def list_submissions_for_assignment(assignment_id: str) -> list[dict[str, Any]]:
+async def list_submissions_for_assignment(
+    assignment_id: str, *, limit: int = 0, offset: int = 0
+) -> list[dict[str, Any]]:
+    """Issue #41: optional limit/offset for pagination — when limit=0
+    (default), returns all rows (backward compatible)."""
     async with session_scope() as session:
-        result = await session.execute(
+        stmt = (
             select(Submission)
             .where(Submission.assignment_id == assignment_id)
             .order_by(Submission.submitted_at)
         )
+        if limit > 0:
+            stmt = stmt.limit(limit).offset(offset)
+        result = await session.execute(stmt)
         return [_submission_to_dict(s) for s in result.scalars()]
+
+
+async def count_submissions_for_assignment(assignment_id: str) -> int:
+    async with session_scope() as session:
+        result = await session.execute(
+            select(func.count(Submission.id)).where(
+                Submission.assignment_id == assignment_id
+            )
+        )
+        return int(result.scalar() or 0)
 
 
 async def get_latest_submission(assignment_id: str, user_id: str) -> dict[str, Any] | None:

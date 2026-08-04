@@ -20,7 +20,7 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import selectinload
 
 from deeptutor.services.db import session_scope
@@ -184,15 +184,25 @@ async def create_course_unit(
     return _unit_to_dict(unit)
 
 
-async def list_course_units() -> list[dict[str, Any]]:
+async def list_course_units(
+    *, limit: int = 50, offset: int = 0
+) -> list[dict[str, Any]]:
     async with session_scope() as session:
         result = await session.execute(
             select(CourseUnit)
             .options(selectinload(CourseUnit.instructors))
             .order_by(CourseUnit.created_at)
+            .limit(limit)
+            .offset(offset)
         )
         units = result.scalars().unique().all()
     return [_unit_to_dict(u) for u in units]
+
+
+async def count_course_units() -> int:
+    async with session_scope() as session:
+        result = await session.execute(select(func.count(CourseUnit.id)))
+        return int(result.scalar() or 0)
 
 
 async def get_course_unit(course_unit_id: str) -> dict[str, Any] | None:
@@ -365,7 +375,9 @@ async def is_approved_student_of(user_id: str, course_unit_id: str) -> bool:
         return True
 
 
-async def list_course_units_for_instructor(user_id: str) -> list[dict[str, Any]]:
+async def list_course_units_for_instructor(
+    user_id: str, *, limit: int = 50, offset: int = 0
+) -> list[dict[str, Any]]:
     async with session_scope() as session:
         result = await session.execute(
             select(CourseUnit)
@@ -373,12 +385,27 @@ async def list_course_units_for_instructor(user_id: str) -> list[dict[str, Any]]
             .join(CourseUnitInstructor)
             .where(CourseUnitInstructor.instructor_id == str(user_id))
             .order_by(CourseUnit.created_at)
+            .limit(limit)
+            .offset(offset)
         )
         units = result.scalars().unique().all()
     return [_unit_to_dict(u) for u in units]
 
 
-async def list_course_units_for_student(user_id: str) -> list[dict[str, Any]]:
+async def count_course_units_for_instructor(user_id: str) -> int:
+    async with session_scope() as session:
+        result = await session.execute(
+            select(func.count())
+            .select_from(CourseUnit)
+            .join(CourseUnitInstructor)
+            .where(CourseUnitInstructor.instructor_id == str(user_id))
+        )
+        return int(result.scalar() or 0)
+
+
+async def list_course_units_for_student(
+    user_id: str, *, limit: int = 50, offset: int = 0
+) -> list[dict[str, Any]]:
     """Units ``user_id`` has *approved* access to — a pending request alone
     doesn't grant it."""
     async with session_scope() as session:
@@ -391,9 +418,25 @@ async def list_course_units_for_student(user_id: str) -> list[dict[str, Any]]:
                 Enrollment.status == "approved",
             )
             .order_by(CourseUnit.created_at)
+            .limit(limit)
+            .offset(offset)
         )
         units = result.scalars().unique().all()
     return [_unit_to_dict(u) for u in units]
+
+
+async def count_course_units_for_student(user_id: str) -> int:
+    async with session_scope() as session:
+        result = await session.execute(
+            select(func.count())
+            .select_from(CourseUnit)
+            .join(Enrollment)
+            .where(
+                Enrollment.user_id == str(user_id),
+                Enrollment.status == "approved",
+            )
+        )
+        return int(result.scalar() or 0)
 
 
 # ---------------------------------------------------------------------------
@@ -599,13 +642,30 @@ async def unenroll_student(course_unit_id: str, user_id: str) -> bool:
         return result.rowcount > 0
 
 
-async def list_enrollments_for_course(course_unit_id: str) -> list[dict[str, Any]]:
+async def list_enrollments_for_course(
+    course_unit_id: str, *, limit: int = 0, offset: int = 0
+) -> list[dict[str, Any]]:
+    """Enrollments for a course unit. Issue #41: optional limit/offset
+    for pagination — when limit=0 (default), returns all rows (backward
+    compatible with callers that don't paginate)."""
     async with session_scope() as session:
-        result = await session.execute(
-            select(Enrollment).where(Enrollment.course_unit_id == course_unit_id)
-        )
+        stmt = select(Enrollment).where(Enrollment.course_unit_id == course_unit_id)
+        if limit > 0:
+            stmt = stmt.limit(limit).offset(offset)
+        result = await session.execute(stmt)
         enrollments = result.scalars().all()
     return [_enrollment_to_dict(e) for e in enrollments]
+
+
+async def count_enrollments_for_course(course_unit_id: str, *, status: str = "") -> int:
+    async with session_scope() as session:
+        stmt = select(func.count(Enrollment.id)).where(
+            Enrollment.course_unit_id == course_unit_id
+        )
+        if status:
+            stmt = stmt.where(Enrollment.status == status)
+        result = await session.execute(stmt)
+        return int(result.scalar() or 0)
 
 
 async def list_enrollments_for_student(user_id: str) -> list[dict[str, Any]]:
