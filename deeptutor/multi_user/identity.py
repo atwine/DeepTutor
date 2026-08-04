@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 import secrets
 import threading
+import time
 from typing import Any
 from uuid import uuid4
 
@@ -22,6 +23,18 @@ logger = logging.getLogger(__name__)
 # multi-worker deployments still race and must rely on an external user store
 # (e.g. PocketBase), which is documented in the multi-user README.
 _USERS_WRITE_LOCK = threading.Lock()
+
+# Issue #45: In-memory TTL cache for load_users(). Without this, every call
+# to load_users() reads and parses the entire users.json from disk — and
+# load_users() is called by 19 functions including authenticate() (every
+# login), get_user_by_id() (every user lookup), and list_user_info() (every
+# admin dashboard load). The cache is invalidated by _write_users() so
+# writes are immediately visible. The TTL is a safety net for external
+# modifications to the file (rare, but possible via manual edits).
+_USERS_CACHE_TTL = 5.0  # seconds
+_users_cache: dict[str, dict[str, Any]] | None = None
+_users_cache_ts: float = 0.0
+_users_cache_lock = threading.Lock()
 
 AUTH_DIR = SYSTEM_ROOT / "auth"
 USERS_FILE = AUTH_DIR / "users.json"
@@ -93,8 +106,15 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _write_users(users: dict[str, dict[str, Any]]) -> None:
+    global _users_cache
     USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     USERS_FILE.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Issue #45: Invalidate the cache so the next load_users() call re-reads
+    # from disk and picks up the changes. This covers all write paths
+    # (save_user, delete_user, update_profile_details, set_disabled,
+    # set_avatar, set_role, and the canonicalization write-back in
+    # load_users() itself).
+    _users_cache = None
 
 
 def _migrate_legacy_users() -> dict[str, dict[str, Any]] | None:
@@ -133,11 +153,13 @@ def _migrate_secret() -> None:
         logger.warning("Failed to migrate legacy auth secret: %s", exc)
 
 
-def load_users(  # nosec B107 - empty defaults mean "no env fallback supplied".
+def _load_users_from_disk(
     env_username: str = "",
     env_password_hash: str = "",
 ) -> dict[str, dict[str, Any]]:
-    """Load canonical users, migrating legacy records and env fallback in memory."""
+    """Read users.json from disk, canonicalize records, and write back if
+    any records were upgraded. This is the cache-miss path of
+    :func:`load_users`."""
     migrate_legacy_multi_user_tree()
     users: dict[str, dict[str, Any]] | None = None
     if USERS_FILE.exists():
@@ -179,6 +201,52 @@ def load_users(  # nosec B107 - empty defaults mean "no env fallback supplied".
         }
 
     return {}
+
+
+def load_users(  # nosec B107 - empty defaults mean "no env fallback supplied".
+    env_username: str = "",
+    env_password_hash: str = "",
+) -> dict[str, dict[str, Any]]:
+    """Load canonical users, migrating legacy records and env fallback in memory.
+
+    Issue #45: Results are cached with a short TTL (5 seconds) to avoid
+    re-reading users.json from disk on every call. The cache is
+    invalidated immediately by :func:`_write_users` so writes are always
+    visible. When ``env_username``/``env_password_hash`` are provided
+    (bootstrap fallback), the cache is bypassed since the result depends
+    on the caller's env params.
+    """
+    # Env-fallback path: don't cache — the result depends on caller params.
+    if env_username or env_password_hash:
+        return _load_users_from_disk(env_username, env_password_hash)
+
+    # Issue #45: Check the TTL cache first. This is the hot path — every
+    # authenticate(), get_user_by_id(), list_user_info(), etc. hits this.
+    global _users_cache, _users_cache_ts
+    now = time.monotonic()
+    cached = _users_cache
+    if cached is not None and (now - _users_cache_ts) < _USERS_CACHE_TTL:
+        return cached
+
+    # Cache miss — acquire lock to avoid thundering herd under concurrent
+    # load (multiple requests all seeing an expired cache and each reading
+    # the file simultaneously).
+    with _users_cache_lock:
+        # Double-check after acquiring the lock — another thread may have
+        # already refreshed the cache while we were waiting.
+        now = time.monotonic()
+        cached = _users_cache
+        if cached is not None and (now - _users_cache_ts) < _USERS_CACHE_TTL:
+            return cached
+
+        # Read from disk. Note: _load_users_from_disk may call
+        # _write_users() (for canonicalization), which sets
+        # _users_cache = None. We set the cache AFTER this call returns,
+        # so the final cache value is correct regardless.
+        result = _load_users_from_disk()
+        _users_cache = result
+        _users_cache_ts = time.monotonic()
+        return result
 
 
 def save_user(username: str, hashed_password: str, role: Role = "user") -> dict[str, Any]:
