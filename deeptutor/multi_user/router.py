@@ -1508,3 +1508,51 @@ async def instructor_students_overview(
         "course_options": course_options,
         "students": student_rows,
     }
+
+
+# ---------------------------------------------------------------------------
+# Issue #35: Admin actions from the student dashboard
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/admin/students/{user_id}/submissions/{assignment_id}",
+)
+async def admin_reset_submission_attempts(
+    user_id: str,
+    assignment_id: str,
+    current: TokenPayload = Depends(require_admin),
+) -> dict[str, Any]:
+    """Delete all of a student's submissions for one assignment — the
+    "reset attempts" admin action. Gives the student a clean slate as if
+    they never submitted, so they can try again from scratch.
+
+    Admin-only (the admin is the last-resort fixer). Instructors use the
+    assignment access grant system for accommodations instead.
+    """
+    from sqlalchemy import delete as sa_delete
+
+    async with session_scope() as session:
+        result = await session.execute(
+            sa_delete(Submission).where(
+                Submission.assignment_id == assignment_id,
+                Submission.user_id == str(user_id),
+            )
+        )
+        deleted_count = result.rowcount
+
+    if deleted_count == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="No submissions found for this student/assignment pair",
+        )
+
+    log_admin_action(
+        "reset_submission_attempts",
+        summary={
+            "user_id": user_id,
+            "assignment_id": assignment_id,
+            "deleted": deleted_count,
+        },
+    )
+    return {"ok": True, "deleted": deleted_count}

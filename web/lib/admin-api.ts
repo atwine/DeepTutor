@@ -160,3 +160,22 @@ export async function getInstructorStudentsOverview(): Promise<StudentsOverviewR
   if (!res.ok) throw new Error("Failed to fetch students overview");
   return res.json();
 }
+
+/** Issue #35: Admin reset submission attempts — deletes all of a student's
+ * submissions for one assignment so they can try again from scratch. */
+export async function resetSubmissionAttempts(
+  userId: string,
+  assignmentId: string,
+): Promise<{ deleted: number }> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/admin/students/${encodeURIComponent(userId)}/submissions/${encodeURIComponent(assignmentId)}`,
+    ),
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail ?? "Failed to reset submission attempts");
+  }
+  return res.json();
+}

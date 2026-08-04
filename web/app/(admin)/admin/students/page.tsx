@@ -113,6 +113,7 @@ export default function AdminStudentsPage() {
           loading={loading}
           error={error}
           onRefresh={load}
+          enableActions
         />
       </div>
     </div>
