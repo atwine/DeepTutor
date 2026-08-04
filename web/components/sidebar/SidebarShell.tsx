@@ -73,16 +73,28 @@ const PRIMARY_NAV: NavEntry[] = [
   {
     // Instructors manage the course units they teach from here. Labeled
     // "My Course Units" to distinguish it from the admin's global catalog
-    // (admins reach the global Course Units via a cross-link from Accounts
-    // Management, not from here) and placed directly below "Browse Courses"
-    // so an instructor's own units sit right under the catalog. The route
-    // is unchanged — only the label and ordering differ. Admins do not see
-    // this entry (they keep their "Accounts Management" footer link).
+    // and placed directly below "Browse Courses" so an instructor's own
+    // units sit right under the catalog. The route is unchanged — only the
+    // label and ordering differ. Admins have their own "Course Units" entry
+    // below (global catalog administration, not "my" units).
     href: "/admin/course-units",
     label: "My Course Units",
     icon: ClipboardList,
     tooltipKey: "My Course Units tooltip",
     roles: ["instructor"],
+  },
+  {
+    // Admin's global course catalog administration: create course units,
+    // assign instructors, manage rosters, archive/delete old units. Labeled
+    // "Course Units" (not "My Course Units" — the admin doesn't teach any)
+    // and placed right after the instructor's entry so course-related nav
+    // items stay grouped. The two entries are mutually exclusive (a user
+    // has one role), so there's no visual conflict.
+    href: "/admin/course-units",
+    label: "Course Units",
+    icon: ClipboardList,
+    tooltipKey: "Course Units tooltip",
+    roles: ["admin"],
   },
   {
     href: "/partners",
@@ -215,14 +227,15 @@ export function SidebarShell({
   const drawer = useSidebarDrawer();
   const { enabled: authEnabled, role } = useAuthStatus();
 
-  // Auth disabled (solo/local use, no real accounts) never hides anything —
-  // the single user is effectively the admin. With auth enabled, hide a
-  // role-gated item until the role is actually known (mirrors AdminLink,
-  // which likewise renders nothing until resolved) rather than flashing it
-  // and then pulling it away.
+  // Auth disabled (solo/local use, no real accounts) — the single user is
+  // effectively the admin, so role-gated items are shown only if the admin
+  // role would see them (e.g. "Course Units" yes, "My Course Units" no).
+  // With auth enabled, hide a role-gated item until the role is actually
+  // known (mirrors AdminLink, which likewise renders nothing until resolved)
+  // rather than flashing it and then pulling it away.
   const visibleForRole = (item: NavEntry) => {
     if (!item.roles) return true;
-    if (!authEnabled) return true;
+    if (!authEnabled) return item.roles.includes("admin");
     if (!role) return false;
     return item.roles.includes(role as "admin" | "instructor" | "user");
   };
@@ -332,7 +345,7 @@ export function SidebarShell({
             if (locked) {
               return (
                 <Tooltip
-                  key={item.href}
+                  key={item.label}
                   label={t(item.label)}
                   description={description}
                   side="right"
@@ -354,7 +367,7 @@ export function SidebarShell({
             }
             return (
               <Tooltip
-                key={item.href}
+                key={item.label}
                 label={t(item.label)}
                 description={description}
                 side="right"
@@ -390,7 +403,7 @@ export function SidebarShell({
             if (locked) {
               return (
                 <Tooltip
-                  key={item.href}
+                  key={item.label}
                   label={t(item.label)}
                   description={lockedTooltip}
                   side="right"
@@ -412,7 +425,7 @@ export function SidebarShell({
             }
             return (
               <Link
-                key={item.href}
+                key={item.label}
                 href={item.href}
                 title={t(item.label) as string}
                 className={`relative flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 ${
@@ -476,7 +489,7 @@ export function SidebarShell({
             if (locked) {
               return (
                 <Tooltip
-                  key={item.href}
+                  key={item.label}
                   label={t(item.label)}
                   description={lockedTooltip}
                   side="right"
@@ -495,7 +508,7 @@ export function SidebarShell({
             }
             return (
               <Link
-                key={item.href}
+                key={item.label}
                 href={item.href}
                 onClick={
                   item.href === "/home" ? handleHomeClick : closeDrawerOnNav
@@ -580,7 +593,7 @@ export function SidebarShell({
           if (locked) {
             return (
               <Tooltip
-                key={item.href}
+                key={item.label}
                 label={t(item.label)}
                 description={lockedTooltip}
                 side="right"
@@ -599,7 +612,7 @@ export function SidebarShell({
           }
           return (
             <Link
-              key={item.href}
+              key={item.label}
               href={item.href}
               onClick={closeDrawerOnNav}
               className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13.5px] transition-colors ${

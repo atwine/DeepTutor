@@ -1709,6 +1709,8 @@
   "Ask about this page...": "Ask about this page...",
   "Home tooltip": "Multi-tool AI chat and search.",
   "Courses tooltip": "Browse course units and request to join one.",
+  "Course Units": "Course Units",
+  "Course Units tooltip": "Manage all course units — create, assign instructors, archive.",
   "Co-Writer tooltip": "AI-powered document editor.",
   "Book tooltip": "Create AI-powered books.",
   "Knowledge tooltip": "Manage learning personas.",
