@@ -167,17 +167,25 @@ const PRIMARY_NAV: NavEntry[] = [
     requires: "llm",
   },
   {
+    // Book is an admin/instructor feature for creating curated course
+    // content. Locked (greyed + padlock, non-clickable) for students —
+    // they access published books via course notes, not the Book builder.
     href: "/book",
     label: "Book",
     icon: Library,
     tooltipKey: "Book tooltip",
     requires: "llm",
+    adminOnly: true,
   },
   {
+    // Learning Space is an admin/instructor workspace for managing
+    // notebooks and agent configurations. Locked for students — they
+    // don't have workspace management capabilities.
     href: "/space",
     label: "Learning Space",
     icon: LayoutGrid,
     tooltipKey: "Space tooltip",
+    adminOnly: true,
   },
 ];
 
