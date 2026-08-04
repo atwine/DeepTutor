@@ -58,6 +58,15 @@ export interface VisiblePathResult {
   siblingsByMessageId: Map<number, SiblingInfo>;
 }
 
+/**
+ * Build the single linear visible path from a flat message list with branch
+ * pointers. At each branch point, follows the user's selection or defaults
+ * to the latest-created child.
+ *
+ * @param allMessages - Flat list of all messages in the session.
+ * @param selectedBranches - Map of parent-id → chosen child-id for branch selection.
+ * @returns The visible message list and sibling info for branching points.
+ */
 export function buildVisiblePath(
   allMessages: MessageItem[],
   selectedBranches: Record<string, number> | undefined,

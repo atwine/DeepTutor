@@ -40,6 +40,8 @@ export interface ConnectablePartner {
   running?: boolean;
 }
 
+/** List partners the current user can connect and consult in chat.
+ * @returns Array of connectable partner identities. */
 export async function listConnectablePartners(): Promise<ConnectablePartner[]> {
   const res = await apiFetch(apiUrl("/api/v1/subagents/partners"), {
     cache: "no-store",
@@ -49,6 +51,8 @@ export async function listConnectablePartners(): Promise<ConnectablePartner[]> {
   return data.partners ?? [];
 }
 
+/** Detect which agent CLI backends are installed on this machine.
+ * @returns Array of backend info with availability and version. */
 export async function detectSubagents(): Promise<SubagentBackendInfo[]> {
   const res = await apiFetch(apiUrl("/api/v1/subagents/detect"), {
     cache: "no-store",
@@ -58,6 +62,8 @@ export async function detectSubagents(): Promise<SubagentBackendInfo[]> {
   return data.backends ?? [];
 }
 
+/** List all connected subagents.
+ * @returns Array of subagent connections. */
 export async function listSubagentConnections(): Promise<SubagentConnection[]> {
   const res = await apiFetch(apiUrl("/api/v1/subagents/connections"), {
     cache: "no-store",
@@ -67,6 +73,9 @@ export async function listSubagentConnections(): Promise<SubagentConnection[]> {
   return data.connections ?? [];
 }
 
+/** Connect a new subagent (Claude Code, Codex, partner, etc.).
+ * @param payload - Name, agent kind, working directory, and optional partner id.
+ * @returns The created subagent connection. */
 export async function connectSubagent(payload: {
   name: string;
   agent_kind: string;
@@ -89,6 +98,8 @@ export async function connectSubagent(payload: {
   return (await res.json()) as SubagentConnection;
 }
 
+/** Disconnect and remove a subagent connection by name.
+ * @param name - The subagent connection name. */
 export async function disconnectSubagent(name: string): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/subagents/connections/${encodeURIComponent(name)}`),
@@ -97,6 +108,7 @@ export async function disconnectSubagent(name: string): Promise<void> {
   if (!res.ok) throw new Error(`Disconnect failed: ${res.status}`);
 }
 
+/** A model option for a subagent backend (slug, display name, efforts). */
 export interface SubagentModelOption {
   slug: string;
   display_name: string;
@@ -104,6 +116,7 @@ export interface SubagentModelOption {
   efforts: string[];
 }
 
+/** Available models and configuration options for one agent backend. */
 export interface SubagentBackendOptions {
   kind: string;
   display_name: string;
@@ -117,6 +130,8 @@ export interface SubagentBackendOptions {
   detail: string;
 }
 
+/** Fetch all agent backend options (models, efforts, permissions).
+ * @returns Array of backend options. */
 export async function getBackendOptions(): Promise<SubagentBackendOptions[]> {
   const res = await apiFetch(apiUrl("/api/v1/subagents/backends/options"), {
     cache: "no-store",
@@ -142,6 +157,7 @@ export async function syncBackendOptions(
   return (await res.json()) as SubagentBackendOptions;
 }
 
+/** Per-backend configuration (model, effort, permissions, sandbox, etc.). */
 export interface SubagentBackendConfig {
   enabled?: boolean;
   model?: string;
@@ -160,6 +176,7 @@ export interface SubagentBackendConfig {
   extra_args?: string[];
 }
 
+/** Subagent settings (consult budget + per-backend config). */
 export interface SubagentSettings {
   consult_budget: number;
   backends: Record<string, SubagentBackendConfig>;
@@ -238,6 +255,9 @@ export async function getSubagentSettings(options?: {
   );
 }
 
+/** Update subagent settings (backends + consult budget).
+ * @param payload - Partial settings to update.
+ * @returns The updated settings. */
 export async function updateSubagentSettings(
   payload: Partial<SubagentSettings>,
 ): Promise<SubagentSettings> {

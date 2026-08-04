@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 
 class CreateBookRequest(BaseModel):
+    """Request body for creating a new book via the IdeationAgent."""
+
     user_intent: str = Field(default="")
     chat_session_id: str = Field(default="")
     chat_selections: list[dict[str, Any]] = Field(default_factory=list)
@@ -47,23 +49,31 @@ class CreateBookRequest(BaseModel):
 
 
 class ConfirmProposalRequest(BaseModel):
+    """Request body for confirming (and optionally editing) a book proposal."""
+
     book_id: str
     proposal: dict[str, Any] | None = None  # full edited BookProposal payload
 
 
 class ConfirmSpineRequest(BaseModel):
+    """Request body for confirming a book spine and creating page shells."""
+
     book_id: str
     spine: dict[str, Any] | None = None
     auto_compile: bool = True
 
 
 class CompilePageRequest(BaseModel):
+    """Request body for compiling a single book page."""
+
     book_id: str
     page_id: str
     force: bool = False
 
 
 class RegenerateBlockRequest(BaseModel):
+    """Request body for regenerating a single block within a page."""
+
     book_id: str
     page_id: str
     block_id: str
@@ -71,6 +81,8 @@ class RegenerateBlockRequest(BaseModel):
 
 
 class InsertBlockRequest(BaseModel):
+    """Request body for inserting a new block into a page."""
+
     book_id: str
     page_id: str
     block_type: str
@@ -80,12 +92,16 @@ class InsertBlockRequest(BaseModel):
 
 
 class DeleteBlockRequest(BaseModel):
+    """Request body for deleting a block from a page."""
+
     book_id: str
     page_id: str
     block_id: str
 
 
 class MoveBlockRequest(BaseModel):
+    """Request body for repositioning a block within a page."""
+
     book_id: str
     page_id: str
     block_id: str
@@ -93,6 +109,8 @@ class MoveBlockRequest(BaseModel):
 
 
 class ChangeBlockTypeRequest(BaseModel):
+    """Request body for changing the type of an existing block."""
+
     book_id: str
     page_id: str
     block_id: str
@@ -101,6 +119,8 @@ class ChangeBlockTypeRequest(BaseModel):
 
 
 class DeepDiveRequest(BaseModel):
+    """Request body for creating a deep-dive sub-page from a parent page."""
+
     book_id: str
     parent_page_id: str
     topic: str
@@ -109,6 +129,8 @@ class DeepDiveRequest(BaseModel):
 
 
 class QuizAttemptRequest(BaseModel):
+    """Request body for recording a quiz attempt on a page block."""
+
     book_id: str
     page_id: str
     block_id: str
@@ -119,18 +141,24 @@ class QuizAttemptRequest(BaseModel):
 
 
 class SupplementRequest(BaseModel):
+    """Request body for generating a supplemental block for a weak topic."""
+
     book_id: str
     page_id: str
     topic: str
 
 
 class PageChatSessionRequest(BaseModel):
+    """Request body for associating a chat session with a book page."""
+
     book_id: str
     page_id: str
     session_id: str
 
 
 class RebuildBookRequest(BaseModel):
+    """Request body for rebuilding a book's pages from its spine."""
+
     book_id: str
     auto_compile: bool = True
 
@@ -142,17 +170,30 @@ class RebuildBookRequest(BaseModel):
 
 @router.get("/health")
 async def health_check() -> dict[str, str]:
+    """Return the health status of the book engine service."""
     return {"status": "healthy", "service": "book"}
 
 
 @router.get("/books")
 async def list_books() -> dict[str, Any]:
+    """List all books known to the book engine."""
     engine = get_book_engine()
     return {"books": [b.model_dump(mode="json") for b in engine.list_books()]}
 
 
 @router.get("/books/{book_id}")
 async def get_book(book_id: str) -> dict[str, Any]:
+    """Retrieve a single book with its spine, pages, and progress.
+
+    Args:
+        book_id: The unique identifier of the book.
+
+    Returns:
+        A dict containing the book, spine, pages, and progress models.
+
+    Raises:
+        HTTPException: 404 if the book is not found.
+    """
     engine = get_book_engine()
     book = engine.load_book(book_id)
     if book is None:
@@ -170,6 +211,17 @@ async def get_book(book_id: str) -> dict[str, Any]:
 
 @router.get("/books/{book_id}/spine")
 async def get_spine(book_id: str) -> dict[str, Any]:
+    """Retrieve the spine (chapter outline) for a book.
+
+    Args:
+        book_id: The unique identifier of the book.
+
+    Returns:
+        A dict containing the serialized spine model.
+
+    Raises:
+        HTTPException: 404 if the spine is not found.
+    """
     engine = get_book_engine()
     spine = engine.load_spine(book_id)
     if spine is None:
@@ -179,6 +231,18 @@ async def get_spine(book_id: str) -> dict[str, Any]:
 
 @router.get("/books/{book_id}/pages/{page_id}")
 async def get_page(book_id: str, page_id: str) -> dict[str, Any]:
+    """Retrieve a single page from a book.
+
+    Args:
+        book_id: The unique identifier of the book.
+        page_id: The unique identifier of the page.
+
+    Returns:
+        A dict containing the serialized page model.
+
+    Raises:
+        HTTPException: 404 if the page is not found.
+    """
     engine = get_book_engine()
     page = engine.load_page(book_id, page_id)
     if page is None:
@@ -188,6 +252,17 @@ async def get_page(book_id: str, page_id: str) -> dict[str, Any]:
 
 @router.delete("/books/{book_id}")
 async def delete_book(book_id: str) -> dict[str, Any]:
+    """Delete a book and all its associated data.
+
+    Args:
+        book_id: The unique identifier of the book.
+
+    Returns:
+        A dict confirming deletion with the book_id.
+
+    Raises:
+        HTTPException: 404 if the book is not found.
+    """
     engine = get_book_engine()
     ok = engine.delete_book(book_id)
     if not ok:
@@ -284,6 +359,17 @@ async def compile_page(req: CompilePageRequest) -> dict[str, Any]:
 
 @router.post("/books/regenerate-block")
 async def regenerate_block(req: RegenerateBlockRequest) -> dict[str, Any]:
+    """Regenerate a single block within a page with optional parameter overrides.
+
+    Args:
+        req: The regeneration request containing book, page, and block IDs.
+
+    Returns:
+        A dict containing the regenerated block model.
+
+    Raises:
+        HTTPException: 404 if the block is not found; 500 on engine errors.
+    """
     engine = get_book_engine()
     try:
         block = await engine.regenerate_block(
@@ -316,6 +402,18 @@ def _coerce_content_type(name: str) -> ContentType:
 
 @router.post("/books/insert-block")
 async def insert_block(req: InsertBlockRequest) -> dict[str, Any]:
+    """Insert a new block into a page at an optional position.
+
+    Args:
+        req: The insertion request with block type, params, and position.
+
+    Returns:
+        A dict containing the inserted block model.
+
+    Raises:
+        HTTPException: 400 if the block type is unknown; 404 if the page is
+            not found; 500 on engine errors.
+    """
     engine = get_book_engine()
     block_type = _coerce_block_type(req.block_type)
     try:
@@ -337,6 +435,17 @@ async def insert_block(req: InsertBlockRequest) -> dict[str, Any]:
 
 @router.post("/books/delete-block")
 async def delete_block(req: DeleteBlockRequest) -> dict[str, Any]:
+    """Delete a block from a page.
+
+    Args:
+        req: The deletion request containing book, page, and block IDs.
+
+    Returns:
+        A dict with ``ok: True`` on success.
+
+    Raises:
+        HTTPException: 404 if the block is not found.
+    """
     engine = get_book_engine()
     ok = await engine.delete_block(book_id=req.book_id, page_id=req.page_id, block_id=req.block_id)
     if not ok:
@@ -346,6 +455,17 @@ async def delete_block(req: DeleteBlockRequest) -> dict[str, Any]:
 
 @router.post("/books/move-block")
 async def move_block(req: MoveBlockRequest) -> dict[str, Any]:
+    """Reposition a block to a new index within its page.
+
+    Args:
+        req: The move request containing book, page, block IDs and new position.
+
+    Returns:
+        A dict with ``ok: True`` on success.
+
+    Raises:
+        HTTPException: 404 if the block is not found.
+    """
     engine = get_book_engine()
     ok = await engine.move_block(
         book_id=req.book_id,
@@ -360,6 +480,19 @@ async def move_block(req: MoveBlockRequest) -> dict[str, Any]:
 
 @router.post("/books/change-block-type")
 async def change_block_type(req: ChangeBlockTypeRequest) -> dict[str, Any]:
+    """Change the type of an existing block, optionally overriding parameters.
+
+    Args:
+        req: The request containing book, page, block IDs, new type, and
+            optional parameter overrides.
+
+    Returns:
+        A dict containing the updated block model.
+
+    Raises:
+        HTTPException: 400 if the new type is unknown; 404 if the block is
+            not found; 500 on engine errors.
+    """
     engine = get_book_engine()
     new_type = _coerce_block_type(req.new_type)
     try:
@@ -380,6 +513,18 @@ async def change_block_type(req: ChangeBlockTypeRequest) -> dict[str, Any]:
 
 @router.post("/books/deep-dive")
 async def deep_dive(req: DeepDiveRequest) -> dict[str, Any]:
+    """Create a deep-dive sub-page exploring a topic from a parent page.
+
+    Args:
+        req: The deep-dive request with parent page, topic, and content type.
+
+    Returns:
+        A dict containing the newly created sub-page model.
+
+    Raises:
+        HTTPException: 400 if the content type is unknown; 404 if the parent
+            page is not found; 500 on engine errors.
+    """
     engine = get_book_engine()
     content_type = _coerce_content_type(req.content_type)
     try:
@@ -400,6 +545,14 @@ async def deep_dive(req: DeepDiveRequest) -> dict[str, Any]:
 
 @router.post("/books/quiz-attempt")
 async def quiz_attempt(req: QuizAttemptRequest) -> dict[str, Any]:
+    """Record a quiz attempt and return updated progress.
+
+    Args:
+        req: The quiz attempt request with question, answer, and correctness.
+
+    Returns:
+        A dict containing the updated progress model.
+    """
     engine = get_book_engine()
     progress = await engine.record_quiz_attempt(
         book_id=req.book_id,
@@ -414,6 +567,14 @@ async def quiz_attempt(req: QuizAttemptRequest) -> dict[str, Any]:
 
 @router.get("/books/{book_id}/health")
 async def book_health(book_id: str) -> dict[str, Any]:
+    """Return KB drift and log health diagnostics for a book.
+
+    Args:
+        book_id: The unique identifier of the book.
+
+    Returns:
+        A dict with ``kb_drift`` and ``log_health`` reports.
+    """
     engine = get_book_engine()
     drift = engine.kb_drift_report(book_id)
     log = engine.log_health(book_id)
@@ -422,6 +583,17 @@ async def book_health(book_id: str) -> dict[str, Any]:
 
 @router.post("/books/{book_id}/refresh-fingerprints")
 async def refresh_fingerprints(book_id: str) -> dict[str, Any]:
+    """Refresh knowledge-base fingerprints for a book.
+
+    Args:
+        book_id: The unique identifier of the book.
+
+    Returns:
+        The fingerprint refresh result from the engine.
+
+    Raises:
+        HTTPException: 404 if the book is not found.
+    """
     engine = get_book_engine()
     result = engine.refresh_kb_fingerprints(book_id)
     if result is None:
@@ -431,6 +603,17 @@ async def refresh_fingerprints(book_id: str) -> dict[str, Any]:
 
 @router.post("/books/supplement")
 async def supplement(req: SupplementRequest) -> dict[str, Any]:
+    """Generate a supplemental block addressing a weak topic on a page.
+
+    Args:
+        req: The supplement request with book, page, and topic.
+
+    Returns:
+        A dict containing the generated supplement block model.
+
+    Raises:
+        HTTPException: 404 if the page is not found; 500 on engine errors.
+    """
     engine = get_book_engine()
     try:
         block = await engine.supplement_for_weakness(
@@ -448,6 +631,17 @@ async def supplement(req: SupplementRequest) -> dict[str, Any]:
 
 @router.post("/books/page-chat-session")
 async def set_page_chat_session(req: PageChatSessionRequest) -> dict[str, Any]:
+    """Associate a chat session with a book page.
+
+    Args:
+        req: The request containing book, page, and session IDs.
+
+    Returns:
+        A dict containing the updated book model.
+
+    Raises:
+        HTTPException: 404 if the book or page is not found.
+    """
     engine = get_book_engine()
     book = engine.set_page_chat_session(
         book_id=req.book_id,
@@ -461,6 +655,17 @@ async def set_page_chat_session(req: PageChatSessionRequest) -> dict[str, Any]:
 
 @router.post("/books/rebuild")
 async def rebuild_book(req: RebuildBookRequest) -> dict[str, Any]:
+    """Rebuild a book's pages from its spine, optionally auto-compiling.
+
+    Args:
+        req: The rebuild request with book ID and auto-compile flag.
+
+    Returns:
+        A dict containing the list of rebuilt page models.
+
+    Raises:
+        HTTPException: 404 if the book is not found; 500 on engine errors.
+    """
     engine = get_book_engine()
     try:
         pages = await engine.rebuild_book(book_id=req.book_id, auto_compile=req.auto_compile)

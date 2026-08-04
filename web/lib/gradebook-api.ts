@@ -1,5 +1,6 @@
 import { apiFetch, apiUrl } from "@/lib/api";
 
+/** An assignment column in the gradebook. */
 export interface GradebookAssignment {
   id: string;
   title: string;
@@ -7,6 +8,7 @@ export interface GradebookAssignment {
   max_points: number;
 }
 
+/** A student's result on a single assignment. */
 export interface GradebookAssignmentResult {
   assignment_id: string;
   score: number | null;
@@ -14,6 +16,7 @@ export interface GradebookAssignmentResult {
   percentage: number | null;
 }
 
+/** A student's row in the gradebook with per-assignment results. */
 export interface GradebookRow {
   user_id: string;
   username: string;
@@ -26,11 +29,18 @@ export interface GradebookRow {
   completed_at: string;
 }
 
+/** Full gradebook — assignment columns and student rows. */
 export interface Gradebook {
   assignments: GradebookAssignment[];
   rows: GradebookRow[];
 }
 
+/**
+ * Fetch the gradebook for a course unit.
+ *
+ * @param courseUnitId - ID of the course unit.
+ * @returns The gradebook with assignments and student rows.
+ */
 export async function getGradebook(courseUnitId: string): Promise<Gradebook> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/gradebook`),

@@ -89,11 +89,15 @@ CHAT_RESPONSE_TIMEOUT_MAX = 1800
 
 
 class SidebarNavOrder(BaseModel):
+    """Ordered lists of sidebar navigation routes for each section."""
+
     start: List[str]
     learnResearch: List[str]
 
 
 class UISettings(BaseModel):
+    """Persisted UI preferences (theme, language, sidebar, code block options)."""
+
     theme: Literal["light", "dark", "glass", "snow"] = "snow"
     language: Literal["zh", "en"] = "en"
     sidebar_description: Optional[str] = None
@@ -126,44 +130,64 @@ class UISettingsUpdate(BaseModel):
 
 
 class VoiceAutoplayUpdate(BaseModel):
+    """Request body for toggling voice auto-play of chat replies."""
+
     voice_autoplay: bool
 
 
 class ChatResponseTimeoutUpdate(BaseModel):
+    """Request body for updating the chat idle timeout (in seconds)."""
+
     chat_response_timeout: int = Field(ge=CHAT_RESPONSE_TIMEOUT_MIN, le=CHAT_RESPONSE_TIMEOUT_MAX)
 
 
 class ThemeUpdate(BaseModel):
+    """Request body for updating the UI theme."""
+
     theme: Literal["light", "dark", "glass", "snow"]
 
 
 class LanguageUpdate(BaseModel):
+    """Request body for updating the UI language."""
+
     language: Literal["zh", "en"]
 
 
 class SidebarDescriptionUpdate(BaseModel):
+    """Request body for updating the sidebar description text."""
+
     description: str
 
 
 class SidebarNavOrderUpdate(BaseModel):
+    """Request body for updating the sidebar navigation order."""
+
     nav_order: SidebarNavOrder
 
 
 class EnabledToolsUpdate(BaseModel):
+    """Request body for updating the set of user-enabled toggleable tools."""
+
     enabled_tools: List[str]
 
 
 class CatalogPayload(BaseModel):
+    """Request body carrying a full model configuration catalog."""
+
     catalog: dict[str, Any]
 
 
 class FetchModelsPayload(BaseModel):
+    """Request body for fetching available models from a provider endpoint."""
+
     binding: str = ""
     base_url: str
     api_key: Optional[str] = None
 
 
 class NetworkSettingsUpdate(BaseModel):
+    """Request body for updating network-related runtime settings."""
+
     backend_port: int = Field(ge=1, le=65535)
     frontend_port: int = Field(ge=1, le=65535)
     public_api_base: str = ""
@@ -270,6 +294,7 @@ def _invalidate_runtime_caches() -> None:
 
 
 def load_ui_settings() -> dict[str, Any]:
+    """Load UI settings from disk, merging over defaults and sanitizing tools."""
     settings_file = _settings_file()
     if settings_file.exists():
         try:
@@ -318,6 +343,11 @@ def get_enabled_optional_tools() -> list[str]:
 
 
 def save_ui_settings(settings: dict[str, Any]) -> None:
+    """Persist UI settings to the interface settings file.
+
+    Args:
+        settings: The complete UI settings dict to write.
+    """
     settings_file = _settings_file()
     settings_file.parent.mkdir(parents=True, exist_ok=True)
     with open(settings_file, "w", encoding="utf-8") as handle:
@@ -508,6 +538,7 @@ def _network_settings_payload() -> dict[str, Any]:
 
 @router.get("")
 async def get_settings():
+    """Return UI settings for any user; admins also see the catalog and providers."""
     user = get_current_user()
     if not user.is_admin:
         # Non-admins never see the catalog (provider URLs/keys); their model
@@ -522,6 +553,7 @@ async def get_settings():
 
 @router.post("/providers/openai-codex/oauth/start")
 async def start_openai_codex_oauth() -> dict[str, Any]:
+    """Begin the OpenAI Codex OAuth login flow."""
     _require_settings_admin()
     try:
         return await get_codex_oauth_service().start_login()
@@ -531,6 +563,7 @@ async def start_openai_codex_oauth() -> dict[str, Any]:
 
 @router.get("/providers/openai-codex/oauth/status")
 async def get_openai_codex_oauth_status() -> dict[str, Any]:
+    """Return the public status of the OpenAI Codex OAuth flow."""
     _require_settings_admin()
     try:
         return get_codex_oauth_service().public_status()
@@ -540,6 +573,7 @@ async def get_openai_codex_oauth_status() -> dict[str, Any]:
 
 @router.post("/providers/openai-codex/oauth/cancel")
 async def cancel_openai_codex_oauth() -> dict[str, Any]:
+    """Cancel an in-progress OpenAI Codex OAuth login flow."""
     _require_settings_admin()
     try:
         return await get_codex_oauth_service().cancel_login()
@@ -549,6 +583,7 @@ async def cancel_openai_codex_oauth() -> dict[str, Any]:
 
 @router.post("/providers/openai-codex/oauth/logout")
 async def logout_openai_codex_oauth() -> dict[str, Any]:
+    """Log out of the OpenAI Codex OAuth session."""
     _require_settings_admin()
     try:
         return await get_codex_oauth_service().logout()
@@ -558,6 +593,7 @@ async def logout_openai_codex_oauth() -> dict[str, Any]:
 
 @router.post("/providers/openai-codex/models/refresh")
 async def refresh_openai_codex_models() -> dict[str, Any]:
+    """Refresh the cached list of models available via OpenAI Codex OAuth."""
     _require_settings_admin()
     try:
         return await get_codex_oauth_service().refresh_models()
@@ -567,18 +603,28 @@ async def refresh_openai_codex_models() -> dict[str, Any]:
 
 @router.get("/catalog")
 async def get_catalog():
+    """Return the full model configuration catalog (admin only)."""
     _require_settings_admin()
     return {"catalog": get_model_catalog_service().load()}
 
 
 @router.get("/network")
 async def get_network_settings():
+    """Return network-related runtime settings (ports, CORS, auth state)."""
     _require_settings_admin()
     return _network_settings_payload()
 
 
 @router.put("/network")
 async def update_network_settings(payload: NetworkSettingsUpdate):
+    """Update network-related runtime settings (ports, public API base, CORS).
+
+    Args:
+        payload: The network settings update request.
+
+    Returns:
+        The updated network settings payload.
+    """
     _require_settings_admin()
     service = get_runtime_settings_service()
     current = service.load_system(include_process_overrides=False)
@@ -635,6 +681,14 @@ async def get_chat_attachment_settings():
 
 @router.put("/chat-attachments")
 async def update_chat_attachment_settings(payload: ChatAttachmentSettingsUpdate):
+    """Update the chat attachment policy (size caps and extraction budgets).
+
+    Args:
+        payload: The chat attachment settings update request.
+
+    Returns:
+        The updated chat attachment settings payload.
+    """
     _require_settings_admin()
     service = get_runtime_settings_service()
     current = service.load_system(include_process_overrides=False)
@@ -728,12 +782,21 @@ def _document_parsing_payload() -> dict[str, Any]:
 
 @router.get("/mineru")
 async def get_mineru_settings():
+    """Return MinerU PDF-parsing settings with the API token redacted."""
     _require_settings_admin()
     return _mineru_settings_payload()
 
 
 @router.put("/mineru")
 async def update_mineru_settings(payload: MinerUSettingsUpdate):
+    """Update MinerU PDF-parsing settings, preserving the token when untouched.
+
+    Args:
+        payload: The MinerU settings update request.
+
+    Returns:
+        The updated MinerU settings payload with token redacted.
+    """
     _require_settings_admin()
     service = get_runtime_settings_service()
     current = service.load_mineru(include_process_overrides=False)
@@ -762,12 +825,22 @@ async def update_mineru_settings(payload: MinerUSettingsUpdate):
 
 @router.get("/document-parsing")
 async def get_document_parsing_settings():
+    """Return the multi-engine document parsing settings page state."""
     _require_settings_admin()
     return _document_parsing_payload()
 
 
 @router.put("/document-parsing")
 async def update_document_parsing_settings(payload: DocumentParsingUpdate):
+    """Update document-parsing settings, switching the active engine if provided.
+
+    Args:
+        payload: The document parsing update with optional engine and per-engine
+            slices.
+
+    Returns:
+        The updated document parsing settings payload.
+    """
     _require_settings_admin()
     service = get_runtime_settings_service()
     full = service.load_document_parsing(include_process_overrides=False)
@@ -866,6 +939,14 @@ async def start_document_parsing_model_download(payload: DocumentParsingInstall)
 
 @router.get("/document-parsing/job/status")
 async def document_parsing_job_status(cursor: int = 0):
+    """Return the status of a background document-parsing install/download job.
+
+    Args:
+        cursor: Event cursor to fetch events since (exclusive).
+
+    Returns:
+        The job status dict from the background job manager.
+    """
     _require_settings_admin()
     from deeptutor.services.parsing.engines._install import get_background_job_manager
 
@@ -874,6 +955,7 @@ async def document_parsing_job_status(cursor: int = 0):
 
 @router.post("/document-parsing/job/cancel")
 async def cancel_document_parsing_job():
+    """Cancel the currently running document-parsing background job."""
     _require_settings_admin()
     from deeptutor.services.parsing.engines._install import get_background_job_manager
 
@@ -918,6 +1000,14 @@ async def start_mineru_models_download(payload: MinerUModelDownloadPayload):
 
 @router.get("/mineru/models/download/status")
 async def mineru_models_download_status(cursor: int = 0):
+    """Return the status of a MinerU model-weight download job.
+
+    Args:
+        cursor: Event cursor to fetch events since (exclusive).
+
+    Returns:
+        The job status dict from the model download manager.
+    """
     _require_settings_admin()
     from deeptutor.services.parsing.engines.mineru.models import get_model_download_manager
 
@@ -926,6 +1016,7 @@ async def mineru_models_download_status(cursor: int = 0):
 
 @router.post("/mineru/models/download/cancel")
 async def cancel_mineru_models_download():
+    """Cancel the currently running MinerU model-weight download."""
     _require_settings_admin()
     from deeptutor.services.parsing.engines.mineru.models import get_model_download_manager
 
@@ -1004,6 +1095,7 @@ async def test_mineru_connection(payload: MinerUSettingsUpdate):
 
 @router.get("/llm-options")
 async def get_llm_options():
+    """Return available LLM options (grant-filtered for non-admins)."""
     if not get_current_user().is_admin:
         return allowed_llm_options()
     return list_llm_options(get_model_catalog_service().load())
@@ -1011,6 +1103,14 @@ async def get_llm_options():
 
 @router.put("/catalog")
 async def update_catalog(payload: CatalogPayload):
+    """Save the model configuration catalog and reset runtime caches.
+
+    Args:
+        payload: The catalog payload to persist.
+
+    Returns:
+        A dict containing the saved catalog.
+    """
     _require_settings_admin()
     catalog = get_model_catalog_service().save(payload.catalog)
     _invalidate_runtime_caches()
@@ -1019,6 +1119,14 @@ async def update_catalog(payload: CatalogPayload):
 
 @router.post("/apply")
 async def apply_catalog(payload: CatalogPayload | None = None):
+    """Apply the catalog to runtime settings and reset global clients.
+
+    Args:
+        payload: Optional catalog payload; falls back to the stored catalog.
+
+    Returns:
+        A dict with a message, the applied catalog, and runtime settings.
+    """
     _require_settings_admin()
     catalog = payload.catalog if payload is not None else get_model_catalog_service().load()
     applied = get_model_catalog_service().apply(catalog)
@@ -1063,6 +1171,14 @@ async def fetch_models_from_provider(payload: FetchModelsPayload):
 
 @router.put("/theme")
 async def update_theme(update: ThemeUpdate):
+    """Persist the UI theme preference.
+
+    Args:
+        update: The theme update request.
+
+    Returns:
+        A dict confirming the updated theme.
+    """
     current_ui = load_ui_settings()
     current_ui["theme"] = update.theme
     save_ui_settings(current_ui)
@@ -1071,6 +1187,14 @@ async def update_theme(update: ThemeUpdate):
 
 @router.put("/language")
 async def update_language(update: LanguageUpdate):
+    """Persist the UI language preference.
+
+    Args:
+        update: The language update request.
+
+    Returns:
+        A dict confirming the updated language.
+    """
     current_ui = load_ui_settings()
     current_ui["language"] = update.language
     save_ui_settings(current_ui)
@@ -1121,12 +1245,14 @@ async def update_ui_settings(update: UISettingsUpdate):
 
 @router.post("/reset")
 async def reset_settings():
+    """Reset all UI settings to their defaults."""
     save_ui_settings(DEFAULT_UI_SETTINGS)
     return DEFAULT_UI_SETTINGS
 
 
 @router.get("/themes")
 async def get_themes():
+    """Return the list of available UI themes."""
     return {
         "themes": [
             {"id": "snow", "name": "Default"},
@@ -1139,6 +1265,7 @@ async def get_themes():
 
 @router.get("/sidebar")
 async def get_sidebar_settings():
+    """Return the sidebar description and navigation order."""
     current_ui = load_ui_settings()
     return {
         "description": current_ui.get(
@@ -1150,6 +1277,14 @@ async def get_sidebar_settings():
 
 @router.put("/sidebar/description")
 async def update_sidebar_description(update: SidebarDescriptionUpdate):
+    """Persist the sidebar description text.
+
+    Args:
+        update: The sidebar description update request.
+
+    Returns:
+        A dict confirming the updated description.
+    """
     current_ui = load_ui_settings()
     current_ui["sidebar_description"] = update.description
     save_ui_settings(current_ui)
@@ -1158,6 +1293,14 @@ async def update_sidebar_description(update: SidebarDescriptionUpdate):
 
 @router.put("/sidebar/nav-order")
 async def update_sidebar_nav_order(update: SidebarNavOrderUpdate):
+    """Persist the sidebar navigation order.
+
+    Args:
+        update: The sidebar nav order update request.
+
+    Returns:
+        A dict confirming the updated navigation order.
+    """
     current_ui = load_ui_settings()
     current_ui["sidebar_nav_order"] = update.nav_order.model_dump()
     save_ui_settings(current_ui)
@@ -1166,6 +1309,14 @@ async def update_sidebar_nav_order(update: SidebarNavOrderUpdate):
 
 @router.put("/enabled-tools")
 async def update_enabled_tools(update: EnabledToolsUpdate):
+    """Persist the set of user-enabled toggleable tools.
+
+    Args:
+        update: The enabled tools update request.
+
+    Returns:
+        A dict with the sanitized list of enabled optional tools.
+    """
     sanitized = _sanitize_enabled_tools(update.enabled_tools)
     current_ui = load_ui_settings()
     current_ui["enabled_optional_tools"] = sanitized
@@ -1175,6 +1326,15 @@ async def update_enabled_tools(update: EnabledToolsUpdate):
 
 @router.post("/tests/{service}/start")
 async def start_service_test(service: str, payload: CatalogPayload | None = None):
+    """Start a streamed readiness test for a configured service.
+
+    Args:
+        service: The service name to test (e.g. ``llm``, ``embedding``).
+        payload: Optional catalog payload to test against.
+
+    Returns:
+        A dict with the run_id for polling test events.
+    """
     _require_settings_admin()
     run = get_config_test_runner().start(service, payload.catalog if payload else None)
     return {"run_id": run.id}
@@ -1182,6 +1342,16 @@ async def start_service_test(service: str, payload: CatalogPayload | None = None
 
 @router.get("/tests/{service}/{run_id}/events")
 async def stream_service_test_events(service: str, run_id: str, request: Request):
+    """Stream test events for a running service test as server-sent events.
+
+    Args:
+        service: The service name being tested.
+        run_id: The unique identifier of the test run.
+        request: The incoming HTTP request (used for disconnect detection).
+
+    Returns:
+        A StreamingResponse yielding SSE-formatted test events.
+    """
     _require_settings_admin()
     runner = get_config_test_runner()
     run = runner.get(run_id)
@@ -1207,6 +1377,15 @@ async def stream_service_test_events(service: str, run_id: str, request: Request
 
 @router.post("/tests/{service}/{run_id}/cancel")
 async def cancel_service_test(service: str, run_id: str):
+    """Cancel a running service test.
+
+    Args:
+        service: The service name being tested.
+        run_id: The unique identifier of the test run.
+
+    Returns:
+        A dict with a cancellation message.
+    """
     _require_settings_admin()
     get_config_test_runner().cancel(run_id)
     return {"message": "Cancelled"}
@@ -1214,6 +1393,7 @@ async def cancel_service_test(service: str, run_id: str):
 
 @router.get("/tour/status")
 async def tour_status():
+    """Return the onboarding tour status from the tour cache file."""
     tour_cache = _tour_cache_file()
     if tour_cache.exists():
         try:
@@ -1230,12 +1410,22 @@ async def tour_status():
 
 
 class TourCompletePayload(BaseModel):
+    """Request body for completing the onboarding tour with optional catalog."""
+
     catalog: dict[str, Any] | None = None
     test_results: dict[str, str] | None = None
 
 
 @router.post("/tour/complete")
 async def complete_tour(payload: TourCompletePayload | None = None):
+    """Apply the tour configuration, persist tour completion, and schedule restart.
+
+    Args:
+        payload: Optional tour completion payload with catalog and test results.
+
+    Returns:
+        A dict with completion status, restart timing, and applied runtime.
+    """
     _require_settings_admin()
     catalog = payload.catalog if payload and payload.catalog else get_model_catalog_service().load()
     applied = get_model_catalog_service().apply(catalog)
@@ -1268,6 +1458,7 @@ async def complete_tour(payload: TourCompletePayload | None = None):
 
 @router.post("/tour/reopen")
 async def reopen_tour():
+    """Return instructions for re-opening the guided setup tour."""
     return {
         "message": "Run the terminal setup guide from the project root to re-open the guided setup.",
         "command": "deeptutor init",

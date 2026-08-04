@@ -1,3 +1,4 @@
+/** Canonical quiz question type after normalization. */
 export type NormalizedQuizQuestionType =
   | "choice"
   | "concept"
@@ -6,6 +7,7 @@ export type NormalizedQuizQuestionType =
   | "written"
   | "coding";
 
+/** All supported normalized quiz question types. */
 export const QUIZ_QUESTION_TYPES: ReadonlyArray<NormalizedQuizQuestionType> = [
   "choice",
   "concept",
@@ -42,6 +44,9 @@ const QUESTION_TYPE_ALIASES: Record<string, NormalizedQuizQuestionType> = {
   programming: "coding",
 };
 
+/** Normalize a raw question-type string into a canonical type.
+ * @param value - The raw type string (case-insensitive, various aliases).
+ * @returns The normalized type (defaults to "short_answer"). */
 export function normalizeQuizQuestionType(
   value: unknown,
 ): NormalizedQuizQuestionType {
@@ -52,23 +57,39 @@ export function normalizeQuizQuestionType(
   return QUESTION_TYPE_ALIASES[normalized] || "short_answer";
 }
 
+/** Check whether a question type normalizes to "choice".
+ * @param value - The raw type string.
+ * @returns True if the type is a multiple-choice variant. */
 export function isChoiceQuizQuestion(value: unknown): boolean {
   return normalizeQuizQuestionType(value) === "choice";
 }
 
+/** Check whether a question type normalizes to "concept" (true/false).
+ * @param value - The raw type string.
+ * @returns True if the type is a concept/true-false variant. */
 export function isConceptQuizQuestion(value: unknown): boolean {
   return normalizeQuizQuestionType(value) === "concept";
 }
 
+/** Check whether a question type normalizes to "fill_in_blank".
+ * @param value - The raw type string.
+ * @returns True if the type is a fill-in-the-blank variant. */
 export function isFillInBlankQuizQuestion(value: unknown): boolean {
   return normalizeQuizQuestionType(value) === "fill_in_blank";
 }
 
+/** Check whether a question type is free-text (short answer, essay, or coding).
+ * @param value - The raw type string.
+ * @returns True if the type accepts free-text answers. */
 export function isFreeTextQuizQuestion(value: unknown): boolean {
   const t = normalizeQuizQuestionType(value);
   return t === "short_answer" || t === "written" || t === "coding";
 }
 
+/** Resolve the option key (A, B, …) for a choice question's correct answer.
+ * @param correctAnswer - The correct answer (key or label text).
+ * @param options - The question's option map.
+ * @returns The uppercase option key, or empty string if unresolvable. */
 export function resolveChoiceAnswerKey(
   correctAnswer: unknown,
   options: Record<string, string> | null | undefined,

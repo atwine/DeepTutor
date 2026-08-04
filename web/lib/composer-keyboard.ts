@@ -1,3 +1,4 @@
+/** Minimal keyboard event shape needed for submit/IME detection. */
 export interface KeyboardSubmitEventLike {
   key: string;
   shiftKey?: boolean;
@@ -13,6 +14,13 @@ export interface KeyboardSubmitEventLike {
 
 const IME_PROCESS_KEY_CODE = 229;
 
+/**
+ * Detect whether a keyboard event is part of an IME composition sequence.
+ *
+ * @param event - The keyboard event to inspect.
+ * @param compositionActive - Whether an IME composition is currently in progress.
+ * @returns True if the event is part of an IME composition.
+ */
 export function isImeComposing(
   event: KeyboardSubmitEventLike,
   compositionActive = false,
@@ -29,6 +37,15 @@ export function isImeComposing(
   );
 }
 
+/**
+ * Determine whether an Enter keypress should submit the composer.
+ *
+ * Returns true only for a bare Enter (no Shift) outside of an IME composition.
+ *
+ * @param event - The keyboard event to inspect.
+ * @param compositionActive - Whether an IME composition is currently in progress.
+ * @returns True if the event should trigger a submit.
+ */
 export function shouldSubmitOnEnter(
   event: KeyboardSubmitEventLike,
   compositionActive = false,

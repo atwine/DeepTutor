@@ -20,6 +20,11 @@ class NotebookSummarizeAgent:
     """Generate concise summaries for notebook records."""
 
     def __init__(self, language: str = "en") -> None:
+        """Initialize the notebook summarize agent with LLM config and prompts.
+
+        Args:
+            language: Language code (``"zh"`` or ``"en"``).
+        """
         self.language = "zh" if str(language or "en").lower().startswith("zh") else "en"
         self.llm_config = get_llm_config()
         self.model = getattr(self.llm_config, "model", None)
@@ -44,6 +49,18 @@ class NotebookSummarizeAgent:
         output: str,
         metadata: dict | None = None,
     ) -> str:
+        """Generate a concise summary for a notebook record.
+
+        Args:
+            title: The record title.
+            record_type: The type of the notebook record.
+            user_query: The user's query that triggered the summary.
+            output: The raw output content to summarize.
+            metadata: Optional metadata dict associated with the record.
+
+        Returns:
+            The cleaned summary text.
+        """
         chunks: list[str] = []
         async for chunk in self.stream_summary(
             title=title,
@@ -65,6 +82,18 @@ class NotebookSummarizeAgent:
         output: str,
         metadata: dict | None = None,
     ) -> AsyncGenerator[str, None]:
+        """Stream a concise summary for a notebook record chunk by chunk.
+
+        Args:
+            title: The record title.
+            record_type: The type of the notebook record.
+            user_query: The user's query that triggered the summary.
+            output: The raw output content to summarize.
+            metadata: Optional metadata dict associated with the record.
+
+        Yields:
+            Summary text chunks as they are generated.
+        """
         prompt = self._build_user_prompt(
             title=title,
             record_type=record_type,

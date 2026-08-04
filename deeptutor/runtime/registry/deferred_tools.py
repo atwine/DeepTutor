@@ -123,6 +123,15 @@ class DeferredToolLoader:
         loaded: set[str],
         allowed: set[str] | None = None,
     ) -> None:
+        """Initialise the loader for a single turn.
+
+        Args:
+            registry: Tool lookup used to resolve deferred tool definitions.
+            session_id: Chat session id, used to persist loaded tool names.
+            loaded: Tool names already loaded in this session.
+            allowed: Optional set restricting which deferred tools may be
+                loaded. ``None`` means every deferred tool is loadable.
+        """
         self._registry = registry
         self._session_id = session_id
         self._loaded = set(loaded)
@@ -138,6 +147,7 @@ class DeferredToolLoader:
 
     @property
     def loaded_names(self) -> set[str]:
+        """Names of tools currently loaded in this session."""
         return set(self._loaded)
 
     def bind_live_schemas(self, schemas: list[dict[str, Any]]) -> None:

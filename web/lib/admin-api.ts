@@ -1,7 +1,9 @@
 import { apiFetch, apiUrl } from "@/lib/api";
 
+/** Role assigned to a user account within the multi-user system. */
 export type UserRole = "admin" | "instructor" | "user";
 
+/** A user account record as returned by the admin users API. */
 export interface UserRecord {
   id: string;
   username: string;
@@ -18,12 +20,22 @@ export interface UserRecord {
   course?: string;
 }
 
+/**
+ * Fetch the list of all user accounts.
+ *
+ * @returns Array of user records.
+ */
 export async function listUsers(): Promise<UserRecord[]> {
   const res = await apiFetch(apiUrl("/api/v1/auth/users"));
   if (!res.ok) throw new Error("Failed to fetch users");
   return res.json();
 }
 
+/**
+ * Delete a user account by username.
+ *
+ * @param username - Username of the account to delete.
+ */
 export async function deleteUser(username: string): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/auth/users/${encodeURIComponent(username)}`),
@@ -37,6 +49,12 @@ export async function deleteUser(username: string): Promise<void> {
   }
 }
 
+/**
+ * Set the role for a user account.
+ *
+ * @param username - Username of the account to update.
+ * @param role - New role to assign.
+ */
 export async function setUserRole(
   username: string,
   role: UserRole,
@@ -55,6 +73,7 @@ export async function setUserRole(
   }
 }
 
+/** Result returned after creating a new user account. */
 export interface CreatedUser {
   user_id: string;
   username: string;
@@ -62,6 +81,13 @@ export interface CreatedUser {
   is_admin: boolean;
 }
 
+/**
+ * Create a new user account.
+ *
+ * @param username - Username for the new account.
+ * @param password - Password for the new account.
+ * @returns The created user record.
+ */
 export async function createUser(
   username: string,
   password: string,
@@ -108,6 +134,7 @@ export async function setUserDisabled(
 // Issue #33: Admin student dashboard
 // ---------------------------------------------------------------------------
 
+/** Aggregate statistics for the admin student dashboard. */
 export interface StudentOverviewStats {
   total_students: number;
   active_students: number;
@@ -119,6 +146,7 @@ export interface StudentOverviewStats {
   completion_rate: number;
 }
 
+/** A single student row in the admin dashboard overview. */
 export interface StudentOverviewRow {
   id: string;
   username: string;
@@ -137,12 +165,18 @@ export interface StudentOverviewRow {
   completion_summary: { completed: number; total: number };
 }
 
+/** Response payload for the students overview endpoint. */
 export interface StudentsOverviewResponse {
   stats: StudentOverviewStats;
   course_options: string[];
   students: StudentOverviewRow[];
 }
 
+/**
+ * Fetch the admin student dashboard overview.
+ *
+ * @returns Aggregate stats and per-student rows.
+ */
 export async function getStudentsOverview(): Promise<StudentsOverviewResponse> {
   const res = await apiFetch(
     apiUrl("/api/v1/multi-user/admin/students/overview"),

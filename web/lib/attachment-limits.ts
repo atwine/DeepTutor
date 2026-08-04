@@ -25,6 +25,7 @@ export interface AttachmentLimits {
   maxTotalBytes: number;
 }
 
+/** Default attachment limits used before the backend policy is fetched. */
 export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = {
   maxFileBytes: DEFAULT_MAX_ATTACHMENT_BYTES,
   maxTotalBytes: DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES,

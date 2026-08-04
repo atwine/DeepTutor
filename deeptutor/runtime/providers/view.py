@@ -53,6 +53,7 @@ class ProviderToolView:
 
     @classmethod
     def empty(cls, registry: ToolLookup) -> "ProviderToolView":
+        """Build a view with no external tools, loader, or manifest."""
         return cls(registry=registry, loader=None, pool=(), manifest="")
 
     def attach(self, tool_schemas: list[dict[str, Any]]) -> None:

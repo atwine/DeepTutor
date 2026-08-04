@@ -13,8 +13,10 @@
  * styling. New code should call `notify()` rather than start a fourth.
  */
 
+/** Visual tone of a toast notification. */
 export type NotificationTone = "info" | "success" | "error";
 
+/** A toast notification dispatched to all subscribers. */
 export interface Notification {
   id: number;
   message: string;
@@ -27,6 +29,9 @@ type Listener = (n: Notification) => void;
 const listeners = new Set<Listener>();
 let counter = 0;
 
+/** Emit a toast notification to all subscribers.
+ * @param message - The message text (empty string is a no-op).
+ * @param options - Optional tone and duration override. */
 export function notify(
   message: string,
   options: { tone?: NotificationTone; durationMs?: number } = {},
@@ -48,6 +53,9 @@ export function notify(
   }
 }
 
+/** Subscribe to toast notifications.
+ * @param listener - Callback invoked for each emitted notification.
+ * @returns Unsubscribe function. */
 export function subscribeNotifications(listener: Listener): () => void {
   listeners.add(listener);
   return () => {

@@ -14,6 +14,7 @@ import { wsUrl } from "./api";
 
 // ---- StreamEvent types (mirror Python StreamEventType) ----
 
+/** All possible stream event types (mirrors the Python StreamEventType). */
 export type StreamEventType =
   | "stage_start"
   | "stage_end"
@@ -30,6 +31,7 @@ export type StreamEventType =
   | "session_meta"
   | "done";
 
+/** A single streamed event from the unified WebSocket. */
 export interface StreamEvent {
   type: StreamEventType;
   source: string;
@@ -42,6 +44,7 @@ export interface StreamEvent {
   timestamp: number;
 }
 
+/** Selected LLM profile and model for a turn. */
 export interface LLMSelection {
   profile_id: string;
   model_id: string;
@@ -49,6 +52,7 @@ export interface LLMSelection {
 
 // ---- Client message ----
 
+/** Client message to start a new turn or send a user message. */
 export interface StartTurnMessage {
   type: "message" | "start_turn";
   content: string;
@@ -83,35 +87,41 @@ export interface StartTurnMessage {
   parent_message_id?: number | null;
 }
 
+/** Client message to subscribe to a specific turn's events. */
 export interface SubscribeTurnMessage {
   type: "subscribe_turn";
   turn_id: string;
   after_seq?: number;
 }
 
+/** Client message to subscribe to all events for a session. */
 export interface SubscribeSessionMessage {
   type: "subscribe_session";
   session_id: string;
   after_seq?: number;
 }
 
+/** Client message to resume a turn's stream after reconnection. */
 export interface ResumeTurnMessage {
   type: "resume_from";
   turn_id: string;
   seq?: number;
 }
 
+/** Client message to unsubscribe from a turn or session. */
 export interface UnsubscribeMessage {
   type: "unsubscribe";
   turn_id?: string;
   session_id?: string;
 }
 
+/** Client message to cancel an in-flight turn. */
 export interface CancelTurnMessage {
   type: "cancel_turn";
   turn_id: string;
 }
 
+/** Client message to regenerate the last assistant turn. */
 export interface RegenerateMessage {
   type: "regenerate";
   session_id: string;
@@ -135,6 +145,7 @@ export interface SubmitUserReplyMessage {
   answers?: Array<{ questionId: string; text: string }>;
 }
 
+/** Union of all client-to-server WebSocket messages. */
 export type ChatMessage =
   | StartTurnMessage
   | SubscribeTurnMessage
@@ -147,6 +158,7 @@ export type ChatMessage =
 
 // ---- Connection manager ----
 
+/** Callback type for handling incoming stream events. */
 export type EventHandler = (event: StreamEvent) => void;
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -154,6 +166,7 @@ const HEARTBEAT_TIMEOUT_MS = 45_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const BASE_RECONNECT_DELAY_MS = 200;
 
+/** WebSocket client for the unified `/api/v1/ws` endpoint with heartbeat and auto-reconnect. */
 export class UnifiedWSClient {
   private ws: WebSocket | null = null;
   private onEvent: EventHandler;
@@ -180,6 +193,7 @@ export class UnifiedWSClient {
     this.lastSeq = seq;
   }
 
+  /** Open the WebSocket connection (no-op if already open). */
   connect(): void {
     if (this.ws && this.ws.readyState <= WebSocket.OPEN) return;
     this.intentionalClose = false;
@@ -233,6 +247,8 @@ export class UnifiedWSClient {
     };
   }
 
+  /** Send a chat message over the WebSocket (no-op if not connected).
+   * @param msg - The message to send. */
   send(msg: ChatMessage): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.error("WebSocket not connected");
@@ -241,6 +257,7 @@ export class UnifiedWSClient {
     this.ws.send(JSON.stringify(msg));
   }
 
+  /** Intentionally close the connection and stop reconnection attempts. */
   disconnect(): void {
     this.intentionalClose = true;
     this.stopHeartbeat();
@@ -250,6 +267,7 @@ export class UnifiedWSClient {
     this.resetResumeState();
   }
 
+  /** Whether the WebSocket is currently in the OPEN state. */
   get connected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
   }

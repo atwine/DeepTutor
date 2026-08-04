@@ -192,6 +192,12 @@ function injectEditorMdTableOfContents(content: string): string {
   return content.replace(/^\[TOCM?\]\s*$/gim, toc);
 }
 
+/**
+ * Convert a flowchart.js fence body into a Mermaid flowchart definition.
+ *
+ * @param source - Raw flowchart.js source text.
+ * @returns Mermaid flowchart string, or null if the source is not a valid flowchart.
+ */
 export function convertFlowFenceToMermaid(source: string): string | null {
   const lines = source
     .split("\n")
@@ -262,6 +268,12 @@ export function convertFlowFenceToMermaid(source: string): string | null {
   return ["flowchart TD", ...nodeDefs, ...edges].join("\n");
 }
 
+/**
+ * Convert a sequence-diagram fence body into a Mermaid sequenceDiagram definition.
+ *
+ * @param source - Raw sequence diagram source text.
+ * @returns Mermaid sequenceDiagram string, or null if the source is not a valid sequence diagram.
+ */
 export function convertSequenceFenceToMermaid(source: string): string | null {
   const lines = source
     .split("\n")
@@ -361,6 +373,14 @@ export function processLatexContent(content: string): string {
   return convertLatexDelimiters(str);
 }
 
+/**
+ * Process markdown content for rendering — normalizes editor.md quirks,
+ * converts flow/sequence fences to Mermaid, injects a table of contents,
+ * and converts LaTeX delimiters.
+ *
+ * @param content - Raw markdown content to process.
+ * @returns Processed markdown ready for ReactMarkdown with remark-math.
+ */
 export function processMarkdownContent(content: string): string {
   if (!content) return "";
 

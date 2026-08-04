@@ -12,6 +12,8 @@ from ..utils import build_repair_error_message, extract_json_object
 
 
 class CodeGeneratorAgent(BaseAgent):
+    """Generates and repairs Manim source code for math animations."""
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -19,6 +21,14 @@ class CodeGeneratorAgent(BaseAgent):
         api_version: str | None = None,
         language: str = "zh",
     ) -> None:
+        """Initialize the code generator agent.
+
+        Args:
+            api_key: LLM provider API key.
+            base_url: LLM provider base URL.
+            api_version: API version for Azure OpenAI (optional).
+            language: Language code (``"zh"`` or ``"en"``).
+        """
         super().__init__(
             module_name="math_animator",
             agent_name="code_generator_agent",
@@ -55,6 +65,21 @@ class CodeGeneratorAgent(BaseAgent):
         design: SceneDesign,
         duration_target_seconds: float | None = None,
     ) -> GeneratedCode:
+        """Generate Manim source code from the analysis and design.
+
+        Args:
+            user_input: The user's animation request text.
+            output_mode: Either ``"video"`` or ``"image"``.
+            analysis: The concept analysis result.
+            design: The scene design result.
+            duration_target_seconds: Optional target animation duration in seconds.
+
+        Returns:
+            A :class:`GeneratedCode` instance with the Manim source.
+
+        Raises:
+            ValueError: If the generation prompts are not configured.
+        """
         system_prompt = self.get_prompt("generate_system")
         user_template = self.get_prompt("generate_user_template")
         if not system_prompt or not user_template:
@@ -100,6 +125,22 @@ class CodeGeneratorAgent(BaseAgent):
         attempt: int,
         duration_target_seconds: float | None = None,
     ) -> GeneratedCode:
+        """Generate repaired Manim code based on a render error.
+
+        Args:
+            user_input: The user's animation request text.
+            output_mode: Either ``"video"`` or ``"image"``.
+            current_code: The Manim code that failed to render.
+            error_message: The error message from the failed render.
+            attempt: The retry attempt number (1-based).
+            duration_target_seconds: Optional target animation duration in seconds.
+
+        Returns:
+            A :class:`GeneratedCode` instance with the repaired Manim source.
+
+        Raises:
+            ValueError: If the retry prompts are not configured.
+        """
         system_prompt = self.get_prompt("retry_system")
         user_template = self.get_prompt("retry_user_template")
         if not system_prompt or not user_template:

@@ -1,5 +1,6 @@
 // Shared types used by Notebook reference pickers.
 
+/** A notebook entry shown in the reference picker. */
 export interface Notebook {
   id: string;
   name: string;
@@ -8,6 +9,7 @@ export interface Notebook {
   color: string;
 }
 
+/** A single record inside a notebook, shown in the picker. */
 export interface NotebookRecord {
   id: string;
   title: string;
@@ -17,11 +19,15 @@ export interface NotebookRecord {
   type: string;
 }
 
+/** A notebook record the user has picked, annotated with its parent notebook. */
 export interface SelectedRecord extends NotebookRecord {
   notebookId: string;
   notebookName: string;
 }
 
+/** Return Tailwind class string for a record type's badge color.
+ * @param type - The record type (solve, question, research, chat, co_writer).
+ * @returns Tailwind background/text/border classes for the badge. */
 export function getTypeColor(type: string): string {
   switch (type) {
     case "solve":

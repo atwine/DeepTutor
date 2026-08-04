@@ -8,11 +8,29 @@ from deeptutor.agents._shared.json_output import extract_json_object
 
 
 def slugify_filename(value: str, fallback: str) -> str:
+    """Convert a string into a safe filename, falling back if the result is empty.
+
+    Args:
+        value: The string to slugify.
+        fallback: Fallback filename when the slugified result is empty.
+
+    Returns:
+        A filesystem-safe filename string.
+    """
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", (value or "").strip()).strip("-")
     return cleaned or fallback
 
 
 def trim_error_message(stderr: str, limit: int = 1200) -> str:
+    """Trim an error message to the last ``limit`` characters.
+
+    Args:
+        stderr: The raw stderr output to trim.
+        limit: Maximum number of characters to keep.
+
+    Returns:
+        The trimmed error message string.
+    """
     text = (stderr or "").strip()
     if len(text) <= limit:
         return text
@@ -20,6 +38,14 @@ def trim_error_message(stderr: str, limit: int = 1200) -> str:
 
 
 def build_repair_error_message(error_message: str) -> str:
+    """Augment an error message with targeted repair hints for known Manim issues.
+
+    Args:
+        error_message: The raw error message from a failed render.
+
+    Returns:
+        The error message, optionally appended with targeted repair hints.
+    """
     text = (error_message or "").strip()
     lowered = text.lower()
     hints: list[str] = []

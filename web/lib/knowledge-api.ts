@@ -3,6 +3,7 @@ import { invalidateClientCache, withClientCache } from "@/lib/client-cache";
 
 const KNOWLEDGE_CACHE_PREFIX = "knowledge:";
 
+/** Summary of a knowledge base — its name, status, and metadata. */
 export interface KnowledgeBaseSummary {
   id?: string;
   name: string;
@@ -19,6 +20,7 @@ export interface KnowledgeBaseSummary {
   available?: boolean;
 }
 
+/** Summary of a RAG provider engine — its capabilities and configuration state. */
 export interface RagProviderSummary {
   id: string;
   name: string;
@@ -35,12 +37,14 @@ export interface RagProviderSummary {
   linkable?: boolean;
 }
 
+/** PageIndex engine configuration — API base URL and key status. */
 export interface PageIndexConfig {
   api_base_url: string;
   api_key_set: boolean;
   configured: boolean;
 }
 
+/** LlamaIndex engine configuration — retrieval profile, chunk geometry, and top-k settings. */
 export interface LlamaIndexConfig {
   version: number;
   /** "hybrid" (BM25 + vector fusion) or "vector" only. */
@@ -54,6 +58,7 @@ export interface LlamaIndexConfig {
   chunk_overlap: number;
 }
 
+/** GraphRAG engine configuration — response type and community settings. */
 export interface GraphRagConfig {
   version: number;
   response_type: string;
@@ -61,12 +66,14 @@ export interface GraphRagConfig {
   dynamic_community_selection: boolean;
 }
 
+/** LightRAG engine configuration — top-k and response type. */
 export interface LightRagConfig {
   version: number;
   top_k: number;
   response_type: string;
 }
 
+/** A single preflight check item for an engine's environment readiness. */
 export interface PreflightCheck {
   key: string;
   label: string;
@@ -76,11 +83,13 @@ export interface PreflightCheck {
   optional: boolean;
 }
 
+/** Preflight check result for an engine — overall ok status and individual checks. */
 export interface EnginePreflight {
   ok: boolean;
   checks: PreflightCheck[];
 }
 
+/** A selectable model option for an engine service kind. */
 export interface ModelOption {
   profile_id: string;
   profile_name: string;
@@ -90,6 +99,7 @@ export interface ModelOption {
   detail: string;
 }
 
+/** Active model selection and available options for one service kind. */
 export interface ModelKindOptions {
   active: { profile_id: string | null; model_id: string | null };
   options: ModelOption[];
@@ -98,12 +108,14 @@ export interface ModelKindOptions {
 /** Map of service kind ("llm" | "embedding") → its options + active selection. */
 export type ModelOptionsByKind = Record<string, ModelKindOptions>;
 
+/** Upload policy — allowed extensions, accept string, and max file size. */
 export interface KnowledgeUploadPolicy {
   extensions: string[];
   accept: string;
   max_file_size_bytes: number;
 }
 
+/** A file or folder entry within a knowledge base's raw/ directory. */
 export interface KnowledgeBaseFile {
   /** POSIX path relative to the KB's raw/ root (may include folders). */
   name: string;
@@ -163,6 +175,12 @@ function normalizeUploadPolicy(data: unknown): KnowledgeUploadPolicy {
   };
 }
 
+/**
+ * List all knowledge bases via the API, with optional cache bypass.
+ *
+ * @param options - Optional `force` to bypass the client cache.
+ * @returns Array of knowledge base summaries.
+ */
 export async function listKnowledgeBases(options?: { force?: boolean }) {
   return withClientCache<KnowledgeBaseSummary[]>(
     `${KNOWLEDGE_CACHE_PREFIX}list`,
@@ -183,6 +201,12 @@ export async function listKnowledgeBases(options?: { force?: boolean }) {
   );
 }
 
+/**
+ * List all available RAG providers, with optional cache bypass.
+ *
+ * @param options - Optional `force` to bypass the client cache.
+ * @returns Array of RAG provider summaries.
+ */
 export async function listRagProviders(options?: { force?: boolean }) {
   return withClientCache<RagProviderSummary[]>(
     `${KNOWLEDGE_CACHE_PREFIX}providers`,
@@ -202,6 +226,12 @@ export async function listRagProviders(options?: { force?: boolean }) {
   );
 }
 
+/**
+ * Fetch the knowledge upload policy (allowed extensions, accept string, max size).
+ *
+ * @param options - Optional `force` to bypass the client cache.
+ * @returns Normalized upload policy.
+ */
 export async function getKnowledgeUploadPolicy(options?: { force?: boolean }) {
   return withClientCache<KnowledgeUploadPolicy>(
     `${KNOWLEDGE_CACHE_PREFIX}upload-policy`,
@@ -221,6 +251,7 @@ export async function getKnowledgeUploadPolicy(options?: { force?: boolean }) {
   );
 }
 
+/** Invalidate all client-cached knowledge API responses. */
 export function invalidateKnowledgeCaches() {
   invalidateClientCache(KNOWLEDGE_CACHE_PREFIX);
 }
@@ -228,6 +259,12 @@ export function invalidateKnowledgeCaches() {
 const PAGEINDEX_CONFIG_PATH =
   "/api/v1/knowledge/rag-pipelines/pageindex/config";
 
+/**
+ * Fetch the PageIndex engine configuration.
+ *
+ * @param options - Optional `force` to bypass the client cache.
+ * @returns PageIndex configuration.
+ */
 export async function getPageIndexConfig(options?: {
   force?: boolean;
 }): Promise<PageIndexConfig> {
@@ -248,6 +285,12 @@ export async function getPageIndexConfig(options?: {
   );
 }
 
+/**
+ * Update the PageIndex engine configuration.
+ *
+ * @param payload - Partial config with optional API key and base URL.
+ * @returns Updated PageIndex configuration.
+ */
 export async function updatePageIndexConfig(payload: {
   /** Omit to keep the stored key, "" to clear it, any value to replace it. */
   api_key?: string;
@@ -271,6 +314,12 @@ export async function updatePageIndexConfig(payload: {
 const LLAMAINDEX_CONFIG_PATH =
   "/api/v1/knowledge/rag-pipelines/llamaindex/config";
 
+/**
+ * Fetch the LlamaIndex engine configuration.
+ *
+ * @param options - Optional `force` to bypass the client cache.
+ * @returns LlamaIndex configuration.
+ */
 export async function getLlamaIndexConfig(options?: {
   force?: boolean;
 }): Promise<LlamaIndexConfig> {
@@ -291,6 +340,12 @@ export async function getLlamaIndexConfig(options?: {
   );
 }
 
+/**
+ * Update the LlamaIndex engine configuration.
+ *
+ * @param payload - Partial config (version is server-managed and omitted).
+ * @returns Updated LlamaIndex configuration.
+ */
 export async function updateLlamaIndexConfig(
   payload: Partial<Omit<LlamaIndexConfig, "version">>,
 ): Promise<LlamaIndexConfig> {
@@ -352,18 +407,28 @@ async function updateEngineConfig<T>(
   return (await res.json()) as T;
 }
 
+/** Fetch the GraphRAG engine configuration. Thin wrapper around `getEngineConfig`. */
 export const getGraphRagConfig = (options?: { force?: boolean }) =>
   getEngineConfig<GraphRagConfig>("graphrag", "graphrag-config", options);
+/** Update the GraphRAG engine configuration. Thin wrapper around `updateEngineConfig`. */
 export const updateGraphRagConfig = (
   payload: Partial<Omit<GraphRagConfig, "version">>,
 ) => updateEngineConfig<GraphRagConfig>("graphrag", payload);
 
+/** Fetch the LightRAG engine configuration. Thin wrapper around `getEngineConfig`. */
 export const getLightRagConfig = (options?: { force?: boolean }) =>
   getEngineConfig<LightRagConfig>("lightrag", "lightrag-config", options);
+/** Update the LightRAG engine configuration. Thin wrapper around `updateEngineConfig`. */
 export const updateLightRagConfig = (
   payload: Partial<Omit<LightRagConfig, "version">>,
 ) => updateEngineConfig<LightRagConfig>("lightrag", payload);
 
+/**
+ * Run preflight environment checks for a RAG provider engine.
+ *
+ * @param provider - Engine provider identifier (e.g. "pageindex", "llamaindex").
+ * @returns Preflight result with overall ok status and individual checks.
+ */
 export async function getEnginePreflight(
   provider: string,
 ): Promise<EnginePreflight> {
@@ -377,6 +442,12 @@ export async function getEnginePreflight(
   return (await res.json()) as EnginePreflight;
 }
 
+/**
+ * Fetch available model options for the given service kinds.
+ *
+ * @param kinds - Service kinds to query (e.g. "llm", "embedding").
+ * @returns Map of service kind to its options and active selection.
+ */
 export async function getEngineModelOptions(
   kinds: string[],
 ): Promise<ModelOptionsByKind> {
@@ -394,6 +465,14 @@ export async function getEngineModelOptions(
   return (await res.json()) as ModelOptionsByKind;
 }
 
+/**
+ * Set the active model for a given service kind.
+ *
+ * @param kind - Service kind (e.g. "llm", "embedding").
+ * @param profileId - Profile identifier for the model.
+ * @param modelId - Model identifier.
+ * @returns Updated options and active selection for the service kind.
+ */
 export async function setEngineActiveModel(
   kind: string,
   profileId: string,
@@ -414,6 +493,13 @@ export async function setEngineActiveModel(
   return (await res.json()) as ModelKindOptions;
 }
 
+/**
+ * Update the active retrieval mode for a RAG provider.
+ *
+ * @param provider - Engine provider identifier.
+ * @param mode - Retrieval mode to set.
+ * @returns Object with the provider and its new mode.
+ */
 export async function updateRagProviderMode(
   provider: string,
   mode: string,
@@ -449,6 +535,13 @@ function withDockerUpgradeHint(
   return detail;
 }
 
+/**
+ * List files in a knowledge base's raw/ directory, with optional cache bypass.
+ *
+ * @param name - Knowledge base name.
+ * @param options - Optional `force` to bypass the client cache.
+ * @returns Array of file and folder entries.
+ */
 export async function listKnowledgeBaseFiles(
   name: string,
   options?: { force?: boolean },
@@ -502,6 +595,7 @@ export function knowledgeBaseFilePreviewTextPath(
     .join("/")}`;
 }
 
+/** Response from a knowledge task (create, upload, reindex, retry). */
 export interface KnowledgeTaskResponse {
   task_id?: string;
   message?: string;
@@ -531,6 +625,12 @@ function appendFilesWithPaths(form: FormData, files: File[]): void {
   });
 }
 
+/**
+ * Create a new knowledge base with uploaded files.
+ *
+ * @param payload - Name, provider, and files to upload.
+ * @returns Task response with task ID for tracking indexing progress.
+ */
 export async function createKnowledgeBase(payload: {
   name: string;
   provider: string;
@@ -554,6 +654,12 @@ export async function createKnowledgeBase(payload: {
   return (await res.json()) as KnowledgeTaskResponse;
 }
 
+/**
+ * Connect an Obsidian vault as a knowledge base.
+ *
+ * @param payload - Knowledge base name and vault path.
+ * @returns Connection status with name and vault path.
+ */
 export async function connectObsidianVault(payload: {
   name: string;
   vaultPath: string;
@@ -576,6 +682,7 @@ export async function connectObsidianVault(payload: {
   };
 }
 
+/** Probe result for a linked folder — checks index readiness and embedding compatibility. */
 export interface LinkedFolderProbe {
   /** Whether the folder holds a ready index for the chosen engine. */
   ok: boolean;
@@ -594,6 +701,12 @@ export interface LinkedFolderProbe {
   error: string | null;
 }
 
+/**
+ * Probe a local folder for an existing RAG index before linking it.
+ *
+ * @param payload - Folder path and provider to check.
+ * @returns Probe result with compatibility and doc count info.
+ */
 export async function probeLinkedFolder(payload: {
   folderPath: string;
   provider: string;
@@ -612,6 +725,12 @@ export async function probeLinkedFolder(payload: {
   return (await res.json()) as LinkedFolderProbe;
 }
 
+/**
+ * Connect a local folder with an existing RAG index as a knowledge base.
+ *
+ * @param payload - Knowledge base name, folder path, and provider.
+ * @returns Connection status with name, path, provider, and any warnings.
+ */
 export async function connectLinkedFolder(payload: {
   name: string;
   folderPath: string;
@@ -645,6 +764,7 @@ export async function connectLinkedFolder(payload: {
   };
 }
 
+/** Probe result for a LightRAG server — reachability, auth, and version info. */
 export interface LightRagServerProbe {
   /** Reachable, a LightRAG server, and (if required) the API key is accepted. */
   ok: boolean;
@@ -658,6 +778,12 @@ export interface LightRagServerProbe {
   error: string | null;
 }
 
+/**
+ * Probe a LightRAG server for reachability and auth before connecting.
+ *
+ * @param payload - Server URL and optional API key.
+ * @returns Probe result with reachability, auth, and version info.
+ */
 export async function probeLightRagServer(payload: {
   serverUrl: string;
   apiKey?: string;
@@ -681,6 +807,12 @@ export async function probeLightRagServer(payload: {
   return (await res.json()) as LightRagServerProbe;
 }
 
+/**
+ * Connect a remote LightRAG server as a knowledge base.
+ *
+ * @param payload - Knowledge base name, server URL, optional API key and mode.
+ * @returns Connection status with name, server URL, and provider.
+ */
 export async function connectLightRagServer(payload: {
   name: string;
   serverUrl: string;
@@ -719,6 +851,14 @@ export async function connectLightRagServer(payload: {
   };
 }
 
+/**
+ * Upload additional files to an existing knowledge base.
+ *
+ * @param name - Knowledge base name.
+ * @param files - Files to upload.
+ * @param options - Optional provider override.
+ * @returns Task response with task ID for tracking indexing progress.
+ */
 export async function uploadKnowledgeBaseFiles(
   name: string,
   files: File[],
@@ -739,6 +879,12 @@ export async function uploadKnowledgeBaseFiles(
   return (await res.json()) as KnowledgeTaskResponse;
 }
 
+/**
+ * Create a new folder inside a knowledge base's raw/ directory.
+ *
+ * @param name - Knowledge base name.
+ * @param path - Folder path relative to raw/.
+ */
 export async function createKbFolder(
   name: string,
   path: string,
@@ -757,6 +903,13 @@ export async function createKbFolder(
   invalidateKnowledgeCaches();
 }
 
+/**
+ * Move a file to a different folder within a knowledge base.
+ *
+ * @param name - Knowledge base name.
+ * @param source - Source file path relative to raw/.
+ * @param destFolder - Destination folder path relative to raw/.
+ */
 export async function moveKbFile(
   name: string,
   source: string,
@@ -796,6 +949,11 @@ export async function deleteKbFile(
   return (await res.json()) as { was_indexed: boolean };
 }
 
+/**
+ * Set a knowledge base as the default.
+ *
+ * @param name - Knowledge base name to set as default.
+ */
 export async function setDefaultKnowledgeBase(name: string): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/knowledge/default/${encodeURIComponent(name)}`),
@@ -807,6 +965,12 @@ export async function setDefaultKnowledgeBase(name: string): Promise<void> {
   invalidateKnowledgeCaches();
 }
 
+/**
+ * Trigger a re-index of an existing knowledge base.
+ *
+ * @param name - Knowledge base name.
+ * @returns Task response with task ID for tracking progress.
+ */
 export async function reindexKnowledgeBase(
   name: string,
 ): Promise<KnowledgeTaskResponse> {
@@ -827,6 +991,12 @@ export async function reindexKnowledgeBase(
   return (await res.json()) as KnowledgeTaskResponse;
 }
 
+/**
+ * Retry indexing for a knowledge base that previously failed.
+ *
+ * @param name - Knowledge base name.
+ * @returns Task response with task ID for tracking progress.
+ */
 export async function retryKnowledgeBase(
   name: string,
 ): Promise<KnowledgeTaskResponse> {
@@ -844,6 +1014,11 @@ export async function retryKnowledgeBase(
   return (await res.json()) as KnowledgeTaskResponse;
 }
 
+/**
+ * Delete a knowledge base and all its data.
+ *
+ * @param name - Knowledge base name to delete.
+ */
 export async function deleteKnowledgeBase(name: string): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/knowledge/${encodeURIComponent(name)}`),

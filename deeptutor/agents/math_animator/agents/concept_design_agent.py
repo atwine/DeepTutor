@@ -12,6 +12,8 @@ from ..utils import extract_json_object
 
 
 class ConceptDesignAgent(BaseAgent):
+    """Designs the Manim scene structure from a concept analysis."""
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -19,6 +21,14 @@ class ConceptDesignAgent(BaseAgent):
         api_version: str | None = None,
         language: str = "zh",
     ) -> None:
+        """Initialize the concept design agent.
+
+        Args:
+            api_key: LLM provider API key.
+            base_url: LLM provider base URL.
+            api_version: API version for Azure OpenAI (optional).
+            language: Language code (``"zh"`` or ``"en"``).
+        """
         super().__init__(
             module_name="math_animator",
             agent_name="concept_design_agent",
@@ -36,6 +46,20 @@ class ConceptDesignAgent(BaseAgent):
         analysis: ConceptAnalysis,
         style_hint: str,
     ) -> SceneDesign:
+        """Design the scene structure from the concept analysis.
+
+        Args:
+            user_input: The user's animation request text.
+            output_mode: Either ``"video"`` or ``"image"``.
+            analysis: The concept analysis result.
+            style_hint: Optional style guidance from the user.
+
+        Returns:
+            A :class:`SceneDesign` instance.
+
+        Raises:
+            ValueError: If the design prompts are not configured.
+        """
         system_prompt = self.get_prompt("system")
         user_template = self.get_prompt("user_template")
         if not system_prompt or not user_template:

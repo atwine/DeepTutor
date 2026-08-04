@@ -12,6 +12,8 @@ from ..utils import extract_json_object
 
 
 class SummaryAgent(BaseAgent):
+    """Produces a human-readable summary of the math animation output."""
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -19,6 +21,14 @@ class SummaryAgent(BaseAgent):
         api_version: str | None = None,
         language: str = "zh",
     ) -> None:
+        """Initialize the summary agent.
+
+        Args:
+            api_key: LLM provider API key.
+            base_url: LLM provider base URL.
+            api_version: API version for Azure OpenAI (optional).
+            language: Language code (``"zh"`` or ``"en"``).
+        """
         super().__init__(
             module_name="math_animator",
             agent_name="summary_agent",
@@ -37,6 +47,21 @@ class SummaryAgent(BaseAgent):
         design: SceneDesign,
         render_result: RenderResult,
     ) -> SummaryPayload:
+        """Generate a summary of the animation result.
+
+        Args:
+            user_input: The user's animation request text.
+            output_mode: Either ``"video"`` or ``"image"``.
+            analysis: The concept analysis result.
+            design: The scene design result.
+            render_result: The render result with artifacts.
+
+        Returns:
+            A :class:`SummaryPayload` instance.
+
+        Raises:
+            ValueError: If the summary prompts are not configured.
+        """
         system_prompt = self.get_prompt("system")
         user_template = self.get_prompt("user_template")
         if not system_prompt or not user_template:

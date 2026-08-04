@@ -4,6 +4,7 @@
 
 import { apiFetch, apiUrl } from "@/lib/api";
 
+/** Memory surface — the app area a memory entry belongs to. */
 export type Surface =
   | "chat"
   | "notebook"
@@ -13,6 +14,7 @@ export type Surface =
   | "partner"
   | "cowriter";
 
+/** All memory surfaces, in display order. */
 export const SURFACES: Surface[] = [
   "chat",
   "notebook",
@@ -23,11 +25,15 @@ export const SURFACES: Surface[] = [
   "cowriter",
 ];
 
+/** L3 memory slot — profile, recent, or scope. */
 export type L3Slot = "profile" | "recent" | "scope";
+/** All L3 memory slots, in display order. */
 export const L3_SLOTS: L3Slot[] = ["profile", "recent", "scope"];
 
+/** Memory layer — L1 (entities), L2 (per-surface docs), or L3 (global docs). */
 export type Layer = "L1" | "L2" | "L3";
 
+/** A single L1 memory entity with its content and timestamp. */
 export interface L1Entity {
   id: string;
   label: string;
@@ -35,6 +41,7 @@ export interface L1Entity {
   content: string;
 }
 
+/** A parsed memory entry with its section, text, and citation refs. */
 export interface ParsedEntry {
   // entry ULID like ``m_01KS...``
   id: string;
@@ -44,6 +51,7 @@ export interface ParsedEntry {
   refs: string[];
 }
 
+/** A parsed memory document with a title and its entries. */
 export interface ParsedDoc {
   title: string;
   entries: ParsedEntry[];
@@ -51,6 +59,7 @@ export interface ParsedDoc {
 
 // ── Node + edge schema ────────────────────────────────────────────────
 
+/** A node in the memory graph visualization, positioned by the layout. */
 export interface GraphNode {
   id: string; // unique key across all layers
   layer: Layer;
@@ -68,6 +77,7 @@ export interface GraphNode {
   r: number;
 }
 
+/** An edge connecting two memory graph nodes (strong or soft citation). */
 export interface GraphEdge {
   source: string;
   target: string;
@@ -76,6 +86,7 @@ export interface GraphEdge {
   kind: "strong" | "soft";
 }
 
+/** The full memory graph — nodes, edges, clusters, and adjacency maps. */
 export interface MemoryGraph {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -86,6 +97,7 @@ export interface MemoryGraph {
   nodeCluster: Map<string, string>;
 }
 
+/** Metadata for a cluster in the concentric layout (pie-slice geometry). */
 export interface ClusterMeta {
   id: string;
   layer: Layer;
@@ -123,6 +135,12 @@ const OLD_FOOTNOTE_RE = new RegExp(
 );
 const MARKER_RE = /\[\^([^\]]+)\]/g;
 
+/**
+ * Parse a memory markdown document into a title and structured entries.
+ *
+ * @param content - Raw markdown content from the memory doc API.
+ * @returns Parsed document with title and entries.
+ */
 export function parseDoc(content: string): ParsedDoc {
   const lines = content.split(/\r?\n/);
   let title = "";
@@ -213,9 +231,12 @@ export function parseDoc(content: string): ParsedDoc {
   return { title, entries };
 }
 
-// Split a footnote ref like "chat:unified_xxx" into surface + id.
-// The id is allowed to contain colons (e.g. ``quiz:unified_xxx:q_1`` →
-// surface=quiz, id=unified_xxx:q_1).
+/**
+ * Split a footnote ref like "chat:unified_xxx" into surface and entity id.
+ *
+ * @param ref - Footnote ref string.
+ * @returns Object with `surface` and `entityId` components.
+ */
 export function splitRef(ref: string): { surface: string; entityId: string } {
   const idx = ref.indexOf(":");
   if (idx < 0) return { surface: ref, entityId: "" };
@@ -232,12 +253,18 @@ interface DocResponse {
   content: string;
 }
 
+/** Raw memory snapshot — L1 entities, L2 per-surface docs, and L3 global docs. */
 export interface RawMemorySnapshot {
   l1: Record<Surface, L1Entity[]>;
   l2: Record<Surface, ParsedDoc>;
   l3: Record<L3Slot, ParsedDoc>;
 }
 
+/**
+ * Fetch the full memory snapshot (L1, L2, L3) from the workbench APIs.
+ *
+ * @returns Raw memory snapshot with all surfaces and slots.
+ */
 export async function fetchMemorySnapshot(): Promise<RawMemorySnapshot> {
   const l1Promises = SURFACES.map(async (s): Promise<[Surface, L1Entity[]]> => {
     try {
@@ -285,6 +312,7 @@ export async function fetchMemorySnapshot(): Promise<RawMemorySnapshot> {
 
 // ── Layout (concentric clusters) ─────────────────────────────────────
 
+/** Layout options for the concentric cluster graph visualization. */
 export interface LayoutOptions {
   // Display size (the layout is centered at width/2, height/2).
   width: number;
@@ -305,6 +333,7 @@ export interface LayoutOptions {
   l3ClusterGap: number;
 }
 
+/** Default layout options for the memory graph visualization. */
 export const DEFAULT_LAYOUT: LayoutOptions = {
   width: 1200,
   height: 1200,
@@ -318,7 +347,13 @@ export const DEFAULT_LAYOUT: LayoutOptions = {
   l3ClusterGap: 0.22,
 };
 
-// Build nodes + edges + cluster metadata + layout coordinates.
+/**
+ * Build the memory graph from a raw snapshot — nodes, edges, clusters, and layout.
+ *
+ * @param snap - Raw memory snapshot.
+ * @param opts - Layout options (defaults to DEFAULT_LAYOUT).
+ * @returns Complete memory graph with positioned nodes and adjacency.
+ */
 export function buildGraph(
   snap: RawMemorySnapshot,
   opts: LayoutOptions = DEFAULT_LAYOUT,
@@ -745,6 +780,7 @@ function placeNodesInSlice<T extends { x: number; y: number; r: number }>(
 
 // ── Display labels ───────────────────────────────────────────────────
 
+/** Human-readable display labels for each memory surface. */
 export const SURFACE_LABEL: Record<Surface, string> = {
   chat: "Chat",
   notebook: "Notebook",
@@ -755,6 +791,7 @@ export const SURFACE_LABEL: Record<Surface, string> = {
   cowriter: "Co-writer",
 };
 
+/** Human-readable display labels for each L3 memory slot. */
 export const L3_LABEL: Record<L3Slot, string> = {
   profile: "Profile",
   recent: "Recent",

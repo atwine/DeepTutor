@@ -1,5 +1,6 @@
 import { apiFetch, apiUrl } from "@/lib/api";
 
+/** The signed-in user's profile information. */
 export interface ProfileInfo {
   id: string;
   username: string;

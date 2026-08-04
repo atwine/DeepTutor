@@ -47,8 +47,10 @@ import type { ServiceName } from "@/components/settings/SettingsContext";
  * breadcrumb trail rendered top-left on every page.
  */
 
+/** Bilingual label (Chinese + English) for settings navigation. */
 export type Lang = { zh: string; en: string };
 
+/** A single settings leaf page (icon, label, blurb, route, service). */
 export interface SettingsLeaf {
   key: string;
   href: string;
@@ -63,6 +65,7 @@ export interface SettingsLeaf {
   adminOnly?: boolean;
 }
 
+/** A settings category block on the hub (may contain leaf children). */
 export interface SettingsCategory {
   key: string;
   label: Lang;
@@ -272,6 +275,7 @@ const AGENT_CHILDREN: SettingsLeaf[] = [
   },
 ];
 
+/** All settings category blocks shown on the hub page. */
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   {
     key: "appearance",
@@ -356,6 +360,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   },
 ];
 
+/** The settings hub route. */
 export const SETTINGS_HUB_HREF = "/settings";
 const HUB_LABEL: Lang = { zh: "设置", en: "Settings" };
 
@@ -365,6 +370,9 @@ const NAV_ONLY_ROUTES = new Set<string>([
   ...SETTINGS_CATEGORIES.filter((c) => c.children).map((c) => c.href),
 ]);
 
+/** Check whether a route is pure navigation (no Save/Apply toolbar).
+ * @param pathname - The route pathname.
+ * @returns True for the hub and sub-hub routes. */
 export function isNavOnlyRoute(pathname: string): boolean {
   return NAV_ONLY_ROUTES.has(pathname);
 }
@@ -395,10 +403,14 @@ const STORAGE_PATHS: Record<string, string> = {
   "/settings/agents/mimo": "data/user/settings/subagent.json",
 };
 
+/** Return the on-disk settings file path for a route (or null if unknown).
+ * @param pathname - The route pathname.
+ * @returns The settings file path, or null. */
 export function storagePathFor(pathname: string): string | null {
   return STORAGE_PATHS[pathname] ?? null;
 }
 
+/** A single breadcrumb entry (label + optional href). */
 export interface Crumb {
   label: Lang;
   /** Omitted on the current (last) crumb. */

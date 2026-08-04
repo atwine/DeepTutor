@@ -1,5 +1,6 @@
 ﻿import { apiFetch, apiUrl } from "@/lib/api";
 
+/** A course unit with its instructors, dates, and archive state. */
 export interface CourseUnit {
   id: string;
   name: string;
@@ -46,6 +47,7 @@ export interface CourseMaterial {
   ingestion_status: "pending" | "indexing" | "ready" | "failed";
 }
 
+/** A single entry in a course unit's enrollment roster. */
 export interface RosterEntry {
   user_id: string;
   username: string;
@@ -56,6 +58,7 @@ export interface RosterEntry {
   approved_at: string;
 }
 
+/** A student account returned by the student search endpoint. */
 export interface StudentSearchResult {
   id: string;
   username: string;
@@ -117,6 +120,17 @@ export async function listMyCourseUnits(): Promise<CourseUnit[]> {
   return data.course_units;
 }
 
+/**
+ * Create a new course unit.
+ *
+ * @param name - Unit name.
+ * @param term - Academic term (e.g. "Fall 2025").
+ * @param instructorIds - User IDs of the instructors.
+ * @param description - Optional description.
+ * @param startDate - Optional start date (ISO "YYYY-MM-DD").
+ * @param endDate - Optional end date (ISO "YYYY-MM-DD").
+ * @returns The created course unit.
+ */
 export async function createCourseUnit(
   name: string,
   term: string,
@@ -144,6 +158,13 @@ export async function createCourseUnit(
   return data.course_unit;
 }
 
+/**
+ * Update an existing course unit's editable fields.
+ *
+ * @param courseUnitId - ID of the course unit to update.
+ * @param updates - Partial fields to change.
+ * @returns The updated course unit.
+ */
 export async function updateCourseUnit(
   courseUnitId: string,
   updates: Partial<
@@ -165,6 +186,11 @@ export async function updateCourseUnit(
   return data.course_unit;
 }
 
+/**
+ * Delete a course unit permanently.
+ *
+ * @param courseUnitId - ID of the course unit to delete.
+ */
 export async function deleteCourseUnit(courseUnitId: string): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}`),
@@ -200,6 +226,12 @@ export async function unarchiveCourseUnit(courseUnitId: string): Promise<CourseU
   return data.course_unit;
 }
 
+/**
+ * Directly enroll a student in a course unit (instructor/admin).
+ *
+ * @param courseUnitId - ID of the course unit.
+ * @param userId - ID of the student to enroll.
+ */
 export async function enrollStudent(
   courseUnitId: string,
   userId: string,
@@ -215,6 +247,12 @@ export async function enrollStudent(
   await unwrap<{ enrollment: unknown }>(res, "Failed to enroll student");
 }
 
+/**
+ * Remove a student from a course unit's roster.
+ *
+ * @param courseUnitId - ID of the course unit.
+ * @param userId - ID of the student to unenroll.
+ */
 export async function unenrollStudent(
   courseUnitId: string,
   userId: string,
@@ -228,6 +266,12 @@ export async function unenrollStudent(
   await unwrap<{ ok: boolean }>(res, "Failed to unenroll student");
 }
 
+/**
+ * Fetch the full roster for a course unit.
+ *
+ * @param courseUnitId - ID of the course unit.
+ * @returns Array of roster entries.
+ */
 export async function getCourseUnitRoster(
   courseUnitId: string,
 ): Promise<RosterEntry[]> {
@@ -288,6 +332,12 @@ export async function getCourseUnitRequests(
   return data.requests;
 }
 
+/**
+ * Approve a pending enrollment request.
+ *
+ * @param courseUnitId - ID of the course unit.
+ * @param userId - ID of the student whose request to approve.
+ */
 export async function approveEnrollmentRequest(
   courseUnitId: string,
   userId: string,
@@ -301,6 +351,12 @@ export async function approveEnrollmentRequest(
   await unwrap<{ enrollment: unknown }>(res, "Failed to approve request");
 }
 
+/**
+ * Reject a pending enrollment request.
+ *
+ * @param courseUnitId - ID of the course unit.
+ * @param userId - ID of the student whose request to reject.
+ */
 export async function rejectEnrollmentRequest(
   courseUnitId: string,
   userId: string,

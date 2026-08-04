@@ -35,6 +35,14 @@ MODEL_PRICING = {
 
 
 def get_tiktoken_encoding(model_name: str):
+    """Return the tiktoken encoding for a model name, or ``None`` if unavailable.
+
+    Args:
+        model_name: The model name to look up.
+
+    Returns:
+        A tiktoken encoding object, or ``None``.
+    """
     if not TIKTOKEN_AVAILABLE:
         return None
     try:
@@ -48,6 +56,15 @@ def get_tiktoken_encoding(model_name: str):
 
 
 def count_tokens_with_tiktoken(text: str, model_name: str) -> int:
+    """Count tokens in *text* using the tiktoken encoding for *model_name*.
+
+    Args:
+        text: The text to tokenize.
+        model_name: The model name used to select the encoding.
+
+    Returns:
+        The token count, or ``0`` if tiktoken is unavailable.
+    """
     if not TIKTOKEN_AVAILABLE:
         return 0
     enc = get_tiktoken_encoding(model_name)
@@ -69,6 +86,16 @@ def count_tokens_with_litellm(messages: list[dict], model_name: str) -> dict[str
 
 
 def get_model_pricing(model_name: str) -> dict[str, float]:
+    """Return the per-1K-token pricing dict for *model_name*.
+
+    Falls back to fuzzy matching and ultimately to ``gpt-4o-mini`` pricing.
+
+    Args:
+        model_name: The model name to look up.
+
+    Returns:
+        A dict with ``"input"`` and ``"output"`` USD-per-1K-token rates.
+    """
     if model_name in MODEL_PRICING:
         return MODEL_PRICING[model_name]
     # Fuzzy matching
@@ -80,6 +107,16 @@ def get_model_pricing(model_name: str) -> dict[str, float]:
 
 
 def calculate_cost(model_name: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """Calculate the USD cost for a single LLM call.
+
+    Args:
+        model_name: The model name used for pricing lookup.
+        prompt_tokens: Number of input tokens.
+        completion_tokens: Number of output tokens.
+
+    Returns:
+        The estimated cost in USD.
+    """
     pricing = get_model_pricing(model_name)
     return (prompt_tokens / 1000.0) * pricing["input"] + (completion_tokens / 1000.0) * pricing[
         "output"
@@ -88,6 +125,8 @@ def calculate_cost(model_name: str, prompt_tokens: int, completion_tokens: int) 
 
 @dataclass
 class TokenUsage:
+    """Record of token usage and cost for a single LLM call."""
+
     agent_name: str
     stage: str
     model: str
@@ -99,11 +138,20 @@ class TokenUsage:
     calculation_method: str = "api"  # "api"|"tiktoken"|"litellm"|"estimated"
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize this usage record to a dictionary."""
         return asdict(self)
 
 
 class TokenTracker:
+    """Accumulates token usage and cost across multiple LLM calls."""
+
     def __init__(self, prefer_tiktoken: bool = True, prefer_litellm: bool = False):
+        """Initialize the tracker with optional tiktoken / litellm preferences.
+
+        Args:
+            prefer_tiktoken: Whether to prefer tiktoken for token counting.
+            prefer_litellm: Whether to prefer litellm for token counting.
+        """
         self.usage_records: list[TokenUsage] = []
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
@@ -125,6 +173,20 @@ class TokenTracker:
         response_text: str | None = None,
         messages: list[dict] | None = None,
     ):
+        """Record a single LLM call's token usage and cost.
+
+        Args:
+            agent_name: Name of the agent that made the call.
+            stage: Pipeline stage the call belongs to.
+            model: Model name used for the call.
+            prompt_tokens: Input token count (if known from API).
+            completion_tokens: Output token count (if known from API).
+            token_counts: Optional dict with ``prompt_tokens`` / ``completion_tokens``.
+            system_prompt: System prompt text (for tiktoken estimation).
+            user_prompt: User prompt text (for tiktoken estimation).
+            response_text: Model response text (for tiktoken estimation).
+            messages: Full message list (for litellm estimation).
+        """
         method = "api"
         if token_counts:
             prompt_tokens = token_counts.get("prompt_tokens", prompt_tokens)
@@ -169,6 +231,12 @@ class TokenTracker:
         self.total_cost_usd += cost
 
     def get_summary(self) -> dict[str, Any]:
+        """Return a summary of all recorded usage, grouped by agent, model, and method.
+
+        Returns:
+            A dict with total token/cost counts and per-agent / per-model /
+            per-method breakdowns.
+        """
         by_agent: dict[str, dict[str, Any]] = {}
         by_model: dict[str, dict[str, Any]] = {}
         by_method: dict[str, dict[str, Any]] = {}
@@ -223,6 +291,7 @@ class TokenTracker:
         }
 
     def format_summary(self) -> str:
+        """Return a human-readable multi-line summary of all recorded usage."""
         s = self.get_summary()
         lines = [
             "=" * 70,
@@ -258,6 +327,7 @@ class TokenTracker:
         return "\n".join(lines)
 
     def reset(self):
+        """Clear all accumulated usage records and totals."""
         self.usage_records.clear()
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
@@ -265,6 +335,11 @@ class TokenTracker:
         self.total_cost_usd = 0.0
 
     def save(self, filepath: str):
+        """Save the summary and all usage records to a JSON file.
+
+        Args:
+            filepath: Path to the output JSON file.
+        """
         data = {"summary": self.get_summary(), "records": [u.to_dict() for u in self.usage_records]}
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -275,6 +350,7 @@ _global_tracker: TokenTracker | None = None
 
 
 def get_token_tracker() -> TokenTracker:
+    """Return the global :class:`TokenTracker` singleton, creating it on first call."""
     global _global_tracker
     if _global_tracker is None:
         _global_tracker = TokenTracker()

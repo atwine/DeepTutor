@@ -12,6 +12,9 @@ function eventMeta(event: StreamEvent): ContentMeta {
   return (event.metadata ?? {}) as ContentMeta;
 }
 
+/** Check whether a content event's text should be appended to the user-facing answer.
+ * @param event - The stream event to check.
+ * @returns True for final-response and agent-loop-round content (not narration). */
 export function shouldAppendEventContent(event: StreamEvent): boolean {
   if (event.type !== "content") return false;
   const meta = eventMeta(event);

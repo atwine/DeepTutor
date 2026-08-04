@@ -1,5 +1,6 @@
 import { apiFetch, apiUrl } from "@/lib/api";
 
+/** Supported question types for assignments. */
 export type QuestionType =
   | "choice"
   | "concept"
@@ -8,7 +9,9 @@ export type QuestionType =
   | "written"
   | "coding";
 
+/** Question types that are automatically graded by the server. */
 export const AUTO_GRADABLE_TYPES: QuestionType[] = ["choice", "concept", "fill_in_blank"];
+/** Question types that require free-text answers from the student. */
 export const FREE_TEXT_TYPES: QuestionType[] = ["short_answer", "written", "coding"];
 
 /** Full question shape — instructor/admin view only (includes the answer key). */
@@ -31,6 +34,7 @@ export interface PublicQuestion {
   points: number;
 }
 
+/** Per-question result after a submission is graded. */
 export interface QuestionResult {
   question_id: string;
   question: string;
@@ -41,6 +45,7 @@ export interface QuestionResult {
   feedback: string;
 }
 
+/** A student's submission for an assignment. */
 export interface Submission {
   id: string;
   assignment_id: string;
@@ -52,12 +57,14 @@ export interface Submission {
   submitted_at: string;
 }
 
+/** A submission enriched with the student's identifying information. */
 export interface SubmissionWithStudent extends Submission {
   username: string;
   full_name: string;
   registration_number: string;
 }
 
+/** Summary metadata for an assignment (no questions). */
 export interface AssignmentSummary {
   id: string;
   course_unit_id: string;
@@ -108,6 +115,7 @@ async function unwrap<T>(res: Response, fallback: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Payload for creating or updating an assignment. */
 export interface AssignmentDraft {
   title: string;
   description?: string;
@@ -122,6 +130,13 @@ export interface AssignmentDraft {
   is_optional?: boolean;
 }
 
+/**
+ * Create a new assignment within a course unit.
+ *
+ * @param courseUnitId - ID of the parent course unit.
+ * @param draft - Assignment draft payload.
+ * @returns The created assignment.
+ */
 export async function createAssignment(
   courseUnitId: string,
   draft: AssignmentDraft,
@@ -138,6 +153,12 @@ export async function createAssignment(
   return data.assignment;
 }
 
+/**
+ * List all assignments for a course unit.
+ *
+ * @param courseUnitId - ID of the course unit.
+ * @returns Array of assignment summaries.
+ */
 export async function listAssignments(courseUnitId: string): Promise<AssignmentSummary[]> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/assignments`),
@@ -165,6 +186,13 @@ export async function getAssignment(
   return data.assignment;
 }
 
+/**
+ * Update an existing assignment.
+ *
+ * @param assignmentId - ID of the assignment to update.
+ * @param updates - Partial assignment draft with fields to change.
+ * @returns The updated assignment.
+ */
 export async function updateAssignment(
   assignmentId: string,
   updates: Partial<AssignmentDraft>,
@@ -181,6 +209,12 @@ export async function updateAssignment(
   return data.assignment;
 }
 
+/**
+ * Publish a draft assignment so students can see it.
+ *
+ * @param assignmentId - ID of the assignment to publish.
+ * @returns The published assignment.
+ */
 export async function publishAssignment(assignmentId: string): Promise<Assignment> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/publish`),
@@ -190,6 +224,12 @@ export async function publishAssignment(assignmentId: string): Promise<Assignmen
   return data.assignment;
 }
 
+/**
+ * Unpublish an assignment, reverting it to draft status.
+ *
+ * @param assignmentId - ID of the assignment to unpublish.
+ * @returns The unpublished assignment.
+ */
 export async function unpublishAssignment(assignmentId: string): Promise<Assignment> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/unpublish`),
@@ -199,6 +239,11 @@ export async function unpublishAssignment(assignmentId: string): Promise<Assignm
   return data.assignment;
 }
 
+/**
+ * Delete an assignment permanently.
+ *
+ * @param assignmentId - ID of the assignment to delete.
+ */
 export async function deleteAssignment(assignmentId: string): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}`),
@@ -207,6 +252,13 @@ export async function deleteAssignment(assignmentId: string): Promise<void> {
   await unwrap<{ ok: boolean }>(res, "Failed to delete assignment");
 }
 
+/**
+ * Submit answers to an assignment for grading.
+ *
+ * @param assignmentId - ID of the assignment.
+ * @param answers - Array of question-answer pairs.
+ * @returns The graded submission.
+ */
 export async function submitAssignment(
   assignmentId: string,
   answers: { question_id: string; answer: string }[],
@@ -223,6 +275,12 @@ export async function submitAssignment(
   return data.submission;
 }
 
+/**
+ * List all submissions for an assignment (instructor/admin view).
+ *
+ * @param assignmentId - ID of the assignment.
+ * @returns Array of submissions with student info.
+ */
 export async function listSubmissions(
   assignmentId: string,
 ): Promise<SubmissionWithStudent[]> {
@@ -254,6 +312,12 @@ export async function listSubmissionsPaged(
   return { items: data.submissions, total: data.total };
 }
 
+/**
+ * Fetch the current user's submission for an assignment.
+ *
+ * @param assignmentId - ID of the assignment.
+ * @returns The user's submission, or null if none exists.
+ */
 export async function getMySubmission(assignmentId: string): Promise<Submission | null> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/my-submission`),
@@ -269,6 +333,7 @@ export async function getMySubmission(assignmentId: string): Promise<Submission 
 // Access grants (A3) — per-student exception/emergency access
 // ---------------------------------------------------------------------------
 
+/** Per-student access grant for extra attempts or extended due dates. */
 export interface AccessGrant {
   id: string;
   assignment_id: string;
@@ -279,6 +344,12 @@ export interface AccessGrant {
   granted_at: string;
 }
 
+/**
+ * List all access grants for an assignment.
+ *
+ * @param assignmentId - ID of the assignment.
+ * @returns Array of access grants.
+ */
 export async function listAccessGrants(assignmentId: string): Promise<AccessGrant[]> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/access-grants`),
@@ -287,6 +358,13 @@ export async function listAccessGrants(assignmentId: string): Promise<AccessGran
   return data.grants;
 }
 
+/**
+ * Create an access grant for a student on an assignment.
+ *
+ * @param assignmentId - ID of the assignment.
+ * @param payload - Grant details (user ID, extra attempts, extended due date).
+ * @returns The created access grant.
+ */
 export async function createAccessGrant(
   assignmentId: string,
   payload: { user_id: string; extra_attempts?: number | null; extended_due_at?: string | null },
@@ -303,6 +381,12 @@ export async function createAccessGrant(
   return data.grant;
 }
 
+/**
+ * Revoke a student's access grant for an assignment.
+ *
+ * @param assignmentId - ID of the assignment.
+ * @param userId - ID of the student whose grant should be revoked.
+ */
 export async function revokeAccessGrant(
   assignmentId: string,
   userId: string,

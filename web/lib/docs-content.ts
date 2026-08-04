@@ -13,12 +13,14 @@ export interface DocTopic {
   body: string;
 }
 
+/** A category of documentation topics shown as a collapsible group. */
 export interface DocCategory {
   id: string;
   label: string;
   topics: DocTopic[];
 }
 
+/** All documentation categories and topics shown on the /docs page. */
 export const DOC_CATEGORIES: DocCategory[] = [
   {
     id: "oriented",

@@ -193,6 +193,14 @@ class AgenticChatPipeline:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> None:
+        """Initialize the agentic chat pipeline with LLM and chat configuration.
+
+        Args:
+            language: Language code (``"zh"`` or ``"en"``).
+            max_rounds: Optional override for the maximum loop rounds.
+            temperature: Optional override for the sampling temperature.
+            max_tokens: Optional override for the maximum response tokens.
+        """
         self.language = "zh" if language.lower().startswith("zh") else "en"
         self.llm_config = get_llm_config()
         self.binding = getattr(self.llm_config, "binding", None) or "openai"
@@ -269,6 +277,7 @@ class AgenticChatPipeline:
 
     @property
     def usage(self) -> UsageTracker:
+        """Usage tracker recording token costs for this pipeline."""
         return self._usage
 
     @property
@@ -287,6 +296,7 @@ class AgenticChatPipeline:
 
     @property
     def max_rounds(self) -> int:
+        """Maximum number of tool-calling rounds per turn (at least 1)."""
         return max(1, self._max_rounds)
 
     def effective_max_rounds(self, context: UnifiedContext) -> int:
@@ -306,10 +316,12 @@ class AgenticChatPipeline:
 
     @property
     def exploring_max_tokens(self) -> int:
+        """Maximum tokens for exploring-stage LLM calls (at least 128)."""
         return max(128, self._exploring_max_tokens)
 
     @property
     def respond_max_tokens(self) -> int:
+        """Maximum tokens for responding-stage LLM calls (at least 256)."""
         return max(256, self._respond_max_tokens)
 
     @property
@@ -324,6 +336,12 @@ class AgenticChatPipeline:
         return self.respond_max_tokens
 
     async def run(self, context: UnifiedContext, stream: StreamBus) -> None:
+        """Execute the agentic chat pipeline for one turn.
+
+        Args:
+            context: The unified context for the current turn.
+            stream: The stream bus for emitting events to the frontend.
+        """
         await self._prepare_deferred_tools(context)
         await self._prepare_kb_manifests(context)
         self._exec_enabled = await self._exec_allowed(context)

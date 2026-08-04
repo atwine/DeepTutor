@@ -23,6 +23,8 @@ _AUTO_SUBTOPICS: dict[str, int] = {"quick": 2, "standard": 4, "deep": 6}
 
 @dataclass(frozen=True)
 class ModeStrategy:
+    """Strategy parameters for one research mode (notes, report, comparison, etc.)."""
+
     name: ResearchMode
     style: str
     rephrase_enabled: bool
@@ -43,13 +45,37 @@ class ModeStrategy:
     )
 
     def rephrase_iterations(self, depth: str) -> int:
+        """Return the rephrase-loop iteration count for the given depth.
+
+        Args:
+            depth: One of ``"quick"``, ``"standard"``, ``"deep"``, ``"manual"``.
+
+        Returns:
+            The number of rephrase iterations.
+        """
         return self._rephrase_iterations_by_depth.get(depth, 1)
 
     def subtopic_count(self, depth: str) -> int:
+        """Return the subtopic count for the given depth and decompose mode.
+
+        Args:
+            depth: One of ``"quick"``, ``"standard"``, ``"deep"``, ``"manual"``.
+
+        Returns:
+            The number of subtopics to generate.
+        """
         table = _AUTO_SUBTOPICS if self.decompose_mode == "auto" else _MANUAL_SUBTOPICS
         return table.get(depth, 3)
 
     def build_policy(self, depth: str) -> dict[str, object]:
+        """Build the full policy dict for the given depth.
+
+        Args:
+            depth: One of ``"quick"``, ``"standard"``, ``"deep"``, ``"manual"``.
+
+        Returns:
+            A dictionary of policy parameters for the research pipeline.
+        """
         if self.decompose_mode == "auto":
             initial = None
             auto_max = _AUTO_SUBTOPICS.get(depth, 4)
@@ -139,6 +165,14 @@ STRATEGIES: dict[ResearchMode, ModeStrategy] = {
 
 
 def get_strategy(mode: str) -> ModeStrategy:
+    """Look up the :class:`ModeStrategy` for a research mode name.
+
+    Args:
+        mode: One of ``"notes"``, ``"report"``, ``"comparison"``, ``"learning_path"``.
+
+    Returns:
+        The :class:`ModeStrategy` for the given mode.
+    """
     return STRATEGIES[mode]  # type: ignore[index]
 
 

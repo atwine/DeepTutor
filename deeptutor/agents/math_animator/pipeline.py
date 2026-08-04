@@ -23,6 +23,8 @@ from .visual_review import VisualReviewService
 
 
 class MathAnimatorPipeline:
+    """Orchestrates the full math animator generation and render flow."""
+
     def __init__(
         self,
         *,
@@ -33,6 +35,16 @@ class MathAnimatorPipeline:
         trace_callback: Callable[[dict[str, Any]], Any] | None = None,
         enable_visual_review: bool = False,
     ) -> None:
+        """Initialize the pipeline with LLM credentials and sub-agents.
+
+        Args:
+            api_key: LLM provider API key.
+            base_url: LLM provider base URL.
+            api_version: API version for Azure OpenAI (optional).
+            language: Language code (``"zh"`` or ``"en"``).
+            trace_callback: Optional callback for structured trace events.
+            enable_visual_review: Whether to enable visual quality review.
+        """
         self.enable_visual_review = enable_visual_review
         self.analysis_agent = ConceptAnalysisAgent(
             api_key=api_key,
@@ -71,6 +83,11 @@ class MathAnimatorPipeline:
         self.set_trace_callback(trace_callback)
 
     def set_trace_callback(self, callback: Callable[[dict[str, Any]], Any] | None) -> None:
+        """Propagate a trace callback to all sub-agents.
+
+        Args:
+            callback: The trace callback to register, or ``None`` to clear.
+        """
         for agent in (
             self.analysis_agent,
             self.design_agent,
@@ -89,6 +106,17 @@ class MathAnimatorPipeline:
         request_config: MathAnimatorRequestConfig,
         attachments: list[Attachment],
     ):
+        """Run the concept analysis stage.
+
+        Args:
+            user_input: The user's animation request text.
+            history_context: Prior conversation context for continuity.
+            request_config: Validated request configuration.
+            attachments: Image attachments for reference.
+
+        Returns:
+            A :class:`ConceptAnalysis` instance.
+        """
         return await self.analysis_agent.process(
             user_input=user_input,
             history_context=history_context,
@@ -104,6 +132,16 @@ class MathAnimatorPipeline:
         request_config: MathAnimatorRequestConfig,
         analysis,
     ):
+        """Run the concept design stage.
+
+        Args:
+            user_input: The user's animation request text.
+            request_config: Validated request configuration.
+            analysis: The :class:`ConceptAnalysis` from the analysis stage.
+
+        Returns:
+            A :class:`SceneDesign` instance.
+        """
         return await self.design_agent.process(
             user_input=user_input,
             output_mode=request_config.output_mode,
@@ -119,6 +157,17 @@ class MathAnimatorPipeline:
         analysis,
         design,
     ):
+        """Run the Manim code generation stage.
+
+        Args:
+            user_input: The user's animation request text.
+            request_config: Validated request configuration.
+            analysis: The :class:`ConceptAnalysis` from the analysis stage.
+            design: The :class:`SceneDesign` from the design stage.
+
+        Returns:
+            A :class:`GeneratedCode` instance.
+        """
         duration_target_seconds = parse_target_duration_seconds(
             " ".join(
                 part.strip()
@@ -145,6 +194,20 @@ class MathAnimatorPipeline:
         on_render_progress: Callable[[str, bool], Any] | None = None,
         on_retry_status: Callable[[str], Any] | None = None,
     ) -> tuple[str, RenderResult]:
+        """Render the generated Manim code with retry and optional visual review.
+
+        Args:
+            turn_id: Unique identifier for the turn (used for file paths).
+            user_input: The user's animation request text.
+            request_config: Validated request configuration.
+            initial_code: The initial Manim source code to render.
+            on_retry: Optional callback invoked on each retry attempt.
+            on_render_progress: Optional callback for render progress updates.
+            on_retry_status: Optional callback for retry status messages.
+
+        Returns:
+            A tuple of (final_code, render_result).
+        """
         renderer = ManimRenderService(turn_id, progress_callback=on_render_progress)
         duration_target_seconds = parse_target_duration_seconds(
             " ".join(
@@ -202,6 +265,18 @@ class MathAnimatorPipeline:
         design,
         render_result: RenderResult,
     ):
+        """Run the summary stage to produce a human-readable result summary.
+
+        Args:
+            user_input: The user's animation request text.
+            request_config: Validated request configuration.
+            analysis: The :class:`ConceptAnalysis` from the analysis stage.
+            design: The :class:`SceneDesign` from the design stage.
+            render_result: The :class:`RenderResult` from the render stage.
+
+        Returns:
+            A :class:`SummaryPayload` instance.
+        """
         return await self.summary_agent.process(
             user_input=user_input,
             output_mode=request_config.output_mode,
@@ -219,6 +294,19 @@ class MathAnimatorPipeline:
         request_config: MathAnimatorRequestConfig,
         attachments: list[Attachment],
     ) -> dict[str, Any]:
+        """Run the full math animator pipeline end-to-end.
+
+        Args:
+            turn_id: Unique identifier for the turn.
+            user_input: The user's animation request text.
+            history_context: Prior conversation context for continuity.
+            request_config: Validated request configuration.
+            attachments: Image attachments for reference.
+
+        Returns:
+            A dictionary containing the analysis, design, code, render result,
+            summary, and per-stage timing measurements.
+        """
         timings: dict[str, float] = {}
 
         start = time.perf_counter()

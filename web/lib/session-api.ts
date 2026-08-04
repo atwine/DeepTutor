@@ -2,12 +2,14 @@ import { apiFetch, apiUrl } from "@/lib/api";
 import { invalidateClientCache, withClientCache } from "@/lib/client-cache";
 import type { LLMSelection, StreamEvent } from "@/lib/unified-ws";
 
+/** Thumbs up/down rating and optional comment for a message. */
 export interface MessageFeedback {
   rating: "up" | "down" | null;
   comment: string;
   updated_at: number;
 }
 
+/** A single persisted message in a chat session. */
 export interface SessionMessage {
   id: number;
   session_id: string;
@@ -35,6 +37,7 @@ export interface SessionMessage {
   parent_message_id?: number | null;
 }
 
+/** Lightweight session metadata for list views. */
 export interface SessionSummary {
   id: string;
   session_id: string;
@@ -66,6 +69,7 @@ export interface SessionSummary {
   };
 }
 
+/** Summary of an active (in-flight) turn. */
 export interface ActiveTurnSummary {
   id: string;
   turn_id: string;
@@ -79,6 +83,7 @@ export interface ActiveTurnSummary {
   last_seq: number;
 }
 
+/** Full session detail including all messages and active turns. */
 export interface SessionDetail {
   id: string;
   session_id: string;
@@ -112,6 +117,7 @@ export interface SessionDetail {
   active_turns?: ActiveTurnSummary[];
 }
 
+/** A single quiz answer result for recording. */
 export interface QuizResultItem {
   question_id?: string;
   question: string;
@@ -140,6 +146,11 @@ async function expectJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** List chat sessions with pagination (client-cached, 15s TTL).
+ * @param limit - Max sessions to return (default 50).
+ * @param offset - Pagination offset (default 0).
+ * @param options - Pass `force` to bypass the cache.
+ * @returns Array of session summaries. */
 export async function listSessions(
   limit = 50,
   offset = 0,
@@ -168,6 +179,10 @@ export async function listSessions(
   );
 }
 
+/** Fetch a single session with all messages and active turns.
+ * @param sessionId - The session id.
+ * @param signal - Optional AbortSignal to cancel the request.
+ * @returns The full session detail. */
 export async function getSession(
   sessionId: string,
   signal?: AbortSignal,
@@ -179,6 +194,10 @@ export async function getSession(
   return expectJson<SessionDetail>(response);
 }
 
+/** Rename a session and invalidate the session list cache.
+ * @param sessionId - The session id.
+ * @param title - The new title.
+ * @returns The updated session detail. */
 export async function updateSessionTitle(
   sessionId: string,
   title: string,
@@ -193,6 +212,8 @@ export async function updateSessionTitle(
   return data.session;
 }
 
+/** Delete a session and invalidate the session list cache.
+ * @param sessionId - The session id. */
 export async function deleteSession(sessionId: string): Promise<void> {
   const response = await apiFetch(apiUrl(`/api/v1/sessions/${sessionId}`), {
     method: "DELETE",
@@ -201,6 +222,12 @@ export async function deleteSession(sessionId: string): Promise<void> {
   invalidateClientCache("sessions:");
 }
 
+/** Set thumbs up/down feedback (and optional comment) on a message.
+ * @param sessionId - The session id.
+ * @param messageId - The message id.
+ * @param rating - "up", "down", or null to clear.
+ * @param comment - Optional feedback comment.
+ * @returns The stored feedback object. */
 export async function setMessageFeedback(
   sessionId: string,
   messageId: number,
@@ -219,6 +246,7 @@ export async function setMessageFeedback(
   return data.feedback;
 }
 
+/** A feedback entry with its paired question and session context. */
 export interface FeedbackEntry {
   message_id: number;
   session_id: string;
@@ -233,6 +261,9 @@ export interface FeedbackEntry {
   created_at: number;
 }
 
+/** List all message feedback (admin endpoint).
+ * @param limit - Max entries to return (default 200).
+ * @returns Array of feedback entries. */
 export async function listMessageFeedback(limit = 200): Promise<FeedbackEntry[]> {
   const response = await apiFetch(
     apiUrl(`/api/v1/sessions/admin/feedback?limit=${limit}`),
@@ -241,6 +272,10 @@ export async function listMessageFeedback(limit = 200): Promise<FeedbackEntry[]>
   return data.feedback;
 }
 
+/** Record quiz answer results for a session.
+ * @param sessionId - The session id.
+ * @param answers - Array of quiz answer items.
+ * @param turnId - Optional turn id for the quiz generation turn. */
 export async function recordQuizResults(
   sessionId: string,
   answers: QuizResultItem[],
@@ -257,6 +292,9 @@ export async function recordQuizResults(
   await expectJson<{ recorded: boolean }>(response);
 }
 
+/** Delete a single message from a session.
+ * @param sessionId - The session id.
+ * @param messageId - The message id. */
 export async function deleteMessage(
   sessionId: string,
   messageId: number,
@@ -268,6 +306,9 @@ export async function deleteMessage(
   await expectJson<{ deleted: boolean }>(response);
 }
 
+/** Persist the selected branch at each edit-branching point.
+ * @param sessionId - The session id.
+ * @param selectedBranches - Map of parentMessageId → selected child id. */
 export async function updateBranchSelection(
   sessionId: string,
   selectedBranches: Record<string, number>,

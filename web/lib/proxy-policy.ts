@@ -6,11 +6,18 @@
 // NextResponse objects. Keeping the policy pure means the routing/auth rules
 // can be unit-tested in the node harness without booting the Next runtime.
 
+/** Login page path used by the auth gate. */
 export const LOGIN_PATH = "/login";
+/** Auth cookie name used by the middleware. */
 export const COOKIE_NAME = "dt_token";
+/** Codex OAuth callback page path. */
 export const CODEX_CALLBACK_PATH = "/auth/callback";
+/** Codex OAuth callback API path. */
 export const CODEX_CALLBACK_API_PATH = "/api/v1/auth/openai-codex/callback";
 
+/** Check whether a pathname is the Codex OAuth callback page.
+ * @param pathname - The request pathname.
+ * @returns True if the path is the Codex callback. */
 export function isCodexCallbackPath(pathname: string): boolean {
   return pathname === CODEX_CALLBACK_PATH;
 }
@@ -19,6 +26,9 @@ export function isCodexCallbackPath(pathname: string): boolean {
 // rewrites these to DEEPTUTOR_API_BASE_URL so the browser can use frontend-
 // relative URLs (e.g. `:3782/api/v1/...` or `.../ws`) and let the rewrite
 // bridge the origin gap.
+/** Check whether a pathname should be proxied to the backend.
+ * @param pathname - The request pathname.
+ * @returns True for `/api/` and `/ws/` paths. */
 export function isBackendPath(pathname: string): boolean {
   return pathname.startsWith("/api/") || pathname.startsWith("/ws/");
 }
@@ -35,6 +45,9 @@ const STATIC_ASSET =
 
 // Paths the auth gate must never block: the auth pages themselves, Next.js
 // internals, and public static assets (see STATIC_ASSET above).
+/** Check whether a pathname is exempt from the auth gate.
+ * @param pathname - The request pathname.
+ * @returns True for auth pages, Next.js internals, and static assets. */
 export function isAuthExempt(pathname: string): boolean {
   return (
     pathname.startsWith(LOGIN_PATH) ||
@@ -45,12 +58,17 @@ export function isAuthExempt(pathname: string): boolean {
   );
 }
 
+/** Classification of the auth cookie's validity (without verifying signature). */
 export type TokenState = "missing" | "malformed" | "expired" | "valid";
 
 // Classify the auth cookie WITHOUT trusting its signature — the middleware is a
 // cheap front-line gate, not the authority (the backend does real verification
 // on every API call). `nowMs` is injected rather than read from the clock so
 // the classifier stays pure and testable.
+/** Classify the auth cookie without trusting its signature.
+ * @param token - The raw JWT string (or undefined).
+ * @param nowMs - Current time in milliseconds (injected for testability).
+ * @returns The token's classified state. */
 export function classifyToken(
   token: string | undefined,
   nowMs: number,

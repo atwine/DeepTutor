@@ -16,6 +16,7 @@ import {
   type BrandIcon,
 } from "@/lib/brand-icons.generated";
 
+/** Namespace for brand icon lookups — MCP servers or CLI apps. */
 export type BrandNamespace = "mcp" | "cli";
 
 /**

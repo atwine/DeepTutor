@@ -6,6 +6,7 @@ export const CLI_APPS_BASE_PATH = "/api/v1/space/cli-apps";
 /** Where the code comes from — the only honest input to "should I install this?". */
 export type CliAppTrust = "first-party" | "third-party";
 
+/** Runtime environment required by a CLI app. */
 export type CliAppRuntime = "python" | "node" | "none";
 
 /** One installed app, as the calling account sees it. */
@@ -39,6 +40,7 @@ export interface CliAppAccess {
   exec_denied: boolean;
 }
 
+/** Full state of installed CLI apps and the caller's access level. */
 export interface CliAppState {
   apps: CliApp[];
   access: CliAppAccess;
@@ -48,6 +50,7 @@ export interface CliAppState {
   log?: string;
 }
 
+/** A single entry in the browsable CLI app catalog. */
 export interface CliCatalogEntry {
   id: string;
   display_name: string;
@@ -72,6 +75,7 @@ export interface CliCatalogEntry {
   installed: boolean;
 }
 
+/** A paginated page of CLI app catalog entries. */
 export interface CliCatalogPage {
   entries: CliCatalogEntry[];
   /** Empty once the last page has been served. */
@@ -190,6 +194,11 @@ function normalizeEntry(raw: unknown): CliCatalogEntry {
   };
 }
 
+/**
+ * Fetch the caller's installed CLI apps and access state.
+ *
+ * @returns Normalized CLI app state.
+ */
 export async function getCliApps(): Promise<CliAppState> {
   const response = await apiFetch(apiUrl(`${CLI_APPS_BASE_PATH}/apps`), {
     cache: "no-store",
@@ -197,6 +206,13 @@ export async function getCliApps(): Promise<CliAppState> {
   return normalizeState(await asJson(response));
 }
 
+/**
+ * Enable or disable a CLI app for the calling account.
+ *
+ * @param appId - ID of the app to toggle.
+ * @param enabled - Whether the app should be enabled.
+ * @returns Updated CLI app state.
+ */
 export async function setCliAppEnabled(
   appId: string,
   enabled: boolean,
@@ -212,6 +228,12 @@ export async function setCliAppEnabled(
   return normalizeState(await asJson(response));
 }
 
+/**
+ * Fetch a page of the browsable CLI app catalog.
+ *
+ * @param query - Optional search text, category filter, pagination cursor, and limit.
+ * @returns A page of catalog entries with category counts.
+ */
 export async function getCliCatalog(
   query: {
     q?: string;

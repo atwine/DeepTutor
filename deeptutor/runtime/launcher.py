@@ -45,6 +45,8 @@ def _t(key: str, **kwargs: object) -> str:
 
 @dataclass(slots=True)
 class ManagedProcess:
+    """A spawned child process tracked by the launcher for cleanup."""
+
     name: str
     process: subprocess.Popen[str]
     pgid: int | None
@@ -52,6 +54,8 @@ class ManagedProcess:
 
 @dataclass(frozen=True, slots=True)
 class FrontendRuntime:
+    """Resolved frontend launch configuration (packaged or source dev server)."""
+
     kind: str
     command: list[str]
     cwd: Path
@@ -59,6 +63,8 @@ class FrontendRuntime:
 
 @dataclass(frozen=True, slots=True)
 class ExistingFrontendRuntime:
+    """A previously-started frontend detected via a Next.js dev-server lock file."""
+
     url: str
     port: int
     pid: int | None
@@ -765,6 +771,12 @@ def _install_signal_handlers(request_shutdown: Callable[[str | None], None]) -> 
 
 
 def start(home: str | Path | None = None) -> None:
+    """Launch the DeepTutor backend and frontend as managed child processes.
+
+    Args:
+        home: Optional workspace root. Defaults to the ``DEEPTUTOR_HOME``
+            environment variable or the current working directory.
+    """
     _relax_console_encoding()
     runtime_home = get_runtime_home(home)
     runtime_home.mkdir(parents=True, exist_ok=True)

@@ -31,9 +31,15 @@ class ToolRegistry:
     """
 
     def __init__(self) -> None:
+        """Initialise an empty tool registry."""
         self._tools: dict[str, BaseTool] = {}
 
     def register(self, tool: BaseTool) -> None:
+        """Register a tool instance under its name.
+
+        Args:
+            tool: The tool to register.
+        """
         name = tool.name
         self._tools[name] = tool
         logger.debug("Registered tool: %s", name)
@@ -72,10 +78,12 @@ class ToolRegistry:
         return resolved_name, merged_kwargs
 
     def get(self, name: str) -> BaseTool | None:
+        """Return the tool registered under *name* (resolving aliases), or ``None``."""
         resolved_name, _ = self._resolve_request(name)
         return self._tools.get(resolved_name)
 
     def list_tools(self) -> list[str]:
+        """Return the names of all registered tools."""
         return list(self._tools.keys())
 
     def get_enabled(self, names: list[str]) -> list[BaseTool]:

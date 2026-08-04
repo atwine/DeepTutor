@@ -7,8 +7,10 @@ import {
   normalizeQuizQuestionType,
 } from "./quiz-question-type";
 
+/** Quiz generation mode: custom topic or mimic an existing paper. */
 export type DeepQuestionMode = "custom" | "mimic";
 
+/** Form configuration for the deep_question capability. */
 export interface DeepQuestionFormConfig {
   mode: DeepQuestionMode;
   topic: string;
@@ -30,6 +32,7 @@ export interface DeepQuestionFormConfig {
   max_questions: number;
 }
 
+/** Default quiz form configuration. */
 export const DEFAULT_QUIZ_CONFIG: DeepQuestionFormConfig = {
   mode: "custom",
   topic: "",
@@ -41,6 +44,7 @@ export const DEFAULT_QUIZ_CONFIG: DeepQuestionFormConfig = {
   max_questions: 10,
 };
 
+/** A single generated quiz question with answer and metadata. */
 export interface QuizQuestion {
   question_id: string;
   question: string;
@@ -53,6 +57,7 @@ export interface QuizQuestion {
   knowledge_context?: string;
 }
 
+/** Context for a follow-up question about a previously answered quiz item. */
 export interface QuizFollowupContext {
   parent_quiz_session_id?: string;
   question_id: string;
@@ -196,6 +201,7 @@ export function extractQuizQuestions(
   );
 }
 
+/** Extra data for building a quiz follow-up config (image filenames, AI judgment). */
 export interface QuizFollowupExtras {
   /** Filenames of the learner's image answers (bytes ride on first msg). */
   userAnswerImageFilenames?: string[] | null;
@@ -203,6 +209,13 @@ export interface QuizFollowupExtras {
   aiJudgment?: string | null;
 }
 
+/** Build the follow-up config payload for a quiz question re-ask.
+ * @param question - The original quiz question.
+ * @param userAnswer - The learner's answer text.
+ * @param isCorrect - Whether the answer was correct (null if unjudged).
+ * @param parentQuizSessionId - Optional parent quiz session id.
+ * @param extras - Optional image filenames and AI judgment text.
+ * @returns Config object with `followup_question_context`. */
 export function buildQuizFollowupConfig(
   question: QuizQuestion,
   userAnswer: string,
@@ -240,6 +253,7 @@ function titleCase(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+/** Human-readable label keys for each quiz question type. */
 export const QUIZ_TYPE_LABEL_KEYS: Record<NormalizedQuizQuestionType, string> =
   {
     choice: "Multiple Choice",

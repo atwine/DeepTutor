@@ -17,6 +17,8 @@ from deeptutor.runtime.request_contracts import get_capability_request_schema
 
 
 class MathAnimatorCapability(BaseCapability):
+    """Capability wrapper for the math animator pipeline."""
+
     manifest = CapabilityManifest(
         name="math_animator",
         description="Generate math animations or storyboard images with Manim.",
@@ -39,6 +41,15 @@ class MathAnimatorCapability(BaseCapability):
     )
 
     async def run(self, context: UnifiedContext, stream: StreamBus) -> None:
+        """Execute the math animator capability for one turn.
+
+        Args:
+            context: The unified context for the current turn.
+            stream: The stream bus for emitting events to the frontend.
+
+        Raises:
+            RuntimeError: If the optional ``manim`` dependency is not installed.
+        """
         if importlib.util.find_spec("manim") is None:
             raise RuntimeError(
                 "math_animator requires optional dependencies. "

@@ -35,16 +35,19 @@ export function artifactDiskPath(url?: string): string | null {
   }
 }
 
+/** Count of times a named tool was invoked in a session. */
 export interface ToolUsage {
   name: string;
   count: number;
 }
 
+/** A message attachment paired with its originating message index. */
 export interface AttachmentWithOrigin {
   messageIndex: number;
   attachment: MessageAttachment;
 }
 
+/** Summary of Space objects (history, books, notebooks, personas, memory) referenced. */
 export interface SpaceReferenceSummary {
   historySessionIds: string[];
   bookPageCount: number;
@@ -57,6 +60,7 @@ export interface SpaceReferenceSummary {
   memoryKinds: Array<"summary" | "profile">;
 }
 
+/** Aggregated activity for a conversation (tools, KBs, Space refs, files). */
 export interface SessionActivity {
   tools: ToolUsage[];
   knowledgeBases: string[];
@@ -70,6 +74,9 @@ export interface SessionActivity {
   isEmpty: boolean;
 }
 
+/** Fold a conversation's messages into a SessionActivity summary.
+ * @param messages - The conversation's message list.
+ * @returns Aggregated tools, KBs, Space references, attachments, and artifacts. */
 export function buildSessionActivity(messages: MessageItem[]): SessionActivity {
   const toolCounts = new Map<string, number>();
   const kbs = new Set<string>();

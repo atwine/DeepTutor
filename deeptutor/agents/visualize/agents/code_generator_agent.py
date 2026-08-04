@@ -12,6 +12,8 @@ from ..utils import extract_code_block
 
 
 class CodeGeneratorAgent(BaseAgent):
+    """Generates visualization code (SVG, Chart.js, Mermaid, or HTML)."""
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -19,6 +21,14 @@ class CodeGeneratorAgent(BaseAgent):
         api_version: str | None = None,
         language: str = "zh",
     ) -> None:
+        """Initialize the visualization code generator agent.
+
+        Args:
+            api_key: LLM provider API key.
+            base_url: LLM provider base URL.
+            api_version: API version for Azure OpenAI (optional).
+            language: Language code (``"zh"`` or ``"en"``).
+        """
         super().__init__(
             module_name="visualize",
             agent_name="code_generator_agent",
@@ -35,6 +45,19 @@ class CodeGeneratorAgent(BaseAgent):
         history_context: str,
         analysis: VisualizationAnalysis,
     ) -> str:
+        """Generate visualization code from the analysis brief.
+
+        Args:
+            user_input: The user's visualization request text.
+            history_context: Prior conversation context for continuity.
+            analysis: The analysis result with the chosen render type.
+
+        Returns:
+            The extracted visualization code string.
+
+        Raises:
+            ValueError: If the code generation prompts are not configured.
+        """
         # Structured prompt assembly: every render type loads the shared
         # base + general rules, plus exactly one format-specific rule block.
         # This keeps the per-call prompt dense with the rules that matter for

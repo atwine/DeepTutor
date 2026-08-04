@@ -68,6 +68,8 @@ def make_imported_session_id(source: str, external_id: str) -> str:
 
 @dataclass
 class TurnRecord:
+    """A single turn record persisted in the ``turns`` table."""
+
     id: str
     session_id: str
     capability: str
@@ -79,6 +81,7 @@ class TurnRecord:
     last_seq: int = 0
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize this turn record to a dictionary."""
         return {
             "id": self.id,
             "turn_id": self.id,
@@ -97,6 +100,12 @@ class SQLiteSessionStore:
     """Persist unified chat sessions and messages in a SQLite database."""
 
     def __init__(self, db_path: Path | None = None) -> None:
+        """Initialize the store, migrating any legacy DB and creating tables.
+
+        Args:
+            db_path: Optional explicit path to the SQLite database file.
+                When ``None``, the path is resolved via ``get_path_service``.
+        """
         path_service = get_path_service()
         self.db_path = db_path or path_service.get_chat_history_db()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -453,6 +462,15 @@ class SQLiteSessionStore:
         title: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
+        """Create a new chat session row in the database.
+
+        Args:
+            title: Optional human-readable title for the session.
+            session_id: Optional explicit session id; auto-generated when ``None``.
+
+        Returns:
+            A dictionary representing the newly created session.
+        """
         return await self._run(self._create_session_sync, title, session_id)
 
     def _get_session_sync(self, session_id: str) -> dict[str, Any] | None:
@@ -511,12 +529,29 @@ class SQLiteSessionStore:
         return payload
 
     async def get_session(self, session_id: str) -> dict[str, Any] | None:
+        """Retrieve a single session by id, including status and active turn info.
+
+        Args:
+            session_id: The session id to look up.
+
+        Returns:
+            A dictionary with session fields, or ``None`` if not found.
+        """
         return await self._run(self._get_session_sync, session_id)
 
     async def ensure_session(
         self,
         session_id: str | None = None,
     ) -> dict[str, Any]:
+        """Return an existing session or create a new one if it is missing.
+
+        Args:
+            session_id: The session id to look up. When ``None`` or not found,
+                a new session is created.
+
+        Returns:
+            A dictionary representing the resolved (existing or new) session.
+        """
         if session_id:
             session = await self.get_session(session_id)
             if session is not None:
@@ -578,6 +613,19 @@ class SQLiteSessionStore:
         }
 
     async def create_turn(self, session_id: str, capability: str = "") -> dict[str, Any]:
+        """Start a new turn for a session.
+
+        Args:
+            session_id: The session to create the turn under.
+            capability: Optional capability name associated with the turn.
+
+        Returns:
+            A dictionary representing the newly created turn.
+
+        Raises:
+            ValueError: If the session does not exist.
+            RuntimeError: If the session already has an active (running) turn.
+        """
         return await self._run(self._create_turn_sync, session_id, capability)
 
     def _get_turn_sync(self, turn_id: str) -> dict[str, Any] | None:
@@ -597,6 +645,14 @@ class SQLiteSessionStore:
         return self._serialize_turn(row)
 
     async def get_turn(self, turn_id: str) -> dict[str, Any] | None:
+        """Retrieve a single turn by id.
+
+        Args:
+            turn_id: The turn id to look up.
+
+        Returns:
+            A dictionary representing the turn, or ``None`` if not found.
+        """
         return await self._run(self._get_turn_sync, turn_id)
 
     def _get_active_turn_sync(self, session_id: str) -> dict[str, Any] | None:
@@ -618,6 +674,15 @@ class SQLiteSessionStore:
         return self._serialize_turn(row)
 
     async def get_active_turn(self, session_id: str) -> dict[str, Any] | None:
+        """Return the currently running turn for a session, if any.
+
+        Args:
+            session_id: The session to check.
+
+        Returns:
+            A dictionary representing the active turn, or ``None`` if there
+            is no running turn.
+        """
         return await self._run(self._get_active_turn_sync, session_id)
 
     def _list_active_turns_sync(self, session_id: str) -> list[dict[str, Any]]:
@@ -636,6 +701,14 @@ class SQLiteSessionStore:
         return [self._serialize_turn(row) for row in rows]
 
     async def list_active_turns(self, session_id: str) -> list[dict[str, Any]]:
+        """List all running turns for a session, most recently updated first.
+
+        Args:
+            session_id: The session to list active turns for.
+
+        Returns:
+            A list of turn dictionaries.
+        """
         return await self._run(self._list_active_turns_sync, session_id)
 
     def _update_turn_status_sync(self, turn_id: str, status: str, error: str = "") -> bool:
@@ -654,6 +727,16 @@ class SQLiteSessionStore:
         return cur.rowcount > 0
 
     async def update_turn_status(self, turn_id: str, status: str, error: str = "") -> bool:
+        """Update the status (and optional error) of a turn.
+
+        Args:
+            turn_id: The turn to update.
+            status: The new status (e.g. ``completed``, ``failed``, ``cancelled``).
+            error: Optional error message to record.
+
+        Returns:
+            ``True`` if the turn was found and updated, ``False`` otherwise.
+        """
         return await self._run(self._update_turn_status_sync, turn_id, status, error)
 
     def _append_turn_event_sync(self, turn_id: str, event: dict[str, Any]) -> dict[str, Any]:
@@ -703,6 +786,18 @@ class SQLiteSessionStore:
         return payload
 
     async def append_turn_event(self, turn_id: str, event: dict[str, Any]) -> dict[str, Any]:
+        """Append a single event to a turn's event stream.
+
+        Args:
+            turn_id: The turn to append the event to.
+            event: A dictionary describing the event payload.
+
+        Returns:
+            The event dictionary with ``seq`` and ``turn_id`` filled in.
+
+        Raises:
+            ValueError: If the turn does not exist.
+        """
         return await self._run(self._append_turn_event_sync, turn_id, event)
 
     def _append_turn_events_sync(
@@ -770,6 +865,18 @@ class SQLiteSessionStore:
     async def append_turn_events(
         self, turn_id: str, events: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
+        """Append a batch of events to a turn in a single transaction.
+
+        Args:
+            turn_id: The turn to append events to.
+            events: A list of event payload dictionaries.
+
+        Returns:
+            A list of event dictionaries with ``seq`` and ``turn_id`` filled in.
+
+        Raises:
+            ValueError: If the turn does not exist.
+        """
         return await self._run(self._append_turn_events_sync, turn_id, events)
 
     def _get_turn_events_sync(self, turn_id: str, after_seq: int = 0) -> list[dict[str, Any]]:
@@ -801,6 +908,15 @@ class SQLiteSessionStore:
         ]
 
     async def get_turn_events(self, turn_id: str, after_seq: int = 0) -> list[dict[str, Any]]:
+        """Retrieve events for a turn, optionally starting after a given seq.
+
+        Args:
+            turn_id: The turn to retrieve events for.
+            after_seq: Only return events with ``seq`` greater than this value.
+
+        Returns:
+            A list of event dictionaries ordered by ``seq`` ascending.
+        """
         return await self._run(self._get_turn_events_sync, turn_id, after_seq)
 
     def _update_session_title_sync(self, session_id: str, title: str) -> bool:
@@ -817,6 +933,15 @@ class SQLiteSessionStore:
         return cur.rowcount > 0
 
     async def update_session_title(self, session_id: str, title: str) -> bool:
+        """Update the title of an existing session.
+
+        Args:
+            session_id: The session to update.
+            title: The new title (truncated to 100 characters).
+
+        Returns:
+            ``True`` if the session was found and updated, ``False`` otherwise.
+        """
         return await self._run(self._update_session_title_sync, session_id, title)
 
     def _delete_session_sync(self, session_id: str) -> bool:
@@ -826,6 +951,14 @@ class SQLiteSessionStore:
         return cur.rowcount > 0
 
     async def delete_session(self, session_id: str) -> bool:
+        """Delete a session and all its dependent rows (messages, turns, etc.).
+
+        Args:
+            session_id: The session to delete.
+
+        Returns:
+            ``True`` if the session was found and deleted, ``False`` otherwise.
+        """
         return await self._run(self._delete_session_sync, session_id)
 
     def _add_message_sync(
@@ -910,6 +1043,26 @@ class SQLiteSessionStore:
         # integer rowid this store itself returned.
         parent_message_id: int | str | None | _Unset = _PARENT_AUTO,
     ) -> int:
+        """Append a message to a session and return its new row id.
+
+        Args:
+            session_id: The session to add the message to.
+            role: The message role (e.g. ``user``, ``assistant``, ``system``).
+            content: The message text content.
+            capability: Optional capability that produced the message.
+            events: Optional list of stream events to persist with the message.
+            attachments: Optional list of attachment metadata dictionaries.
+            metadata: Optional arbitrary metadata dictionary.
+            parent_message_id: The parent message id for edit-branching.
+                Defaults to auto-chaining off the latest message; ``None``
+                attaches at the session root.
+
+        Returns:
+            The integer row id of the newly inserted message.
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
         return await self._run(
             self._add_message_sync,
             session_id,
@@ -1054,6 +1207,14 @@ class SQLiteSessionStore:
         return cur.rowcount > 0
 
     async def delete_message(self, message_id: int | str) -> bool:
+        """Delete a single message by id.
+
+        Args:
+            message_id: The message row id to delete.
+
+        Returns:
+            ``True`` if the message was found and deleted, ``False`` otherwise.
+        """
         return await self._run(self._delete_message_sync, message_id)
 
     def _set_message_feedback_sync(
@@ -1137,6 +1298,14 @@ class SQLiteSessionStore:
         return results
 
     async def list_feedback(self, limit: int = 200) -> list[dict[str, Any]]:
+        """List all rated messages in this workspace, most recent first.
+
+        Args:
+            limit: Maximum number of feedback entries to return.
+
+        Returns:
+            A list of dictionaries describing each rated message.
+        """
         return await self._run(self._list_feedback_sync, limit)
 
     def _delete_turn_by_message_sync(self, session_id: str, message_id: int) -> dict[str, Any]:
@@ -1256,6 +1425,16 @@ class SQLiteSessionStore:
         }
 
     async def delete_turn_by_message(self, session_id: str, message_id: int) -> dict[str, Any]:
+        """Delete a message, its paired message, and the associated turn.
+
+        Args:
+            session_id: The session the message belongs to.
+            message_id: The message id to delete (and its paired counterpart).
+
+        Returns:
+            A dictionary with ``deleted``, ``attachment_ids``, ``turn_id``,
+            and ``was_running`` keys describing the outcome.
+        """
         return await self._run(self._delete_turn_by_message_sync, session_id, message_id)
 
     def _get_last_message_sync(
@@ -1293,6 +1472,15 @@ class SQLiteSessionStore:
     async def get_last_message(
         self, session_id: str, role: str | None = None
     ) -> dict[str, Any] | None:
+        """Retrieve the most recent message in a session, optionally filtered by role.
+
+        Args:
+            session_id: The session to query.
+            role: Optional role filter (e.g. ``user``, ``assistant``).
+
+        Returns:
+            A dictionary representing the message, or ``None`` if no match.
+        """
         return await self._run(self._get_last_message_sync, session_id, role)
 
     def _serialize_message(self, row: sqlite3.Row) -> dict[str, Any]:
@@ -1362,9 +1550,26 @@ class SQLiteSessionStore:
         return chain
 
     async def get_message_path(self, session_id: str, leaf_message_id: int) -> list[dict[str, Any]]:
+        """Return the chain of messages from the session root to a leaf message.
+
+        Args:
+            session_id: The session containing the message tree.
+            leaf_message_id: The leaf message id to trace back from.
+
+        Returns:
+            A list of message dictionaries in chronological order.
+        """
         return await self._run(self._get_message_path_sync, session_id, int(leaf_message_id))
 
     async def get_messages(self, session_id: str) -> list[dict[str, Any]]:
+        """Retrieve all messages for a session in chronological order.
+
+        Args:
+            session_id: The session to list messages for.
+
+        Returns:
+            A list of message dictionaries ordered by id ascending.
+        """
         return await self._run(self._get_messages_sync, session_id)
 
     def _get_messages_for_context_sync(
@@ -1423,6 +1628,19 @@ class SQLiteSessionStore:
     async def get_messages_for_context(
         self, session_id: str, leaf_message_id: int | None = None
     ) -> list[dict[str, Any]]:
+        """Retrieve lightweight message context for LLM prompting.
+
+        When ``leaf_message_id`` is provided, only the ancestor chain up to
+        that leaf is returned (branch-aware). Otherwise all user/assistant/
+        system messages are returned in order.
+
+        Args:
+            session_id: The session to query.
+            leaf_message_id: Optional leaf message id for branch-aware context.
+
+        Returns:
+            A list of dictionaries with ``id``, ``role``, and ``content`` keys.
+        """
         return await self._run(self._get_messages_for_context_sync, session_id, leaf_message_id)
 
     # Imported conversations live in the same tables as native chats (so the
@@ -1510,6 +1728,15 @@ class SQLiteSessionStore:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        """List native chat sessions, most recently updated first.
+
+        Args:
+            limit: Maximum number of sessions to return.
+            offset: Number of sessions to skip for pagination.
+
+        Returns:
+            A list of session summary dictionaries.
+        """
         return await self._run(self._list_sessions_sync, limit, offset)
 
     async def list_imported_sessions(
@@ -1517,6 +1744,15 @@ class SQLiteSessionStore:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        """List imported conversation sessions, most recently updated first.
+
+        Args:
+            limit: Maximum number of sessions to return.
+            offset: Number of sessions to skip for pagination.
+
+        Returns:
+            A list of session summary dictionaries.
+        """
         return await self._run(self._list_imported_sessions_sync, limit, offset)
 
     def _update_summary_sync(self, session_id: str, summary: str, up_to_msg_id: int) -> bool:
@@ -1533,6 +1769,16 @@ class SQLiteSessionStore:
         return cur.rowcount > 0
 
     async def update_summary(self, session_id: str, summary: str, up_to_msg_id: int) -> bool:
+        """Persist a compressed conversation summary for a session.
+
+        Args:
+            session_id: The session to update.
+            summary: The compressed summary text.
+            up_to_msg_id: The message id up to which the summary covers.
+
+        Returns:
+            ``True`` if the session was found and updated, ``False`` otherwise.
+        """
         return await self._run(self._update_summary_sync, session_id, summary, up_to_msg_id)
 
     def _update_session_preferences_sync(
@@ -1563,9 +1809,27 @@ class SQLiteSessionStore:
     async def update_session_preferences(
         self, session_id: str, preferences: dict[str, Any]
     ) -> bool:
+        """Merge new preferences into a session's existing preferences JSON.
+
+        Args:
+            session_id: The session to update.
+            preferences: A dictionary of preference keys to merge in.
+
+        Returns:
+            ``True`` if the session was found and updated, ``False`` otherwise.
+        """
         return await self._run(self._update_session_preferences_sync, session_id, preferences)
 
     async def get_session_with_messages(self, session_id: str) -> dict[str, Any] | None:
+        """Retrieve a session together with its messages and active turns.
+
+        Args:
+            session_id: The session to retrieve.
+
+        Returns:
+            A session dictionary augmented with ``messages`` and
+            ``active_turns`` lists, or ``None`` if the session is not found.
+        """
         session = await self.get_session(session_id)
         if session is None:
             return None
@@ -1667,6 +1931,18 @@ class SQLiteSessionStore:
         return upserted
 
     async def upsert_notebook_entries(self, session_id: str, items: list[dict[str, Any]]) -> int:
+        """Insert or update notebook entries for a session.
+
+        Args:
+            session_id: The session the entries belong to.
+            items: A list of entry dictionaries to upsert.
+
+        Returns:
+            The number of entries successfully upserted.
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
         return await self._run(self._upsert_notebook_entries_sync, session_id, items)
 
     @staticmethod
@@ -1757,6 +2033,19 @@ class SQLiteSessionStore:
         *,
         session_id: str | None = None,
     ) -> dict[str, Any]:
+        """List notebook entries with optional filters and pagination.
+
+        Args:
+            category_id: Optional category to filter by.
+            bookmarked: Optional filter for bookmarked entries.
+            is_correct: Optional filter for correctly answered entries.
+            limit: Maximum number of entries to return.
+            offset: Number of entries to skip for pagination.
+            session_id: Optional session id to scope the query to.
+
+        Returns:
+            A dictionary with ``items`` (list of entries) and ``total`` (count).
+        """
         return await self._run(
             self._list_notebook_entries_sync,
             category_id,
@@ -1796,6 +2085,15 @@ class SQLiteSessionStore:
         return entry
 
     async def get_notebook_entry(self, entry_id: int) -> dict[str, Any] | None:
+        """Retrieve a single notebook entry by id, including its categories.
+
+        Args:
+            entry_id: The notebook entry id to look up.
+
+        Returns:
+            A dictionary representing the entry with a ``categories`` list,
+            or ``None`` if not found.
+        """
         return await self._run(self._get_notebook_entry_sync, entry_id)
 
     def _find_notebook_entry_sync(
@@ -1832,6 +2130,16 @@ class SQLiteSessionStore:
         question_id: str,
         turn_id: str | None = None,
     ) -> dict[str, Any] | None:
+        """Find a notebook entry by session, question id, and optional turn id.
+
+        Args:
+            session_id: The session to search within.
+            question_id: The question id to match.
+            turn_id: Optional turn id to scope the search.
+
+        Returns:
+            A dictionary representing the entry, or ``None`` if not found.
+        """
         return await self._run(self._find_notebook_entry_sync, session_id, question_id, turn_id)
 
     def _update_notebook_entry_sync(self, entry_id: int, updates: dict[str, Any]) -> bool:
@@ -1861,6 +2169,17 @@ class SQLiteSessionStore:
         return cur.rowcount > 0
 
     async def update_notebook_entry(self, entry_id: int, updates: dict[str, Any]) -> bool:
+        """Update allowed fields on an existing notebook entry.
+
+        Args:
+            entry_id: The notebook entry id to update.
+            updates: A dictionary of field names to new values. Only
+                ``bookmarked``, ``followup_session_id``, ``user_answer``,
+                ``is_correct``, and ``ai_judgment`` are accepted.
+
+        Returns:
+            ``True`` if the entry was found and updated, ``False`` otherwise.
+        """
         return await self._run(self._update_notebook_entry_sync, entry_id, updates)
 
     def _delete_notebook_entry_sync(self, entry_id: int) -> bool:
@@ -1870,6 +2189,14 @@ class SQLiteSessionStore:
         return cur.rowcount > 0
 
     async def delete_notebook_entry(self, entry_id: int) -> bool:
+        """Delete a notebook entry by id.
+
+        Args:
+            entry_id: The notebook entry id to delete.
+
+        Returns:
+            ``True`` if the entry was found and deleted, ``False`` otherwise.
+        """
         return await self._run(self._delete_notebook_entry_sync, entry_id)
 
     # ── Notebook categories ────────────────────────────────────────
@@ -1885,6 +2212,15 @@ class SQLiteSessionStore:
         return {"id": int(cur.lastrowid), "name": name.strip(), "created_at": now}
 
     async def create_category(self, name: str) -> dict[str, Any]:
+        """Create a new notebook category.
+
+        Args:
+            name: The category name (must be unique).
+
+        Returns:
+            A dictionary with the new category's ``id``, ``name``, and
+            ``created_at``.
+        """
         return await self._run(self._create_category_sync, name)
 
     def _list_categories_sync(self) -> list[dict[str, Any]]:
@@ -1910,6 +2246,12 @@ class SQLiteSessionStore:
         ]
 
     async def list_categories(self) -> list[dict[str, Any]]:
+        """List all notebook categories with their entry counts.
+
+        Returns:
+            A list of dictionaries with ``id``, ``name``, ``created_at``,
+            and ``entry_count`` keys, ordered by name.
+        """
         return await self._run(self._list_categories_sync)
 
     def _rename_category_sync(self, category_id: int, name: str) -> bool:
@@ -1922,6 +2264,15 @@ class SQLiteSessionStore:
         return cur.rowcount > 0
 
     async def rename_category(self, category_id: int, name: str) -> bool:
+        """Rename an existing notebook category.
+
+        Args:
+            category_id: The category id to rename.
+            name: The new category name.
+
+        Returns:
+            ``True`` if the category was found and renamed, ``False`` otherwise.
+        """
         return await self._run(self._rename_category_sync, category_id, name)
 
     def _delete_category_sync(self, category_id: int) -> bool:
@@ -1931,6 +2282,14 @@ class SQLiteSessionStore:
         return cur.rowcount > 0
 
     async def delete_category(self, category_id: int) -> bool:
+        """Delete a notebook category by id.
+
+        Args:
+            category_id: The category id to delete.
+
+        Returns:
+            ``True`` if the category was found and deleted, ``False`` otherwise.
+        """
         return await self._run(self._delete_category_sync, category_id)
 
     def _add_entry_to_category_sync(self, entry_id: int, category_id: int) -> bool:
@@ -1946,6 +2305,16 @@ class SQLiteSessionStore:
         return True
 
     async def add_entry_to_category(self, entry_id: int, category_id: int) -> bool:
+        """Associate a notebook entry with a category.
+
+        Args:
+            entry_id: The notebook entry id.
+            category_id: The category id to associate with.
+
+        Returns:
+            ``True`` if the association was created, ``False`` if the entry
+            or category does not exist.
+        """
         return await self._run(self._add_entry_to_category_sync, entry_id, category_id)
 
     def _remove_entry_from_category_sync(self, entry_id: int, category_id: int) -> bool:
@@ -1958,6 +2327,15 @@ class SQLiteSessionStore:
         return cur.rowcount > 0
 
     async def remove_entry_from_category(self, entry_id: int, category_id: int) -> bool:
+        """Remove a notebook entry's association with a category.
+
+        Args:
+            entry_id: The notebook entry id.
+            category_id: The category id to disassociate from.
+
+        Returns:
+            ``True`` if the association was removed, ``False`` otherwise.
+        """
         return await self._run(self._remove_entry_from_category_sync, entry_id, category_id)
 
     def _get_entry_categories_sync(self, entry_id: int) -> list[dict[str, Any]]:
@@ -1974,6 +2352,15 @@ class SQLiteSessionStore:
         return [{"id": r["id"], "name": r["name"]} for r in rows]
 
     async def get_entry_categories(self, entry_id: int) -> list[dict[str, Any]]:
+        """List all categories associated with a notebook entry.
+
+        Args:
+            entry_id: The notebook entry id to look up.
+
+        Returns:
+            A list of dictionaries with ``id`` and ``name`` keys, ordered
+            by name.
+        """
         return await self._run(self._get_entry_categories_sync, entry_id)
 
 
@@ -1981,6 +2368,7 @@ _instances: dict[str, SQLiteSessionStore] = {}
 
 
 def get_sqlite_session_store() -> SQLiteSessionStore:
+    """Return a process-wide singleton ``SQLiteSessionStore`` for the current DB path."""
     db_path = get_path_service().get_chat_history_db().resolve()
     key = str(db_path)
     if key not in _instances:

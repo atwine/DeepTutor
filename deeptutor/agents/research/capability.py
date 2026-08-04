@@ -35,6 +35,8 @@ from deeptutor.services.config import load_config_with_main
 
 
 class DeepResearchCapability(BaseCapability):
+    """Capability wrapper for the deep research pipeline."""
+
     manifest = CapabilityManifest(
         name="deep_research",
         description="Agentic-loop deep research with iterative report generation.",
@@ -45,6 +47,12 @@ class DeepResearchCapability(BaseCapability):
     )
 
     async def run(self, context: UnifiedContext, stream: StreamBus) -> None:
+        """Execute the deep research capability for one turn.
+
+        Args:
+            context: The unified context for the current turn.
+            stream: The stream bus for emitting events to the frontend.
+        """
         kb_name = context.knowledge_bases[0] if context.knowledge_bases else None
         request_config = validate_research_request_config(context.config_overrides)
 

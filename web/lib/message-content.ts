@@ -1,3 +1,4 @@
+/** A single content part within a multi-part message. */
 export type MessageContentItem = {
   type: string;
   text?: string;
@@ -7,6 +8,7 @@ export type MessageContentItem = {
   alt?: string;
 };
 
+/** Untyped raw message content from the backend. */
 export type RawMessageContent = unknown;
 
 function stringifyObject(value: Record<string, unknown>): string {
@@ -26,6 +28,12 @@ function normalizeObjectContent(item: Record<string, unknown>): string {
   return stringifyObject(item);
 }
 
+/**
+ * Normalize raw message content (string, array, or object) into a plain string.
+ *
+ * @param content - Raw content from the backend.
+ * @returns A flattened string representation.
+ */
 export function normalizeMessageContent(content: RawMessageContent): string {
   if (content == null) return "";
   if (typeof content === "string") return content;
@@ -44,6 +52,13 @@ export function normalizeMessageContent(content: RawMessageContent): string {
   return String(content);
 }
 
+/**
+ * Truncate text to a maximum length, appending an ellipsis if cut.
+ *
+ * @param text - Text to truncate.
+ * @param maxLength - Maximum number of characters to keep.
+ * @returns The truncated string.
+ */
 export function truncateText(text: string, maxLength: number = 100): string {
   if (!text) return "";
   if (text.length <= maxLength) return text;

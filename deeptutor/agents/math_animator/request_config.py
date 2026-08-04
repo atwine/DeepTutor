@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 class MathAnimatorRequestConfig(BaseModel):
+    """Validated configuration for a math animator request."""
+
     model_config = ConfigDict(extra="forbid")
 
     output_mode: Literal["video", "image"] = "video"
@@ -18,6 +20,17 @@ class MathAnimatorRequestConfig(BaseModel):
 def validate_math_animator_request_config(
     raw_config: dict[str, Any] | None,
 ) -> MathAnimatorRequestConfig:
+    """Validate and parse a raw config dict into a :class:`MathAnimatorRequestConfig`.
+
+    Args:
+        raw_config: Raw configuration dictionary from the request, or ``None``.
+
+    Returns:
+        A validated :class:`MathAnimatorRequestConfig` instance.
+
+    Raises:
+        ValueError: If the config is not a dict or fails Pydantic validation.
+    """
     if raw_config is None:
         return MathAnimatorRequestConfig()
     if not isinstance(raw_config, dict):

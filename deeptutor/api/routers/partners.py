@@ -109,12 +109,16 @@ class SoulSpec(BaseModel):
 
 
 class AssetSpec(BaseModel):
+    """Specification of knowledge bases, skills, and notebooks to provision."""
+
     knowledge_bases: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     notebooks: list[str] = Field(default_factory=list)
 
 
 class CreatePartnerRequest(BaseModel):
+    """Request body for creating a new partner."""
+
     partner_id: str | None = None
     name: str = Field(..., min_length=1)
     description: str | None = None
@@ -136,6 +140,8 @@ class CreatePartnerRequest(BaseModel):
 
 
 class UpdatePartnerRequest(BaseModel):
+    """Request body for partially updating an existing partner's config."""
+
     name: str | None = None
     description: str | None = None
     channels: dict | None = None
@@ -151,14 +157,20 @@ class UpdatePartnerRequest(BaseModel):
 
 
 class SoulUpdateBody(BaseModel):
+    """Request body for updating a partner's soul markdown content."""
+
     content: str
 
 
 class AssetAddRequest(AssetSpec):
+    """Request body for adding assets to an existing partner workspace."""
+
     pass
 
 
 class ChatAttachmentRequest(BaseModel):
+    """A single attachment sent with a partner chat message."""
+
     type: str = "file"
     url: str = ""
     base64: str = ""
@@ -167,6 +179,8 @@ class ChatAttachmentRequest(BaseModel):
 
 
 class ChatMessageRequest(BaseModel):
+    """Request body for sending a chat message to a partner."""
+
     model_config = ConfigDict(populate_by_name=True)
 
     content: str = ""
@@ -178,21 +192,29 @@ class ChatMessageRequest(BaseModel):
 
 
 class SessionKeyBody(BaseModel):
+    """Request body carrying a single session key."""
+
     session_key: str = Field(..., min_length=1)
 
 
 class SessionBranchBody(BaseModel):
+    """Request body for branching a session into a new key."""
+
     source_key: str = Field(..., min_length=1)
     new_key: str = Field(..., min_length=1)
 
 
 class SoulCreateRequest(BaseModel):
+    """Request body for creating a new soul template in the library."""
+
     id: str
     name: str
     content: str
 
 
 class SoulTemplateUpdateRequest(BaseModel):
+    """Request body for updating an existing soul template's name or content."""
+
     name: str | None = None
     content: str | None = None
 
@@ -326,11 +348,23 @@ def _load_persona_markdown(name: str) -> str:
 
 @router.get("/souls")
 async def list_souls():
+    """List all soul templates in the library."""
     return get_partner_manager().list_souls()
 
 
 @router.post("/souls")
 async def create_soul(payload: SoulCreateRequest):
+    """Create a new soul template in the library.
+
+    Args:
+        payload: The soul creation request with id, name, and content.
+
+    Returns:
+        The created soul template entry.
+
+    Raises:
+        HTTPException: 409 if a soul with the same id already exists.
+    """
     mgr = get_partner_manager()
     # Slug the id server-side (authoritative): soul ids ride in ``/souls/<id>``
     # URLs, so a raw CJK / path-unsafe id (e.g. ``我的灵魂`` or ``a/b``) would be
@@ -343,6 +377,17 @@ async def create_soul(payload: SoulCreateRequest):
 
 @router.get("/souls/{soul_id}")
 async def get_soul(soul_id: str):
+    """Retrieve a single soul template by id.
+
+    Args:
+        soul_id: The unique identifier of the soul template.
+
+    Returns:
+        The soul template entry.
+
+    Raises:
+        HTTPException: 404 if the soul is not found.
+    """
     soul = get_partner_manager().get_soul(soul_id)
     if not soul:
         raise HTTPException(status_code=404, detail=t("api.soul_not_found"))
@@ -351,6 +396,18 @@ async def get_soul(soul_id: str):
 
 @router.put("/souls/{soul_id}")
 async def update_soul(soul_id: str, payload: SoulTemplateUpdateRequest):
+    """Update an existing soul template's name and/or content.
+
+    Args:
+        soul_id: The unique identifier of the soul template.
+        payload: The update request with optional name and content.
+
+    Returns:
+        The updated soul template entry.
+
+    Raises:
+        HTTPException: 404 if the soul is not found.
+    """
     result = get_partner_manager().update_soul(soul_id, payload.name, payload.content)
     if not result:
         raise HTTPException(status_code=404, detail=t("api.soul_not_found"))
@@ -359,6 +416,17 @@ async def update_soul(soul_id: str, payload: SoulTemplateUpdateRequest):
 
 @router.delete("/souls/{soul_id}")
 async def delete_soul(soul_id: str):
+    """Delete a soul template from the library.
+
+    Args:
+        soul_id: The unique identifier of the soul template.
+
+    Returns:
+        A dict confirming deletion with the soul id.
+
+    Raises:
+        HTTPException: 404 if the soul is not found.
+    """
     if not get_partner_manager().delete_soul(soul_id):
         raise HTTPException(status_code=404, detail=t("api.soul_not_found"))
     return {"id": soul_id, "deleted": True}
@@ -408,11 +476,20 @@ async def soul_sources():
 
 @router.get("")
 async def list_partners():
+    """List all configured partners."""
     return get_partner_manager().list_partners()
 
 
 @router.get("/recent")
 async def recent_partners(limit: int = 3):
+    """Return the most recently active partners.
+
+    Args:
+        limit: Maximum number of partners to return.
+
+    Returns:
+        A list of recently active partner summaries.
+    """
     return get_partner_manager().get_recent_active_partners(limit=limit)
 
 
@@ -446,6 +523,19 @@ async def tool_options():
 
 @router.post("")
 async def create_partner(payload: CreatePartnerRequest):
+    """Create a new partner with soul, channels, assets, and optional auto-start.
+
+    Args:
+        payload: The partner creation request with name, channels, soul spec,
+            LLM selection, assets, and start flag.
+
+    Returns:
+        A dict describing the created partner instance and provisioning results.
+
+    Raises:
+        HTTPException: 409 if a partner with the same id already exists; 422
+            for invalid channels, avatar, or LLM selection.
+    """
     mgr = get_partner_manager()
     partner_id = slugify_partner_id(payload.partner_id or payload.name)
     if mgr.partner_exists(partner_id):
@@ -545,6 +635,19 @@ async def get_partner(
         ),
     ),
 ):
+    """Retrieve a partner's current state (running instance or stored config).
+
+    Args:
+        partner_id: The unique identifier of the partner.
+        include_secrets: If True, return raw channel secrets instead of
+            masked values.
+
+    Returns:
+        A dict describing the partner instance or stopped config.
+
+    Raises:
+        HTTPException: 404 if the partner is not found.
+    """
     mgr = get_partner_manager()
     instance = mgr.get_partner(partner_id)
     if instance:
@@ -588,6 +691,19 @@ def _apply_update(cfg: PartnerConfig, payload: UpdatePartnerRequest) -> None:
 
 @router.patch("/{partner_id}")
 async def update_partner(partner_id: str, payload: UpdatePartnerRequest):
+    """Partially update a partner's configuration.
+
+    Args:
+        partner_id: The unique identifier of the partner.
+        payload: The update request with optional fields to change.
+
+    Returns:
+        A dict describing the updated partner instance or stopped config.
+
+    Raises:
+        HTTPException: 404 if the partner is not found; 422 for invalid
+            channels; 500 if channel reload fails.
+    """
     if payload.channels is not None:
         _validate_channels_payload(payload.channels)
 
@@ -622,6 +738,18 @@ async def update_partner(partner_id: str, payload: UpdatePartnerRequest):
 
 @router.post("/{partner_id}/start")
 async def start_partner(partner_id: str):
+    """Start a partner and persist auto-start intent for future restarts.
+
+    Args:
+        partner_id: The unique identifier of the partner.
+
+    Returns:
+        A dict describing the running partner instance.
+
+    Raises:
+        HTTPException: 404 if the partner config is not found; 500 on
+            start failure.
+    """
     instance = await _ensure_running_partner(partner_id, allow_stopped=True)
     # An explicit start is a persisted "run on boot" intent — so the partner
     # comes back in this state after a DeepTutor restart (a manual /stop clears
@@ -632,6 +760,17 @@ async def start_partner(partner_id: str):
 
 @router.post("/{partner_id}/stop")
 async def stop_partner(partner_id: str):
+    """Stop a running partner.
+
+    Args:
+        partner_id: The unique identifier of the partner.
+
+    Returns:
+        A dict confirming the partner was stopped.
+
+    Raises:
+        HTTPException: 404 if the partner is not found or not running.
+    """
     stopped = await get_partner_manager().stop_partner(partner_id)
     if not stopped:
         raise HTTPException(status_code=404, detail=t("api.partner_not_found_or_not_running"))
@@ -640,6 +779,17 @@ async def stop_partner(partner_id: str):
 
 @router.delete("/{partner_id}")
 async def destroy_partner(partner_id: str):
+    """Permanently destroy a partner and all its data.
+
+    Args:
+        partner_id: The unique identifier of the partner.
+
+    Returns:
+        A dict confirming the partner was destroyed.
+
+    Raises:
+        HTTPException: 404 if the partner is not found.
+    """
     destroyed = await get_partner_manager().destroy_partner(partner_id)
     if not destroyed:
         raise HTTPException(status_code=404, detail=t("api.partner_not_found"))
@@ -648,6 +798,17 @@ async def destroy_partner(partner_id: str):
 
 @router.post("/{partner_id}/channels/reload")
 async def reload_partner_channels(partner_id: str):
+    """Reload a running partner's channel listeners without restarting.
+
+    Args:
+        partner_id: The unique identifier of the partner.
+
+    Returns:
+        A dict confirming the channels were reloaded.
+
+    Raises:
+        HTTPException: 404 if the partner is not running; 500 on reload failure.
+    """
     mgr = get_partner_manager()
     instance = mgr.get_partner(partner_id)
     if not instance or not instance.running:
@@ -667,6 +828,17 @@ async def reload_partner_channels(partner_id: str):
 
 @router.get("/{partner_id}/soul")
 async def get_partner_soul(partner_id: str):
+    """Retrieve a partner's soul markdown content.
+
+    Args:
+        partner_id: The unique identifier of the partner.
+
+    Returns:
+        A dict with the partner id and soul content.
+
+    Raises:
+        HTTPException: 404 if the partner is not found.
+    """
     mgr = get_partner_manager()
     if not mgr.partner_exists(partner_id):
         raise HTTPException(status_code=404, detail=t("api.partner_not_found"))
@@ -675,6 +847,18 @@ async def get_partner_soul(partner_id: str):
 
 @router.put("/{partner_id}/soul")
 async def put_partner_soul(partner_id: str, payload: SoulUpdateBody):
+    """Update a partner's soul markdown content.
+
+    Args:
+        partner_id: The unique identifier of the partner.
+        payload: The request body containing the new soul content.
+
+    Returns:
+        A dict confirming the soul was saved.
+
+    Raises:
+        HTTPException: 404 if the partner is not found.
+    """
     mgr = get_partner_manager()
     if not mgr.partner_exists(partner_id):
         raise HTTPException(status_code=404, detail=t("api.partner_not_found"))
@@ -687,6 +871,17 @@ async def put_partner_soul(partner_id: str, payload: SoulUpdateBody):
 
 @router.get("/{partner_id}/assets")
 async def get_partner_assets(partner_id: str):
+    """List all assets provisioned in a partner's workspace.
+
+    Args:
+        partner_id: The unique identifier of the partner.
+
+    Returns:
+        A list of asset entries (knowledge bases, skills, notebooks).
+
+    Raises:
+        HTTPException: 404 if the partner is not found.
+    """
     mgr = get_partner_manager()
     if not mgr.partner_exists(partner_id):
         raise HTTPException(status_code=404, detail=t("api.partner_not_found"))
@@ -695,6 +890,18 @@ async def get_partner_assets(partner_id: str):
 
 @router.post("/{partner_id}/assets")
 async def add_partner_assets(partner_id: str, payload: AssetAddRequest):
+    """Provision additional assets into a partner's workspace.
+
+    Args:
+        partner_id: The unique identifier of the partner.
+        payload: The asset specification with knowledge bases, skills, notebooks.
+
+    Returns:
+        A dict with provisioning report and the updated asset list.
+
+    Raises:
+        HTTPException: 404 if the partner is not found.
+    """
     mgr = get_partner_manager()
     if not mgr.partner_exists(partner_id):
         raise HTTPException(status_code=404, detail=t("api.partner_not_found"))
@@ -709,6 +916,20 @@ async def add_partner_assets(partner_id: str, payload: AssetAddRequest):
 
 @router.delete("/{partner_id}/assets/{asset_type}/{name}")
 async def delete_partner_asset(partner_id: str, asset_type: str, name: str):
+    """Remove a single asset from a partner's workspace.
+
+    Args:
+        partner_id: The unique identifier of the partner.
+        asset_type: The asset category (e.g. ``knowledge_bases``, ``skills``).
+        name: The name of the asset to remove.
+
+    Returns:
+        A dict confirming removal with the updated asset list.
+
+    Raises:
+        HTTPException: 404 if the partner or asset is not found; 422 if the
+            asset type is invalid.
+    """
     mgr = get_partner_manager()
     if not mgr.partner_exists(partner_id):
         raise HTTPException(status_code=404, detail=t("api.partner_not_found"))
@@ -742,6 +963,17 @@ async def get_partner_history(
 
 @router.get("/{partner_id}/sessions")
 async def get_partner_sessions(partner_id: str):
+    """List all chat sessions for a partner.
+
+    Args:
+        partner_id: The unique identifier of the partner.
+
+    Returns:
+        A list of session summaries.
+
+    Raises:
+        HTTPException: 404 if the partner is not found.
+    """
     mgr = get_partner_manager()
     if not mgr.partner_exists(partner_id):
         raise HTTPException(status_code=404, detail=t("api.partner_not_found"))
@@ -772,6 +1004,18 @@ async def resume_partner_session(partner_id: str, payload: SessionKeyBody):
 
 @router.post("/{partner_id}/sessions/delete")
 async def delete_partner_session(partner_id: str, payload: SessionKeyBody):
+    """Permanently delete a partner chat session.
+
+    Args:
+        partner_id: The unique identifier of the partner.
+        payload: The request body with the session key to delete.
+
+    Returns:
+        A dict confirming the session was deleted.
+
+    Raises:
+        HTTPException: 404 if the partner or session is not found.
+    """
     mgr = get_partner_manager()
     if not mgr.partner_exists(partner_id):
         raise HTTPException(status_code=404, detail=t("api.partner_not_found"))
@@ -795,6 +1039,7 @@ async def branch_partner_session(partner_id: str, payload: SessionBranchBody):
 
 @router.get("/commands/palette")
 async def partner_command_palette():
+    """Return the command palette entries for partner slash commands."""
     from deeptutor.services.partners.commands import partner_command_palette
 
     return {"commands": partner_command_palette()}

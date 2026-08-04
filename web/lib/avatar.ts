@@ -10,9 +10,11 @@
  * the UserAvatar component maps icon names to lucide components on top.
  */
 
-// Same curated icon set as SessionAvatar, so the app keeps one visual voice.
-// Order matters: the fallback hash indexes into this list, so reordering or
-// removing entries silently reassigns every user's fallback avatar.
+/**
+ * Same curated icon set as SessionAvatar, so the app keeps one visual voice.
+ * Order matters: the fallback hash indexes into this list, so reordering or
+ * removing entries silently reassigns every user's fallback avatar.
+ */
 export const AVATAR_ICON_NAMES: readonly string[] = [
   "sparkles",
   "sprout",
@@ -32,8 +34,10 @@ export const AVATAR_ICON_NAMES: readonly string[] = [
   "music",
 ];
 
-// Fixed hexes (not theme variables) so a user's chosen color reads the same
-// across Light/Dark/Snow/Glass themes; all carry white icons at 4.5:1+.
+/**
+ * Fixed hexes (not theme variables) so a user's chosen color reads the same
+ * across Light/Dark/Snow/Glass themes; all carry white icons at 4.5:1+.
+ */
 export const AVATAR_COLORS: Record<string, string> = {
   violet: "#7c5fd3",
   blue: "#3f7cc8",
@@ -45,6 +49,7 @@ export const AVATAR_COLORS: Record<string, string> = {
   pink: "#bb5fb2",
 };
 
+/** Ordered list of avatar color names (keys of {@link AVATAR_COLORS}). */
 export const AVATAR_COLOR_NAMES = Object.keys(AVATAR_COLORS);
 
 // Cheap, stable FNV-1a hash (same as SessionAvatar) so a username always maps
@@ -58,6 +63,12 @@ function hashString(input: string): number {
   return h >>> 0;
 }
 
+/**
+ * Deterministically derive a fallback icon and color from a username.
+ *
+ * @param username - Username to hash for the fallback selection.
+ * @returns An object with the fallback icon name and color name.
+ */
 export function fallbackAvatarFor(username: string): {
   icon: string;
   color: string;
@@ -71,6 +82,7 @@ export function fallbackAvatarFor(username: string): {
   };
 }
 
+/** Classified avatar marker: an uploaded image, a chosen icon, or a fallback. */
 export type AvatarDescriptor =
   | { kind: "image"; version: string }
   | { kind: "icon"; icon: string; color: string }

@@ -1,5 +1,7 @@
+/** Generic event shape exchanged over the book WebSocket. */
 export type BookWsEvent = { type: string; [key: string]: unknown };
 
+/** Minimal socket interface used by {@link runBookSocketOperation}. */
 export interface BookSocketLike {
   onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent<string>) => void) | null;
@@ -9,6 +11,7 @@ export interface BookSocketLike {
   close(): void;
 }
 
+/** Options for running a single book WebSocket operation. */
 export interface BookSocketOperationOptions {
   message: BookWsEvent;
   resultType: string;
@@ -22,6 +25,16 @@ function errorMessage(event: BookWsEvent): string {
     : "Book WebSocket operation failed";
 }
 
+/**
+ * Run a single request/response cycle over a book WebSocket.
+ *
+ * Opens a socket, sends the message, and resolves when the matching
+ * result event arrives (or rejects on error/close).
+ *
+ * @param createSocket - Factory that returns a fresh socket instance.
+ * @param options - Message, expected result type, and optional event callback.
+ * @returns The result event payload.
+ */
 export function runBookSocketOperation<T extends BookWsEvent = BookWsEvent>(
   createSocket: () => BookSocketLike,
   options: BookSocketOperationOptions,

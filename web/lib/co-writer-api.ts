@@ -2,6 +2,7 @@ import { apiFetch, apiUrl } from "@/lib/api";
 
 const BASE = "/api/v1/co_writer";
 
+/** Summary of a Co-Writer document for list views. */
 export interface CoWriterDocumentSummary {
   id: string;
   title: string;
@@ -10,6 +11,7 @@ export interface CoWriterDocumentSummary {
   preview: string;
 }
 
+/** Full Co-Writer document with content. */
 export interface CoWriterDocument {
   id: string;
   title: string;
@@ -28,6 +30,11 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/**
+ * List all Co-Writer documents for the current user.
+ *
+ * @returns Array of document summaries.
+ */
 export async function listCoWriterDocuments(): Promise<
   CoWriterDocumentSummary[]
 > {
@@ -38,6 +45,12 @@ export async function listCoWriterDocuments(): Promise<
   return Array.isArray(data?.documents) ? data.documents : [];
 }
 
+/**
+ * Create a new Co-Writer document.
+ *
+ * @param payload - Optional title and initial content.
+ * @returns The created document.
+ */
 export async function createCoWriterDocument(payload?: {
   title?: string;
   content?: string;
@@ -53,6 +66,12 @@ export async function createCoWriterDocument(payload?: {
   return jsonOrThrow<CoWriterDocument>(res);
 }
 
+/**
+ * Fetch a single Co-Writer document by ID.
+ *
+ * @param docId - ID of the document to retrieve.
+ * @returns The full document.
+ */
 export async function getCoWriterDocument(
   docId: string,
 ): Promise<CoWriterDocument> {
@@ -65,6 +84,13 @@ export async function getCoWriterDocument(
   return jsonOrThrow<CoWriterDocument>(res);
 }
 
+/**
+ * Update a Co-Writer document's title and/or content.
+ *
+ * @param docId - ID of the document to update.
+ * @param payload - Fields to update (title and/or content).
+ * @returns The updated document.
+ */
 export async function updateCoWriterDocument(
   docId: string,
   payload: { title?: string | null; content?: string | null },
@@ -83,6 +109,12 @@ export async function updateCoWriterDocument(
   return jsonOrThrow<CoWriterDocument>(res);
 }
 
+/**
+ * Delete a Co-Writer document.
+ *
+ * @param docId - ID of the document to delete.
+ * @returns True if the document was deleted.
+ */
 export async function deleteCoWriterDocument(docId: string): Promise<boolean> {
   const res = await apiFetch(
     apiUrl(`${BASE}/documents/${encodeURIComponent(docId)}`),

@@ -322,6 +322,13 @@ class RuntimeSettingsService:
         *,
         process_env: dict[str, str] | None = None,
     ) -> None:
+        """Initialize the settings service for a settings directory.
+
+        Args:
+            settings_dir: Directory holding the JSON settings files.
+            process_env: Optional explicit process environment mapping used for
+                deployment overrides. Defaults to ``os.environ``.
+        """
         self.settings_dir = settings_dir
         self.process_env = process_env if process_env is not None else os.environ
         self._external_process_keys: set[str] = set()
@@ -334,6 +341,19 @@ class RuntimeSettingsService:
         *,
         process_env: dict[str, str] | None = None,
     ) -> "RuntimeSettingsService":
+        """Return a cached singleton for the resolved settings directory.
+
+        When ``process_env`` is provided a fresh, uncached instance is returned
+        (used by tests). Otherwise a per-directory singleton is reused.
+
+        Args:
+            settings_dir: Settings directory to resolve; defaults to the global
+                settings directory.
+            process_env: Optional explicit process environment mapping.
+
+        Returns:
+            The ``RuntimeSettingsService`` instance for the directory.
+        """
         resolved = (settings_dir or _global_settings_dir()).resolve()
         key = str(resolved)
         if process_env is not None:
@@ -343,11 +363,28 @@ class RuntimeSettingsService:
         return cls._instances[key]
 
     def path_for(self, name: str) -> Path:
+        """Return the JSON file path for a settings name.
+
+        Args:
+            name: Settings name (with or without a ``.json`` suffix).
+
+        Returns:
+            The full path to the settings JSON file.
+        """
         if not name.endswith(".json"):
             name = f"{name}.json"
         return self.settings_dir / name
 
     def load_system(self, *, include_process_overrides: bool = True) -> dict[str, Any]:
+        """Load system settings, applying process-env overrides when enabled.
+
+        Args:
+            include_process_overrides: Whether to apply process environment
+                deployment overrides on top of the persisted JSON.
+
+        Returns:
+            The normalized system settings dictionary.
+        """
         payload = self._load_or_create(
             "system",
             DEFAULT_SYSTEM_SETTINGS,
@@ -358,11 +395,28 @@ class RuntimeSettingsService:
         return payload
 
     def save_system(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Persist normalized system settings to ``system.json``.
+
+        Args:
+            settings: Partial or full system settings to merge over defaults.
+
+        Returns:
+            The normalized settings that were written.
+        """
         payload = self._normalize_system({**DEFAULT_SYSTEM_SETTINGS, **settings})
         _atomic_write_json(self.path_for("system"), payload)
         return payload
 
     def load_auth(self, *, include_process_overrides: bool = True) -> dict[str, Any]:
+        """Load auth settings, applying process-env overrides when enabled.
+
+        Args:
+            include_process_overrides: Whether to apply process environment
+                deployment overrides on top of the persisted JSON.
+
+        Returns:
+            The normalized auth settings dictionary.
+        """
         payload = self._load_or_create(
             "auth",
             DEFAULT_AUTH_SETTINGS,
@@ -373,11 +427,28 @@ class RuntimeSettingsService:
         return payload
 
     def save_auth(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Persist normalized auth settings to ``auth.json``.
+
+        Args:
+            settings: Partial or full auth settings to merge over defaults.
+
+        Returns:
+            The normalized settings that were written.
+        """
         payload = self._normalize_auth({**DEFAULT_AUTH_SETTINGS, **settings})
         _atomic_write_json(self.path_for("auth"), payload)
         return payload
 
     def load_integrations(self, *, include_process_overrides: bool = True) -> dict[str, Any]:
+        """Load integrations settings, applying process-env overrides when enabled.
+
+        Args:
+            include_process_overrides: Whether to apply process environment
+                deployment overrides on top of the persisted JSON.
+
+        Returns:
+            The normalized integrations settings dictionary.
+        """
         payload = self._load_or_create(
             "integrations",
             DEFAULT_INTEGRATIONS_SETTINGS,
@@ -388,6 +459,14 @@ class RuntimeSettingsService:
         return payload
 
     def save_integrations(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Persist normalized integrations settings to ``integrations.json``.
+
+        Args:
+            settings: Partial or full integrations settings to merge over defaults.
+
+        Returns:
+            The normalized settings that were written.
+        """
         payload = self._normalize_integrations({**DEFAULT_INTEGRATIONS_SETTINGS, **settings})
         _atomic_write_json(self.path_for("integrations"), payload)
         return payload
@@ -409,6 +488,15 @@ class RuntimeSettingsService:
         return payload
 
     def save_document_parsing(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Persist the full v2 document-parsing structure to ``document_parsing.json``.
+
+        Args:
+            settings: Partial or full document-parsing settings to merge over
+                defaults.
+
+        Returns:
+            The normalized settings that were written.
+        """
         self._migrate_legacy_document_parsing_file()
         payload = self._normalize_document_parsing(
             {**DEFAULT_DOCUMENT_PARSING_SETTINGS, **settings}
@@ -442,6 +530,15 @@ class RuntimeSettingsService:
         return payload["engines"][DOCUMENT_PARSING_ENGINE_MINERU]
 
     def load_pageindex(self, *, include_process_overrides: bool = True) -> dict[str, Any]:
+        """Load PageIndex settings, applying process-env overrides when enabled.
+
+        Args:
+            include_process_overrides: Whether to apply process environment
+                deployment overrides on top of the persisted JSON.
+
+        Returns:
+            The normalized PageIndex settings dictionary.
+        """
         payload = self._load_or_create(
             "pageindex",
             DEFAULT_PAGEINDEX_SETTINGS,
@@ -452,11 +549,28 @@ class RuntimeSettingsService:
         return payload
 
     def save_pageindex(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Persist normalized PageIndex settings to ``pageindex.json``.
+
+        Args:
+            settings: Partial or full PageIndex settings to merge over defaults.
+
+        Returns:
+            The normalized settings that were written.
+        """
         payload = self._normalize_pageindex({**DEFAULT_PAGEINDEX_SETTINGS, **settings})
         _atomic_write_json(self.path_for("pageindex"), payload)
         return payload
 
     def load_llamaindex(self, *, include_process_overrides: bool = True) -> dict[str, Any]:
+        """Load LlamaIndex RAG settings, applying process-env overrides when enabled.
+
+        Args:
+            include_process_overrides: Whether to apply process environment
+                deployment overrides on top of the persisted JSON.
+
+        Returns:
+            The normalized LlamaIndex settings dictionary.
+        """
         payload = self._load_or_create(
             "llamaindex",
             DEFAULT_LLAMAINDEX_SETTINGS,
@@ -467,27 +581,66 @@ class RuntimeSettingsService:
         return payload
 
     def save_llamaindex(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Persist normalized LlamaIndex settings to ``llamaindex.json``.
+
+        Args:
+            settings: Partial or full LlamaIndex settings to merge over defaults.
+
+        Returns:
+            The normalized settings that were written.
+        """
         payload = self._normalize_llamaindex({**DEFAULT_LLAMAINDEX_SETTINGS, **settings})
         _atomic_write_json(self.path_for("llamaindex"), payload)
         return payload
 
     def load_graphrag(self) -> dict[str, Any]:
+        """Load GraphRAG retrieval settings from ``graphrag.json``.
+
+        Returns:
+            The normalized GraphRAG settings dictionary.
+        """
         return self._load_or_create("graphrag", DEFAULT_GRAPHRAG_SETTINGS, self._normalize_graphrag)
 
     def save_graphrag(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Persist normalized GraphRAG settings to ``graphrag.json``.
+
+        Args:
+            settings: Partial or full GraphRAG settings to merge over defaults.
+
+        Returns:
+            The normalized settings that were written.
+        """
         payload = self._normalize_graphrag({**DEFAULT_GRAPHRAG_SETTINGS, **settings})
         _atomic_write_json(self.path_for("graphrag"), payload)
         return payload
 
     def load_lightrag(self) -> dict[str, Any]:
+        """Load LightRAG retrieval settings from ``lightrag.json``.
+
+        Returns:
+            The normalized LightRAG settings dictionary.
+        """
         return self._load_or_create("lightrag", DEFAULT_LIGHTRAG_SETTINGS, self._normalize_lightrag)
 
     def save_lightrag(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Persist normalized LightRAG settings to ``lightrag.json``.
+
+        Args:
+            settings: Partial or full LightRAG settings to merge over defaults.
+
+        Returns:
+            The normalized settings that were written.
+        """
         payload = self._normalize_lightrag({**DEFAULT_LIGHTRAG_SETTINGS, **settings})
         _atomic_write_json(self.path_for("lightrag"), payload)
         return payload
 
     def ensure_defaults(self) -> None:
+        """Create all runtime settings files with safe defaults if missing.
+
+        Loads each settings group without process overrides so persisted JSON
+        files are created on first run.
+        """
         self.load_system(include_process_overrides=False)
         self.load_auth(include_process_overrides=False)
         self.load_integrations(include_process_overrides=False)
@@ -540,6 +693,15 @@ class RuntimeSettingsService:
         }
 
     def export_environment(self, *, overwrite: bool = True) -> dict[str, str]:
+        """Export rendered settings into ``os.environ`` and return the mapping.
+
+        Args:
+            overwrite: When ``True``, overwrite existing env values. When
+                ``False``, only set values for keys not already present.
+
+        Returns:
+            The environment mapping that was exported.
+        """
         env = self.render_environment()
         for key, value in env.items():
             current = os.environ.get(key)
@@ -941,6 +1103,7 @@ def _global_settings_dir() -> Path:
 
 
 def get_runtime_settings_service() -> RuntimeSettingsService:
+    """Return the shared ``RuntimeSettingsService`` for the global settings dir."""
     return RuntimeSettingsService.get_instance(_global_settings_dir())
 
 
@@ -959,6 +1122,11 @@ def ensure_runtime_settings_files() -> None:
 
 
 def load_system_settings() -> dict[str, Any]:
+    """Load system settings (with process overrides) from the global service.
+
+    Returns:
+        The normalized system settings dictionary.
+    """
     return get_runtime_settings_service().load_system()
 
 
@@ -1011,34 +1179,78 @@ def get_ws_max_size() -> int:
 
 
 def load_auth_settings() -> dict[str, Any]:
+    """Load auth settings (with process overrides) from the global service.
+
+    Returns:
+        The normalized auth settings dictionary.
+    """
     return get_runtime_settings_service().load_auth()
 
 
 def load_integrations_settings() -> dict[str, Any]:
+    """Load integrations settings (with process overrides) from the global service.
+
+    Returns:
+        The normalized integrations settings dictionary.
+    """
     return get_runtime_settings_service().load_integrations()
 
 
 def load_mineru_settings() -> dict[str, Any]:
+    """Load the MinerU engine slice (with process overrides) from the global service.
+
+    Returns:
+        The normalized MinerU engine settings dictionary.
+    """
     return get_runtime_settings_service().load_mineru()
 
 
 def load_llamaindex_settings() -> dict[str, Any]:
+    """Load LlamaIndex RAG settings (with process overrides) from the global service.
+
+    Returns:
+        The normalized LlamaIndex settings dictionary.
+    """
     return get_runtime_settings_service().load_llamaindex()
 
 
 def load_graphrag_settings() -> dict[str, Any]:
+    """Load GraphRAG retrieval settings from the global service.
+
+    Returns:
+        The normalized GraphRAG settings dictionary.
+    """
     return get_runtime_settings_service().load_graphrag()
 
 
 def load_lightrag_settings() -> dict[str, Any]:
+    """Load LightRAG retrieval settings from the global service.
+
+    Returns:
+        The normalized LightRAG settings dictionary.
+    """
     return get_runtime_settings_service().load_lightrag()
 
 
 def load_document_parsing_settings() -> dict[str, Any]:
+    """Load the full v2 document-parsing structure from the global service.
+
+    Returns:
+        The normalized document-parsing settings dictionary.
+    """
     return get_runtime_settings_service().load_document_parsing()
 
 
 def export_runtime_settings_to_env(*, overwrite: bool = True) -> dict[str, str]:
+    """Export runtime settings into ``os.environ`` via the global service.
+
+    Args:
+        overwrite: When ``True``, overwrite existing env values. When ``False``,
+            only set values for keys not already present.
+
+    Returns:
+        The environment mapping that was exported.
+    """
     return get_runtime_settings_service().export_environment(overwrite=overwrite)
 
 

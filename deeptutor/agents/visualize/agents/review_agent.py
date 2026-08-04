@@ -12,6 +12,8 @@ from ..utils import extract_json_object
 
 
 class ReviewAgent(BaseAgent):
+    """Repairs visualization code that failed deterministic local validation."""
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -19,6 +21,14 @@ class ReviewAgent(BaseAgent):
         api_version: str | None = None,
         language: str = "zh",
     ) -> None:
+        """Initialize the visualization review/repair agent.
+
+        Args:
+            api_key: LLM provider API key.
+            base_url: LLM provider base URL.
+            api_version: API version for Azure OpenAI (optional).
+            language: Language code (``"zh"`` or ``"en"``).
+        """
         super().__init__(
             module_name="visualize",
             agent_name="review_agent",

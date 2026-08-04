@@ -11,6 +11,8 @@ from ..utils import extract_json_object
 
 
 class ConceptAnalysisAgent(BaseAgent):
+    """Analyzes a math concept request to plan an animation."""
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -18,6 +20,14 @@ class ConceptAnalysisAgent(BaseAgent):
         api_version: str | None = None,
         language: str = "zh",
     ) -> None:
+        """Initialize the concept analysis agent.
+
+        Args:
+            api_key: LLM provider API key.
+            base_url: LLM provider base URL.
+            api_version: API version for Azure OpenAI (optional).
+            language: Language code (``"zh"`` or ``"en"``).
+        """
         super().__init__(
             module_name="math_animator",
             agent_name="concept_analysis_agent",
@@ -36,6 +46,21 @@ class ConceptAnalysisAgent(BaseAgent):
         style_hint: str,
         attachments: list[Attachment],
     ) -> ConceptAnalysis:
+        """Analyze the user's animation request and produce a concept analysis.
+
+        Args:
+            user_input: The user's animation request text.
+            history_context: Prior conversation context for continuity.
+            output_mode: Either ``"video"`` or ``"image"``.
+            style_hint: Optional style guidance from the user.
+            attachments: Image attachments for reference.
+
+        Returns:
+            A :class:`ConceptAnalysis` instance.
+
+        Raises:
+            ValueError: If the analysis prompts are not configured.
+        """
         system_prompt = self.get_prompt("system")
         user_template = self.get_prompt("user_template")
         if not system_prompt or not user_template:

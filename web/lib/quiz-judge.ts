@@ -1,5 +1,6 @@
 import { wsUrl } from "@/lib/api";
 
+/** An image attached to a quiz answer for AI judging. */
 export interface QuizJudgeImage {
   /** Base64 of the freshly-picked image (no ``data:`` prefix). */
   base64: string | null;
@@ -9,6 +10,7 @@ export interface QuizJudgeImage {
   mime_type: string;
 }
 
+/** Request payload sent to the quiz judge WebSocket. */
 export interface QuizJudgeRequest {
   question: string;
   question_type: string;
@@ -21,10 +23,12 @@ export interface QuizJudgeRequest {
   language: "zh" | "en";
 }
 
+/** Handle for controlling an in-flight quiz judge WebSocket. */
 export interface QuizJudgeHandle {
   close: () => void;
 }
 
+/** Callbacks for streaming quiz judge events. */
 export interface QuizJudgeHandlers {
   onStart?: () => void;
   onChunk: (chunk: string) => void;
@@ -32,6 +36,10 @@ export interface QuizJudgeHandlers {
   onError: (message: string) => void;
 }
 
+/** Open a WebSocket to the quiz judge and stream the AI's verdict.
+ * @param payload - Question, answer, and image data for judging.
+ * @param handlers - Streaming callbacks (start, chunk, done, error).
+ * @returns A handle to close the connection early. */
 export function startQuizJudge(
   payload: QuizJudgeRequest,
   handlers: QuizJudgeHandlers,
@@ -112,6 +120,9 @@ export function startQuizJudge(
   };
 }
 
+/** Read a File as base64 (no data-URI prefix) with its MIME type and name.
+ * @param file - The image file to read.
+ * @returns Object with base64 string, MIME type, and filename. */
 export function readFileAsBase64(
   file: File,
 ): Promise<{ base64: string; mime: string; name: string }> {

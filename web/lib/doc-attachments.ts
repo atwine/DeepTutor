@@ -155,8 +155,10 @@ export const TEXT_LIKE_EXTS = [
   ".dockerfile",
 ] as const;
 
+/** All supported document extensions (office + text-like). */
 export const SUPPORTED_DOC_EXTS = [...OFFICE_EXTS, ...TEXT_LIKE_EXTS] as const;
 
+/** Set of supported document MIME types for upload validation. */
 export const SUPPORTED_DOC_MIMES = new Set<string>([
   // Office
   "application/pdf",
@@ -215,8 +217,15 @@ export const ATTACHMENT_ACCEPT = [
   ...Array.from(SUPPORTED_DOC_MIMES),
 ].join(",");
 
+/** Classification of an attachment: image or document. */
 export type FileKind = "image" | "doc";
 
+/**
+ * Extract the lowercase file extension (with leading dot) from a filename.
+ *
+ * @param filename - Filename to inspect.
+ * @returns The extension (e.g. ".pdf"), or empty string if none.
+ */
 export function extOf(filename: string): string {
   const idx = filename.lastIndexOf(".");
   return idx >= 0 ? filename.slice(idx).toLowerCase() : "";
@@ -258,6 +267,7 @@ export function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Icon, tint, and short label for rendering a document attachment. */
 export interface DocIconSpec {
   Icon: LucideIcon;
   tint: string; // tailwind class, e.g. "text-red-500/80"
@@ -378,6 +388,12 @@ const DATA_EXTS = new Set([".csv", ".tsv"]);
 const STYLE_EXTS = new Set([".css", ".scss", ".sass", ".less"]);
 const PLAIN_EXTS = new Set([".txt", ".text", ".log"]);
 
+/**
+ * Resolve a Lucide icon, tint color, and short label for a document filename.
+ *
+ * @param filename - Filename to look up.
+ * @returns Icon spec with component, tailwind tint class, and label.
+ */
 export function docIconFor(filename: string): DocIconSpec {
   const ext = extOf(filename);
   // Office first — keep the original distinctive colors

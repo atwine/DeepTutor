@@ -4,8 +4,10 @@ import { invalidateClientCache, withClientCache } from "@/lib/client-cache";
 const SKILLS_CACHE_PREFIX = "skills:";
 const SKILL_TAGS_CACHE_KEY = `${SKILLS_CACHE_PREFIX}tags`;
 
+/** Whether a skill was created by the user, built-in, or provisioned by an admin. */
 export type SkillSource = "user" | "builtin" | "admin";
 
+/** Lightweight skill metadata returned by the list endpoint. */
 export interface SkillInfo {
   name: string;
   description: string;
@@ -14,10 +16,12 @@ export interface SkillInfo {
   read_only?: boolean;
 }
 
+/** Full skill detail including the SKILL.md content. */
 export interface SkillDetail extends SkillInfo {
   content: string;
 }
 
+/** Payload for creating a new skill. */
 export interface CreateSkillPayload {
   name: string;
   description: string;
@@ -25,6 +29,7 @@ export interface CreateSkillPayload {
   tags?: string[];
 }
 
+/** Payload for updating an existing skill. */
 export interface UpdateSkillPayload {
   description?: string;
   content?: string;
@@ -65,6 +70,9 @@ async function asJson(response: Response) {
   return response.json();
 }
 
+/** List all skills (user + builtin + admin), with client-side caching.
+ * @param options - Pass `force` to bypass the cache.
+ * @returns Array of skill info entries. */
 export async function listSkills(options?: {
   force?: boolean;
 }): Promise<SkillInfo[]> {
@@ -96,6 +104,9 @@ export async function listSkills(options?: {
   );
 }
 
+/** Fetch a single skill by name, including its content.
+ * @param name - The skill name.
+ * @returns The skill detail. */
 export async function getSkill(name: string): Promise<SkillDetail> {
   const response = await apiFetch(
     apiUrl(`/api/v1/skills/${encodeURIComponent(name)}`),
@@ -114,6 +125,7 @@ export async function getSkill(name: string): Promise<SkillDetail> {
   };
 }
 
+/** Result of installing a skill from a hub (name, version, security verdict). */
 export interface InstalledSkill {
   name: string;
   version: string;
@@ -157,6 +169,7 @@ export async function installSkillFromHub(
 // hub's public catalog (no login, no iframe), so the panel can render hub
 // skills in DeepTutor's own UI and download them with one click.
 
+/** A skill listing from a hub catalog. */
 export interface HubSkillListing {
   slug: string;
   name: string;
@@ -168,6 +181,7 @@ export interface HubSkillListing {
   ownerUrl: string;
 }
 
+/** A hub's catalog (hub name, web URL, and skill listings). */
 export interface HubCatalog {
   hub: string;
   /** The hub's website origin (for a "view on EduHub" link out). */
@@ -175,6 +189,7 @@ export interface HubCatalog {
   skills: HubSkillListing[];
 }
 
+/** Full detail for a hub skill (listing + rendered content + tags). */
 export interface HubSkillDetail extends HubSkillListing {
   content: string;
   tags: string[];
@@ -241,6 +256,9 @@ export async function fetchHubSkillDetail(
   };
 }
 
+/** Create a new skill.
+ * @param payload - Name, description, content, and optional tags.
+ * @returns The created skill info. */
 export async function createSkill(
   payload: CreateSkillPayload,
 ): Promise<SkillInfo> {
@@ -263,6 +281,10 @@ export async function createSkill(
   };
 }
 
+/** Update an existing skill (description, content, rename, or tags).
+ * @param name - The current skill name.
+ * @param payload - Fields to update.
+ * @returns The updated skill info. */
 export async function updateSkill(
   name: string,
   payload: UpdateSkillPayload,
@@ -284,6 +306,8 @@ export async function updateSkill(
   };
 }
 
+/** Delete a skill by name.
+ * @param name - The skill name. */
 export async function deleteSkill(name: string): Promise<void> {
   const response = await apiFetch(
     apiUrl(`/api/v1/skills/${encodeURIComponent(name)}`),
@@ -295,6 +319,9 @@ export async function deleteSkill(name: string): Promise<void> {
   invalidateSkillsCache();
 }
 
+/** List all skill tags, with client-side caching.
+ * @param options - Pass `force` to bypass the cache.
+ * @returns Array of normalized tag strings. */
 export async function listSkillTags(options?: {
   force?: boolean;
 }): Promise<string[]> {
@@ -311,6 +338,9 @@ export async function listSkillTags(options?: {
   );
 }
 
+/** Create a new skill tag.
+ * @param name - The tag name.
+ * @returns The created tag name. */
 export async function createSkillTag(name: string): Promise<string> {
   const response = await apiFetch(apiUrl("/api/v1/skills/tags/create"), {
     method: "POST",
@@ -322,6 +352,10 @@ export async function createSkillTag(name: string): Promise<string> {
   return String(data?.name ?? name);
 }
 
+/** Rename an existing skill tag.
+ * @param oldName - The current tag name.
+ * @param newName - The new tag name.
+ * @returns The renamed tag name. */
 export async function renameSkillTag(
   oldName: string,
   newName: string,
@@ -339,6 +373,8 @@ export async function renameSkillTag(
   return String(data?.name ?? newName);
 }
 
+/** Delete a skill tag by name.
+ * @param name - The tag name. */
 export async function deleteSkillTag(name: string): Promise<void> {
   const response = await apiFetch(
     apiUrl(`/api/v1/skills/tags/${encodeURIComponent(name)}`),
@@ -350,6 +386,7 @@ export async function deleteSkillTag(name: string): Promise<void> {
   invalidateSkillsCache();
 }
 
+/** Drop all cached skill responses so the next list/get refetches. */
 export function invalidateSkillsCache() {
   invalidateClientCache(SKILLS_CACHE_PREFIX);
 }
