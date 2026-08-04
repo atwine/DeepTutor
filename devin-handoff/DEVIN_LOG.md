@@ -3377,3 +3377,225 @@ they're learning, unlocking these progressively rather than exposing
 the full feature set immediately. Not started yet — revisit next.
 
 — Devin
+
+## 2026-08-04 — Devin — Upload hints, PDF indexing fix, branch cleanup, multi-user test harness
+
+**Item**: Multiple follow-ups from the previous session: file upload bugs,
+UI hints for supported file types/sizes, git hygiene, GitHub issue sync,
+and a multi-user test environment for Claude to use for UI testing.
+
+**Status**: all done.
+
+### 1. Course material upload — "Knowledge base not initialized" fix
+
+**What changed**: `deeptutor/multi_user/course_units.py` —
+`_run_material_indexing()` now calls `RAGService.initialize()` to create
+the LlamaIndex index from scratch when the course KB doesn't have one yet,
+instead of assuming it already exists. Previously the first upload to a
+freshly-provisioned course KB failed because the index directory was empty.
+
+**Verified**: PDF upload to a course unit with no prior materials now
+succeeds — material record created, ingestion status transitions from
+pending → indexing → ready.
+
+### 2. Course material delete fix
+
+**What changed**: `web/lib/course-units-api.ts` — `deleteMaterial()` now
+parses the 204 No Content response correctly (was trying `res.json()` on
+an empty body, causing a JSON parse error that surfaced as "Failed to
+delete" in the UI). The backend delete logic was already correct; this was
+a frontend-only bug.
+
+**Verified**: Delete button in the admin materials page now removes
+materials without error.
+
+### 3. Upload hints — file types + max sizes on all upload surfaces
+
+**What changed** (5 files):
+- `web/app/(admin)/admin/course-units/[courseUnitId]/materials/page.tsx`
+  — persistent hint: "Supported: PDF, Word, PowerPoint, Excel, Markdown,
+  Text, Notebook (.ipynb), images. Max 200 MB per file. Videos and audio
+  are not indexed."
+- `web/components/chat/home/ChatComposer.tsx` — drag overlay + attach
+  button tooltip now show "Images, Office docs, code & text · Max 20.0 MB
+  per file" (dynamic from `useAttachmentLimits()`).
+- `web/components/partners/PartnerComposer.tsx` — same hint pattern.
+- `web/app/(workspace)/book/components/BookChatPanel.tsx` — same pattern.
+- `web/app/(workspace)/playground/page.tsx` — "Max 20.0 MB per file" hint
+  under the PDF upload label.
+- `web/locales/en/app.json`, `web/locales/zh/app.json` — i18n keys for all
+  new strings (English + Chinese).
+
+**Max size constants**:
+- Course materials: 200 MB per file (`_COURSE_MATERIAL_MAX_BYTES` in
+  `course_units.py`)
+- Chat/partner/book/playground attachments: 20 MB per file, 25 MB total
+  (from `useAttachmentLimits()` defaults, overridable via
+  `data/user/settings/system.json`)
+
+### 4. Embedding model configuration (Ollama)
+
+**What was done**: Guided the repo owner through configuring a local
+Ollama instance as the embedding provider for course KB RAG indexing:
+- **Binding**: Ollama
+- **Base URL**: `http://host.docker.internal:11434/api/embed`
+- **Model**: `nomic-embed-text:v1.5`
+- **Dimensions**: 768
+- **API Key**: blank
+
+Verified container reachability to the host Ollama instance via
+`host.docker.internal`. Without this, uploads succeed but indexing fails
+with "No active embedding model is configured."
+
+### 5. Git branch + worktree cleanup
+
+**What was done**:
+- Removed 10 git worktrees (DeepTutor-security-review, DeepTutor-devin,
+  DeepTutor-docs-conventions, DeepTutor-docs-services-agents,
+  DeepTutor-fix-archive, DeepTutor-fix-assignments,
+  DeepTutor-fix-notifications, DeepTutor-r4-alembic,
+  DeepTutor-r4-cu-perms, DeepTutor-r4-notes-cascade)
+- Deleted 30 local branches (all merged into `development`)
+- Deleted 3 stale remote branches (`dev`, `db-migration-integration`,
+  `feature/materials-frontend`)
+- Pruned stale remote-tracking ref for `feature/ipynb-rag-parser`
+- Fixed corrupted `.git/config` fetch refspec (was only fetching the
+  deleted `feature/ipynb-rag-parser` branch instead of all branches —
+  this caused `git fetch` to fail silently and `origin/development` to
+  appear stale even though pushes were landing correctly)
+
+**Remaining branches** (local + remote):
+- `development` — active integration branch (118 commits)
+- `main` — production (protected, PR-only)
+- `staging` — stabilization (currently identical to main)
+- Remote-only: `Deeptutor-v0.6.0-archive`, `eval`, `guide2.0`,
+  `multi-user` (all have unique commits, kept deliberately)
+
+**Verified**: All 30 deleted branch tips confirmed as ancestors of
+`development` (via `git merge-base --is-ancestor`). The one exception
+(`feature/course-materials-backend`, commit `f22147f`) was a parallel/
+earlier version of the same work that landed via a different merge path
+(`feature/materials-frontend` → `merge-materials-frontend`); `development`
+has the newer version (428 lines vs 419 in `course-units-api.ts`).
+
+### 6. GitHub issue sync (atwine/DeepTutor fork)
+
+**Closed with summary comments**:
+- **#3** — Instructor course-material uploads for RAG (books + Jupyter
+  notebooks). All functionality delivered: upload, indexing, delete,
+  publish/unpublish, student view, notebook preview, upload hints.
+  5 commits: `9f5831c`, `5ee5f8c`, `95f6fb9`, `6c45a02`, `874cf5d`.
+- **#8** — Housekeeping: decide fate of old 'dev' branch. Resolved: `dev`
+  fully merged into `development`, deleted from remote along with 2 other
+  stale branches.
+
+**Still open** (15 issues on the fork):
+- #1 — Student: request additional LLM model access (enhancement, not started)
+- #5 — Co-Writer / Book max-w-6xl layout decision (question)
+- #6 — Extend 18px/36px icon-button sizing app-wide? (question)
+- #7 — Re-evaluate sandbox-runner cross-user filesystem visibility (question)
+- #11–#22 — Documentation audit (11 issues, partial progress, comments posted)
+
+**Note**: The 48 issues visible via `gh issue list` without `--repo` belong
+to the upstream `HKUDS/DeepTutor` repo, not this fork. Always use
+`gh issue list --repo atwine/DeepTutor` to see this fork's issues.
+
+### 7. Multi-user test harness (seed + verify scripts)
+
+**What was built**: Two scripts for creating and verifying a realistic
+multi-user test environment:
+
+**`_seed.py`** (run: `docker exec deeptutor python /app/_seed.py`):
+- Creates 2 instructors + 5 students (password: `testpass123`)
+- 3 course units with overlapping enrollments:
+  - Data Structures (instr_a): stud1, stud2, stud3
+  - Algorithms (instr_a): stud3, stud4
+  - Databases (instr_b): stud4, stud5
+- 3 published assignments with questions (MCQ + short answer)
+- 4 pre-graded submissions (stud1: 10/10, stud2: 5/10, stud3: 0/10,
+  stud5: 15/15)
+- 3 course material records (1 published + 1 draft in Course 0,
+  1 published in Course 2)
+- Idempotent: cleans up all seed data before re-creating
+
+**`_verify.py`** (run: `docker exec deeptutor python /app/_verify.py`):
+- 36 tests across 8 scenarios, all via the real HTTP API:
+  1. Role isolation — students blocked from admin/instructor endpoints
+  2. Assignment lifecycle — list, view, submit permissions, submission view
+  3. Materials visibility — draft hidden from students, published visible
+  4. Cross-course isolation — unenrolled students blocked
+  5. Completion tracking — enrollment data queryable
+  6. Instructor scope — instructors only see their own courses
+  7. Admin access — admin sees all courses, rosters, gradebooks
+  8. Submission integrity — seeded scores match
+
+**Result**: 36/36 tests pass.
+
+**Known issue found during testing**: The assignment submit endpoint
+(`/assignments/{id}/submit`) blocks the FastAPI event loop when calling
+the LLM for AI grading — a single submit can make the entire server
+unresponsive for 30+ seconds. This matches upstream issue #761 (Event
+Loop blocked by CPU-bound JSON serialization). The verify script
+intentionally skips live submission to avoid hanging the server;
+pre-graded submissions are inserted directly into the DB instead.
+
+### 8. Push to GitHub
+
+All changes were committed to `development` and pushed to
+`origin/development`. The `.git/config` fetch refspec fix (section 5
+above) was necessary to confirm the push had actually landed — the
+remote was already up to date, but the broken refspec prevented
+`git fetch` from updating the local tracking ref.
+
+**Current sync state**: local `development` = `origin/development` =
+`a7706db` (0 ahead, 0 behind).
+
+---
+
+## How to use the test environment for UI testing (for Claude)
+
+The seed data is live in the running Docker instance. Log in via the web
+UI at `http://localhost:3782` (or `http://localhost:3000` for the local
+dev server) with any of these accounts:
+
+| Username | Role | Password | What to test |
+|---|---|---|---|
+| `admin` | admin | (existing) | All courses, rosters, gradebooks, user management |
+| `instr_a` | instructor | `testpass123` | Data Structures + Algorithms courses, gradebook, materials |
+| `instr_b` | instructor | `testpass123` | Databases course only |
+| `stud1` | student | `testpass123` | Course 0 (DS) — has 10/10 submission |
+| `stud2` | student | `testpass123` | Course 0 (DS) — has 5/10 submission |
+| `stud3` | student | `testpass123` | Course 0 (DS) + Course 1 (Algorithms) — cross-course |
+| `stud4` | student | `testpass123` | Course 1 (Algorithms) + Course 2 (DB) — cross-course, no submissions |
+| `stud5` | student | `testpass123` | Course 2 (DB) — has 15/15 submission |
+
+**UI test scenarios to try**:
+1. Log in as `instr_a` → verify sidebar shows "Course Units" → click it
+   → see Data Structures + Algorithms (not Databases)
+2. Log in as `stud1` → Browse Courses → see only Data Structures →
+   verify no "Request to join" on own course, no access to Databases
+3. Log in as `instr_a` → Course Units → Data Structures → Materials →
+   verify 2 materials visible (1 published, 1 draft with "Draft" badge)
+4. Log in as `stud1` → Courses → Data Structures → Materials → verify
+   only 1 published material visible (draft hidden)
+5. Log in as `instr_a` → Data Structures → gradebook → verify stud1
+   (10/10) and stud2 (5/10) appear with correct scores
+6. Log in as `admin` → Accounts Management → verify all 9 users listed
+   with correct roles
+7. Log in as `stud3` → verify can see both Data Structures and
+   Algorithms but NOT Databases
+8. Test upload hints: log in as `instr_a` → Materials → drag overlay
+   should show "Supported: PDF, Word, PowerPoint, Excel, Markdown, Text,
+   Notebook (.ipynb), images. Max 200 MB per file."
+
+**To re-seed** (wipes and recreates all test data):
+```bash
+docker exec deeptutor python /app/_seed.py
+```
+
+**To verify** (runs 36 automated API tests):
+```bash
+docker exec deeptutor python /app/_verify.py
+```
+
+— Devin

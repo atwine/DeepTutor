@@ -3,7 +3,8 @@
 Ordered roughly by size/independence, not strict priority. Each item has enough technical
 framing to start without re-deriving context — read the referenced section of
 `ARCHITECTURE_AND_COMPLETED_WORK.md` first regardless, and read `DEVIN_LOG.md`'s latest entry
-(the 2026-08-03 "Round 4 complete — full handoff" one) for the fullest current-state picture.
+(the 2026-08-04 "Upload hints, PDF indexing fix, branch cleanup, multi-user test harness" one)
+for the fullest current-state picture.
 
 Pick an item, work it, then **append an entry to `DEVIN_LOG.md`** — don't mark anything here as
 done by editing this file; the log is the source of truth for status.
@@ -13,23 +14,22 @@ error-message fix, `mastery_grade` AI-Judge reuse, the multi-user edge-case test
 `README.md` rewrite, the Postgres migration (all phases), Round 2 (course lifecycle, dates,
 archive precursor, notifications precursor), Round 3 (assignment timer/retake UX, notifications
 system, archive feature, instructor leave-request UI), Round 4 (course-notes cascade verified,
-course-unit permission decision, Alembic migration tooling). All of this is live on `main` as of
-commit `cf84034`.
+course-unit permission decision, Alembic migration tooling), security review (login
+rate-limiting, disabled-user feature, demographics, default-model fallback, dropdown dark-mode
+fix, sidebar reorder, consistent page widths), course-material upload/indexing/delete fixes,
+upload hints on all upload surfaces, git branch/worktree cleanup, GitHub issue sync, multi-user
+test harness (seed + verify scripts). All work is on `development` (commit `a7706db`) and
+pushed to `origin/development`.
 
 ---
 
-## A. Security review
+## A. Security review — DONE
 
-**Small, high-value, do this before Railway deployment — this now handles real student
-accounts and grades, not a single-user default deployment.**
-
-Review `SECURITY.md` against the actual current state: auth is enabled, there are three roles
-with real permission boundaries, Postgres holds grade/enrollment data, and a sandbox-runner
-sidecar executes model-generated code. `SECURITY.md` was written against upstream's single-user
-default posture and hasn't been revisited since this fork's multi-user work started. No
-findings pre-supposed — go read the actual current auth/permission code
-(`deeptutor/api/routers/auth.py`, the `require_admin`/`require_instructor_or_admin` patterns
-throughout `deeptutor/multi_user/`) and compare against what the doc currently claims.
+Completed in the 2026-08-03 security review pass. See `SECURITY.md` and the
+DEVIN_LOG entries from that date. Login rate-limiting, disabled-user feature,
+demographics, and default-model fallback are all live. One open item:
+sandbox-runner cross-user filesystem visibility (GitHub issue #7) — deferred,
+needs an architecture decision about whether students get the code tool.
 
 ---
 
@@ -80,6 +80,11 @@ concurrent throughput) — don't guess ahead of the evidence. No action item her
   raised as a lower-risk alternative to fully opening up `instructor_ids` editing (Round 4 Task
   2's decision explicitly kept `instructor_ids` reassignment admin-only). Not scoped or built,
   just noted as worth keeping in mind if the general question comes up again.
+- **Assignment submit blocks the event loop** — the `/assignments/{id}/submit` endpoint calls
+  the LLM for AI grading synchronously, blocking the entire FastAPI event loop for 30+ seconds.
+  This makes the server unresponsive during any student submission. Matches upstream issue
+  #761. Fix: move grading to a background task or thread pool. Found during multi-user test
+  harness verification (2026-08-04).
 
 ---
 
@@ -109,3 +114,18 @@ concurrent throughput) — don't guess ahead of the evidence. No action item her
   wanted.
 - The `eval` branch (internal LLM-judge/benchmarking tooling) — deferred backlog item, only
   worth mining if a formal quiz/tutoring-quality-checking harness becomes a real need.
+
+---
+
+## G. Open GitHub issues on atwine/DeepTutor (not TODO.md items, but tracked)
+
+Use `gh issue list --repo atwine/DeepTutor` to see these (NOT `gh issue list` without
+`--repo`, which shows the upstream HKUDS repo's 48 issues).
+
+- **#1** — Student: request additional LLM model access (enhancement, not started)
+- **#5** — Co-Writer / Book max-w-6xl layout decision (question)
+- **#6** — Extend 18px/36px icon-button sizing app-wide? (question)
+- **#7** — Re-evaluate sandbox-runner cross-user filesystem visibility (question)
+- **#11–#22** — Documentation audit (11 issues, partial progress, comments posted on #11, #20, #22)
+
+Closed: #2, #3, #4, #8, #9, #10 (see DEVIN_LOG for details).
