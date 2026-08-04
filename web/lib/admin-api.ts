@@ -103,3 +103,50 @@ export async function setUserDisabled(
     throw new Error(data.detail ?? "Failed to update user status");
   }
 }
+
+// ---------------------------------------------------------------------------
+// Issue #33: Admin student dashboard
+// ---------------------------------------------------------------------------
+
+export interface StudentOverviewStats {
+  total_students: number;
+  active_students: number;
+  disabled_students: number;
+  orphan_students: number;
+  total_instructors: number;
+  total_courses: number;
+  total_enrollments: number;
+  completion_rate: number;
+}
+
+export interface StudentOverviewRow {
+  id: string;
+  username: string;
+  full_name: string;
+  first_name: string;
+  surname: string;
+  registration_number: string;
+  gender: string;
+  course: string;
+  created_at: string;
+  disabled: boolean;
+  avatar: string;
+  enrollment_count: number;
+  course_names: string[];
+  submission_count: number;
+  completion_summary: { completed: number; total: number };
+}
+
+export interface StudentsOverviewResponse {
+  stats: StudentOverviewStats;
+  course_options: string[];
+  students: StudentOverviewRow[];
+}
+
+export async function getStudentsOverview(): Promise<StudentsOverviewResponse> {
+  const res = await apiFetch(
+    apiUrl("/api/v1/multi-user/admin/students/overview"),
+  );
+  if (!res.ok) throw new Error("Failed to fetch students overview");
+  return res.json();
+}

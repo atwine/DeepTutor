@@ -70,6 +70,14 @@ from .identity import get_user_by_id, list_user_info, search_enrollable_users
 from .knowledge_access import admin_kb_base_dir
 from .model_access import is_owner_bound
 from .paths import get_admin_path_service
+from deeptutor.services.db import session_scope
+from deeptutor.services.db.models import (
+    Assignment,
+    CourseUnit,
+    Enrollment,
+    Submission,
+)
+from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
 
@@ -1161,3 +1169,162 @@ async def download_course_material(
             "Content-Disposition": f'attachment; filename="{file_path.name}"',
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #33: Admin student dashboard — overview with enrollment + completion
+# ---------------------------------------------------------------------------
+
+
+@router.get("/admin/students/overview")
+async def admin_students_overview(
+    current: TokenPayload = Depends(require_admin),
+) -> dict[str, Any]:
+    """Bird's-eye view of all students for the admin dashboard.
+
+    Returns every student (role == "user") with their enrollment count,
+    course names, submission count, and completion summary — all via
+    batched queries (NOT per-student loops, see issue #31).
+
+    Also returns aggregate stats for the dashboard header cards and a
+    course list for the filter dropdown.
+    """
+    # 1. All students from the identity store (JSON, not Postgres).
+    all_users = list_user_info()
+    students = [u for u in all_users if u.get("role") == "user"]
+    instructors = [u for u in all_users if u.get("role") == "instructor"]
+    student_ids = {s["id"] for s in students}
+
+    # 2. Batched enrollment query: count + course names per student.
+    #    One query joins enrollments → course_units, grouped by user_id.
+    async with session_scope() as session:
+        # Enrollment counts per student (approved only).
+        if student_ids:
+            enrollment_rows = (
+                await session.execute(
+                    select(
+                        Enrollment.user_id,
+                        Enrollment.course_unit_id,
+                        Enrollment.completed_at,
+                        CourseUnit.name.label("course_name"),
+                    )
+                    .join(CourseUnit, Enrollment.course_unit_id == CourseUnit.id)
+                    .where(Enrollment.status == "approved")
+                    .where(Enrollment.user_id.in_(student_ids))
+                )
+            ).all()
+
+            # Submission counts per student (across all assignments).
+            submission_counts_raw = (
+                await session.execute(
+                    select(Submission.user_id, func.count(Submission.id))
+                    .where(Submission.user_id.in_(student_ids))
+                    .group_by(Submission.user_id)
+                )
+            ).all()
+        else:
+            enrollment_rows = []
+            submission_counts_raw = []
+
+        # Total published assignments per course (for completion math).
+        assignment_counts_raw = (
+            await session.execute(
+                select(
+                    Assignment.course_unit_id,
+                    func.count(Assignment.id),
+                )
+                .where(Assignment.status == "published")
+                .group_by(Assignment.course_unit_id)
+            )
+        ).all()
+
+        # Total course units (for stats card).
+        total_courses = (
+            await session.execute(select(func.count(CourseUnit.id)))
+        ).scalar_one()
+
+    # Build per-student aggregates from the batched results.
+    # enrollments_by_user: {user_id: [{course_unit_id, course_name, completed_at}, ...]}
+    enrollments_by_user: dict[str, list[dict[str, Any]]] = {}
+    for row in enrollment_rows:
+        uid, cu_id, completed_at, course_name = row
+        enrollments_by_user.setdefault(uid, []).append({
+            "course_unit_id": cu_id,
+            "course_name": course_name,
+            "completed_at": completed_at.isoformat() if completed_at else "",
+        })
+
+    # submission_count_by_user: {user_id: int}
+    submission_count_by_user = {uid: count for uid, count in submission_counts_raw}
+
+    # assignment_count_by_course: {course_unit_id: int}
+    assignment_count_by_course = {cu_id: count for cu_id, count in assignment_counts_raw}
+
+    # Build the student rows.
+    student_rows: list[dict[str, Any]] = []
+    for s in students:
+        uid = s["id"]
+        enrollments = enrollments_by_user.get(uid, [])
+        course_names = [e["course_name"] for e in enrollments]
+        completed_count = sum(1 for e in enrollments if e["completed_at"])
+
+        # Completion summary: "X/Y courses completed"
+        total_enrolled = len(enrollments)
+        completion_summary = {
+            "completed": completed_count,
+            "total": total_enrolled,
+        }
+
+        student_rows.append({
+            "id": uid,
+            "username": s["username"],
+            "full_name": s.get("full_name") or "",
+            "first_name": s.get("first_name") or "",
+            "surname": s.get("surname") or "",
+            "registration_number": s.get("registration_number") or "",
+            "gender": s.get("gender") or "",
+            "course": s.get("course") or "",
+            "created_at": s.get("created_at") or "",
+            "disabled": s.get("disabled", False),
+            "avatar": s.get("avatar") or "",
+            "enrollment_count": total_enrolled,
+            "course_names": course_names,
+            "submission_count": submission_count_by_user.get(uid, 0),
+            "completion_summary": completion_summary,
+        })
+
+    # Sort by username for stable display.
+    student_rows.sort(key=lambda r: r["username"])
+
+    # Aggregate stats for the dashboard header cards.
+    active_students = sum(1 for s in students if not s.get("disabled", False))
+    disabled_students = sum(1 for s in students if s.get("disabled", False))
+    orphan_students = sum(1 for r in student_rows if r["enrollment_count"] == 0)
+    total_enrollments = sum(r["enrollment_count"] for r in student_rows)
+    total_completions = sum(r["completion_summary"]["completed"] for r in student_rows)
+    completion_rate = (
+        round(total_completions / total_enrollments * 100, 1)
+        if total_enrollments > 0
+        else 0.0
+    )
+
+    # Course list for the filter dropdown — all course names that appear
+    # in at least one student's enrollment.
+    course_options = sorted({
+        name for names in [r["course_names"] for r in student_rows] for name in names
+    })
+
+    return {
+        "stats": {
+            "total_students": len(students),
+            "active_students": active_students,
+            "disabled_students": disabled_students,
+            "orphan_students": orphan_students,
+            "total_instructors": len(instructors),
+            "total_courses": total_courses,
+            "total_enrollments": total_enrollments,
+            "completion_rate": completion_rate,
+        },
+        "course_options": course_options,
+        "students": student_rows,
+    }

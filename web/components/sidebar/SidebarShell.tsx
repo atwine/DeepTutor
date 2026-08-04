@@ -22,6 +22,7 @@ import {
   PanelLeftOpen,
   PenLine,
   Settings,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -94,6 +95,17 @@ const PRIMARY_NAV: NavEntry[] = [
     label: "Course Units",
     icon: ClipboardList,
     tooltipKey: "Course Units tooltip",
+    roles: ["admin"],
+  },
+  {
+    // Admin's student dashboard (issue #33): bird's-eye view of all
+    // students with enrollment counts, course names, submission counts,
+    // and completion status. Searchable and filterable. Placed right
+    // after "Course Units" so course-related admin tools stay grouped.
+    href: "/admin/students",
+    label: "Student Dashboard",
+    icon: Users,
+    tooltipKey: "Student Dashboard tooltip",
     roles: ["admin"],
   },
   {
