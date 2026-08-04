@@ -501,17 +501,22 @@ export default function CourseUnitsPage() {
               </tbody>
             </table>
           )}
-          <Pagination
-            total={totalCount}
-            limit={PAGE_LIMIT}
-            offset={pageOffset}
-            disabled={loading}
-            onPageChange={(newOffset) => {
-              setPageOffset(newOffset);
-              void load(isAdmin, newOffset);
-            }}
-          />
         </div>
+
+        {totalCount > PAGE_LIMIT && (
+          <div className="mt-2 rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
+            <Pagination
+              total={totalCount}
+              limit={PAGE_LIMIT}
+              offset={pageOffset}
+              disabled={loading}
+              onPageChange={(newOffset) => {
+                setPageOffset(newOffset);
+                void load(isAdmin, newOffset);
+              }}
+            />
+          </div>
+        )}
 
         {archivedUnits.length > 0 && (
           <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">

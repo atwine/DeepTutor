@@ -398,13 +398,17 @@ export function RosterEditor({ courseUnitId }: { courseUnitId: string }) {
             ))}
           </div>
         )}
-        <Pagination
-          total={rosterTotal}
-          limit={ROSTER_PAGE_LIMIT}
-          offset={rosterOffset}
-          disabled={loading}
-          onPageChange={(newOffset) => setRosterOffset(newOffset)}
-        />
+        {rosterTotal > ROSTER_PAGE_LIMIT && (
+          <div className="mt-2">
+            <Pagination
+              total={rosterTotal}
+              limit={ROSTER_PAGE_LIMIT}
+              offset={rosterOffset}
+              disabled={loading}
+              onPageChange={(newOffset) => setRosterOffset(newOffset)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
