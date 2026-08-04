@@ -364,7 +364,7 @@ export async function uploadMaterials(
   }
   const res = await apiFetch(
     apiUrl(
-      `/api/v1/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/upload`,
+      `/api/v1/multi-user/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/upload`,
     ),
     { method: "POST", body: form },
   );
@@ -382,7 +382,7 @@ export async function listMaterials(
 ): Promise<CourseMaterial[]> {
   const res = await apiFetch(
     apiUrl(
-      `/api/v1/admin/course-units/${encodeURIComponent(courseUnitId)}/materials`,
+      `/api/v1/multi-user/admin/course-units/${encodeURIComponent(courseUnitId)}/materials`,
     ),
   );
   const data = await unwrap<{ materials: CourseMaterial[] }>(
@@ -399,7 +399,7 @@ export async function publishMaterial(
 ): Promise<CourseMaterial> {
   const res = await apiFetch(
     apiUrl(
-      `/api/v1/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/${encodeURIComponent(materialId)}/publish`,
+      `/api/v1/multi-user/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/${encodeURIComponent(materialId)}/publish`,
     ),
     { method: "POST" },
   );
@@ -417,7 +417,7 @@ export async function unpublishMaterial(
 ): Promise<CourseMaterial> {
   const res = await apiFetch(
     apiUrl(
-      `/api/v1/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/${encodeURIComponent(materialId)}/unpublish`,
+      `/api/v1/multi-user/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/${encodeURIComponent(materialId)}/unpublish`,
     ),
     { method: "POST" },
   );
@@ -435,7 +435,7 @@ export async function deleteMaterial(
 ): Promise<void> {
   const res = await apiFetch(
     apiUrl(
-      `/api/v1/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/${encodeURIComponent(materialId)}`,
+      `/api/v1/multi-user/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/${encodeURIComponent(materialId)}`,
     ),
     { method: "DELETE" },
   );
@@ -449,6 +449,6 @@ export function materialDownloadUrl(
   materialId: string,
 ): string {
   return apiUrl(
-    `/api/v1/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/${encodeURIComponent(materialId)}/download`,
+    `/api/v1/multi-user/admin/course-units/${encodeURIComponent(courseUnitId)}/materials/${encodeURIComponent(materialId)}/download`,
   );
 }
