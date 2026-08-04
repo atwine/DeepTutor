@@ -861,11 +861,14 @@ async def _run_material_indexing(
         from deeptutor.knowledge.add_documents import DocumentAdder
         from deeptutor.knowledge.progress_tracker import ProgressTracker
 
-        base_dir = str(admin_kb_base_dir().resolve())
+        # ProgressTracker.__init__ does base_dir / kb_name, so base_dir
+        # must be a Path, not str (same fix as commit 1442ab2 for the
+        # auto-provisioning path).
+        base_dir = admin_kb_base_dir().resolve()
         progress_tracker = ProgressTracker(kb_name, base_dir)
         adder = DocumentAdder(
             kb_name=kb_name,
-            base_dir=base_dir,
+            base_dir=str(base_dir),
             progress_tracker=progress_tracker,
         )
         staged = adder.add_documents([file_path], allow_duplicates=False)

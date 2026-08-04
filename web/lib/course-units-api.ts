@@ -68,7 +68,16 @@ async function unwrap<T>(res: Response, fallback: string): Promise<T> {
     const data = await res.json().catch(() => ({}));
     throw new Error(data?.detail ?? fallback);
   }
-  return res.json() as Promise<T>;
+  // 204 No Content (and any empty body) — return a default so callers
+  // that expect JSON don't throw "Unexpected end of JSON input".
+  if (res.status === 204) {
+    return {} as T;
+  }
+  const text = await res.text();
+  if (!text) {
+    return {} as T;
+  }
+  return JSON.parse(text) as T;
 }
 
 /** Admins see every course unit; instructors see only the ones they teach. */
