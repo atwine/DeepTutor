@@ -66,7 +66,7 @@ from .course_units import (
 )
 from .grants import load_grant, save_grant
 from .gradebook import build_instructor_report, build_instructor_report_csv
-from .identity import get_user_by_id, list_user_info, search_enrollable_users
+from .identity import get_user_by_id, get_users_by_ids, list_user_info, search_enrollable_users
 from .knowledge_access import admin_kb_base_dir
 from .model_access import is_owner_bound
 from .paths import get_admin_path_service
@@ -331,18 +331,44 @@ async def _require_course_unit_access(payload: TokenPayload, course_unit_id: str
     raise HTTPException(status_code=403, detail="You do not manage this course unit")
 
 
-def _with_instructor_names(unit: dict[str, Any]) -> dict[str, Any]:
+def _with_instructor_names(
+    unit: dict[str, Any],
+    user_records: dict[str, tuple[str, dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
     """Attach resolved usernames for ``instructor_ids``.
 
     ``GET /users`` (the only place that lists every account) is admin-only, so
     an instructor viewing their own course unit has no other way to learn a
     co-instructor's username — without this, they'd see a bare user id.
+
+    Issue #37: ``user_records`` is an optional pre-loaded batch from
+    ``get_users_by_ids()``. When provided, each instructor lookup is an
+    O(1) dict get instead of a full ``load_users()`` file read + scan.
+    Use ``_with_instructor_names_batch()`` when processing a list of
+    course units — it collects all instructor_ids across all units and
+    does a single batched lookup.
     """
     names = []
     for uid in unit.get("instructor_ids", []):
-        user_record = get_user_by_id(uid)
+        if user_records is not None:
+            user_record = user_records.get(uid)
+        else:
+            user_record = get_user_by_id(uid)
         names.append(user_record[0] if user_record is not None else uid)
     return {**unit, "instructor_usernames": names}
+
+
+def _with_instructor_names_batch(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Issue #37: Batched version of :func:`_with_instructor_names` for
+    list endpoints. Collects all instructor_ids across all course units,
+    does a **single** ``get_users_by_ids()`` call, then maps over the
+    units with the pre-loaded dict — eliminating the N+1 where each unit
+    was doing its own per-instructor file read."""
+    all_instructor_ids: list[str] = []
+    for unit in units:
+        all_instructor_ids.extend(unit.get("instructor_ids", []))
+    user_records = get_users_by_ids(all_instructor_ids)
+    return [_with_instructor_names(u, user_records) for u in units]
 
 
 @router.post("/course-units")
@@ -383,7 +409,7 @@ async def list_course_units_endpoint(
         units = await list_course_units()
     else:
         units = await list_course_units_for_instructor(current.user_id)
-    return {"course_units": [_with_instructor_names(u) for u in units]}
+    return {"course_units": _with_instructor_names_batch(units)}
 
 
 @router.get("/course-units/catalog")
@@ -413,9 +439,17 @@ async def course_unit_catalog_endpoint(
     # same as an expired course past its grace period; no special-case
     # needed beyond not surfacing it as a *new* thing to join).
     catalog = []
+    filtered_units = []
     for unit in await list_course_units():
         if unit.get("is_archived") and unit["id"] not in status_by_unit:
             continue
+        filtered_units.append(unit)
+    # Issue #37: batch instructor name lookup — one file read for all
+    # course units instead of one per unit.
+    instructor_records = get_users_by_ids(
+        [uid for u in filtered_units for uid in u.get("instructor_ids", [])]
+    )
+    for unit in filtered_units:
         # An instructor browsing the catalog sees their own course(s) as
         # "teaching", not "Request to join" — they already have full access
         # via /my/course-units, and a join request against a course they
@@ -435,7 +469,7 @@ async def course_unit_catalog_endpoint(
         if my_status == "approved" and user_id:
             completed_at = await check_and_mark_completion(unit["id"], user_id)
         catalog.append(
-            {**_with_instructor_names(unit), "my_status": my_status, "completed_at": completed_at}
+            {**_with_instructor_names(unit, instructor_records), "my_status": my_status, "completed_at": completed_at}
         )
     return {"course_units": catalog}
 
@@ -453,7 +487,7 @@ async def my_course_units_endpoint(
         units = await list_course_units_for_instructor(current.user_id)
     else:
         units = await list_course_units_for_student(current.user_id)
-    return {"course_units": [_with_instructor_names(u) for u in units]}
+    return {"course_units": _with_instructor_names_batch(units)}
 
 
 @router.get("/course-units/{course_unit_id}")
@@ -602,13 +636,29 @@ async def unenroll_student_endpoint(
     return {"ok": True}
 
 
-def _enrollment_with_student_info(enrollment: dict[str, Any]) -> dict[str, Any] | None:
-    user_record = get_user_by_id(enrollment["user_id"])
+def _enrollment_with_student_info(
+    enrollment: dict[str, Any],
+    user_records: dict[str, tuple[str, dict[str, Any]]] | None = None,
+) -> dict[str, Any] | None:
+    """Attach username/full_name/registration_number to an enrollment dict.
+
+    Issue #37: ``user_records`` is an optional pre-loaded batch from
+    ``get_users_by_ids()``. When provided, the lookup is an O(1) dict
+    get instead of a full ``load_users()`` file read + linear scan per
+    enrollment. Callers that process multiple enrollments (roster,
+    requests, leave-requests) should batch-load all user_ids first and
+    pass the result here.
+    """
+    user_id = enrollment["user_id"]
+    if user_records is not None:
+        user_record = user_records.get(user_id)
+    else:
+        user_record = get_user_by_id(user_id)
     if user_record is None:
         return None
     username, record = user_record
     return {
-        "user_id": enrollment["user_id"],
+        "user_id": user_id,
         "username": username,
         "role": record.get("role", "user"),
         "full_name": str(record.get("full_name") or ""),
@@ -626,11 +676,16 @@ async def course_unit_roster_endpoint(
     """Approved enrollments only — a pending request belongs on the
     /requests endpoint until an instructor decides on it."""
     await _require_course_unit_access(current, course_unit_id)
+    enrollments = [
+        e for e in await list_enrollments_for_course(course_unit_id)
+        if e.get("status", "approved") == "approved"
+    ]
+    # Issue #37: batch user lookup — one file read instead of N.
+    user_records = get_users_by_ids([e["user_id"] for e in enrollments])
     roster = [
         info
-        for enrollment in await list_enrollments_for_course(course_unit_id)
-        if enrollment.get("status", "approved") == "approved"
-        and (info := _enrollment_with_student_info(enrollment)) is not None
+        for enrollment in enrollments
+        if (info := _enrollment_with_student_info(enrollment, user_records)) is not None
     ]
     return {"roster": roster}
 
@@ -642,11 +697,16 @@ async def course_unit_requests_endpoint(
 ) -> dict[str, Any]:
     """Pending enrollment requests awaiting this course unit's instructor(s)."""
     await _require_course_unit_access(current, course_unit_id)
+    enrollments = [
+        e for e in await list_enrollments_for_course(course_unit_id)
+        if e.get("status", "approved") == "pending"
+    ]
+    # Issue #37: batch user lookup — one file read instead of N.
+    user_records = get_users_by_ids([e["user_id"] for e in enrollments])
     requests = [
         info
-        for enrollment in await list_enrollments_for_course(course_unit_id)
-        if enrollment.get("status", "approved") == "pending"
-        and (info := _enrollment_with_student_info(enrollment)) is not None
+        for enrollment in enrollments
+        if (info := _enrollment_with_student_info(enrollment, user_records)) is not None
     ]
     return {"requests": requests}
 
@@ -733,10 +793,13 @@ async def list_leave_requests_endpoint(
 ) -> dict[str, Any]:
     """B2: Leave requests awaiting instructor confirmation for this course unit."""
     await _require_course_unit_access(current, course_unit_id)
+    enrollments = await list_leave_requests_for_course(course_unit_id)
+    # Issue #37: batch user lookup — one file read instead of N.
+    user_records = get_users_by_ids([e["user_id"] for e in enrollments])
     requests = [
         info
-        for enrollment in await list_leave_requests_for_course(course_unit_id)
-        if (info := _enrollment_with_student_info(enrollment)) is not None
+        for enrollment in enrollments
+        if (info := _enrollment_with_student_info(enrollment, user_records)) is not None
     ]
     return {"requests": requests}
 

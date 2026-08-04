@@ -3733,3 +3733,30 @@ All 30 students have password `testpass123`:
    the submit blocking is a server-wide outage.
 
 â€” Devin
+
+---
+
+## 2026-08-04 — Devin — Full-codebase scalability audit (100x stress)
+
+**Item**: not in TODO.md — proactive audit prompted by issue #31 (gradebook N+1).
+**Status**: investigated-not-fixed (audit only; no code changes).
+**What changed**: no application code touched. Full audit report saved to
+devin-handoff/SCALABILITY_AUDIT.md (this entry is a pointer to it).
+**Verified**: n/a — audit only.
+**New findings**: 5 parallel subagents audited the entire codebase for
+scaling bottlenecks at 100x (students, assignments, submissions, courses,
+users, documents, sessions). Found **26 CRITICAL**, **15 HIGH**, **12 MEDIUM**,
+**12 LOW** issues across 5 layers. The single biggest theme: the JSON
+file-based identity store (identity.py) is the root cause of ~10 of the
+CRITICAL issues — every get_user_by_id() call reads the entire users.json
+from disk and linear-scans it, and it's called inside loops in 7 places.
+The second biggest theme: missing DB indexes on enrollment/notification
+tables and missing composite index on submissions. The third: no pagination
+on any list endpoint or frontend table. See SCALABILITY_AUDIT.md for the
+full prioritized list with file/line references and fixes.
+**Left for later / handing back**: all 65+ findings are unfixed. The audit
+is a planning document — the user should decide which to tackle first.
+Recommended top 5: (1) replace get_user_by_id() loops with
+get_users_by_ids() (already exists), (2) add missing DB indexes, (3) add
+pagination to list endpoints, (4) replace session.refresh loops with
+selectinload, (5) add virtualization to gradebook/student tables.
