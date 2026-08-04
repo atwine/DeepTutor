@@ -90,6 +90,23 @@ export async function listCourseUnits(): Promise<CourseUnit[]> {
   return data.course_units;
 }
 
+/** Issue #42: Paginated version — returns items + total count for pagination UI. */
+export async function listCourseUnitsPaged(
+  limit: number = 50,
+  offset: number = 0,
+): Promise<{ items: CourseUnit[]; total: number }> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/course-units?limit=${limit}&offset=${offset}`,
+    ),
+  );
+  const data = await unwrap<{ course_units: CourseUnit[]; total: number; limit: number; offset: number }>(
+    res,
+    "Failed to fetch course units",
+  );
+  return { items: data.course_units, total: data.total };
+}
+
 /** Any signed-in account's own view (admin: all, instructor: taught, student: enrolled). */
 export async function listMyCourseUnits(): Promise<CourseUnit[]> {
   const res = await apiFetch(apiUrl("/api/v1/multi-user/my/course-units"));
@@ -222,6 +239,24 @@ export async function getCourseUnitRoster(
     "Failed to fetch roster",
   );
   return data.roster;
+}
+
+/** Issue #42: Paginated roster — returns items + total count. */
+export async function getCourseUnitRosterPaged(
+  courseUnitId: string,
+  limit: number = 50,
+  offset: number = 0,
+): Promise<{ items: RosterEntry[]; total: number }> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/course-units/${encodeURIComponent(courseUnitId)}/roster?limit=${limit}&offset=${offset}`,
+    ),
+  );
+  const data = await unwrap<{ roster: RosterEntry[]; total: number; limit: number; offset: number }>(
+    res,
+    "Failed to fetch roster",
+  );
+  return { items: data.roster, total: data.total };
 }
 
 /** Find student accounts by username, full name, or registration number. */

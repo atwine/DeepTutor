@@ -236,6 +236,24 @@ export async function listSubmissions(
   return data.submissions;
 }
 
+/** Issue #42: Paginated submissions — returns items + total count. */
+export async function listSubmissionsPaged(
+  assignmentId: string,
+  limit: number = 50,
+  offset: number = 0,
+): Promise<{ items: SubmissionWithStudent[]; total: number }> {
+  const res = await apiFetch(
+    apiUrl(
+      `/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/submissions?limit=${limit}&offset=${offset}`,
+    ),
+  );
+  const data = await unwrap<{ submissions: SubmissionWithStudent[]; total: number; limit: number; offset: number }>(
+    res,
+    "Failed to load submissions",
+  );
+  return { items: data.submissions, total: data.total };
+}
+
 export async function getMySubmission(assignmentId: string): Promise<Submission | null> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/assignments/${encodeURIComponent(assignmentId)}/my-submission`),
