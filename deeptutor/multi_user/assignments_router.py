@@ -44,7 +44,7 @@ from .assignments import (
 from .course_units import get_course_unit, is_approved_student_of, is_instructor_of
 from .grading import grade_submission
 from .gradebook import build_gradebook, build_gradebook_csv
-from .identity import get_user_by_id
+from .identity import get_user_by_id, get_users_by_ids
 
 router = APIRouter()
 
@@ -404,9 +404,14 @@ async def list_submissions_endpoint(
 ) -> dict[str, Any]:
     assignment = await _get_assignment_or_404(assignment_id)
     await _require_manage_access(current, assignment)
+    records = await list_submissions_for_assignment(assignment_id)
+    # Issue #37: batch user lookup — one file read instead of N (one per
+    # submission). get_users_by_ids loads users.json once and returns a
+    # dict keyed by user_id for O(1) lookups.
+    user_records = get_users_by_ids([r["user_id"] for r in records])
     submissions = []
-    for record in await list_submissions_for_assignment(assignment_id):
-        user_record = get_user_by_id(record["user_id"])
+    for record in records:
+        user_record = user_records.get(record["user_id"])
         username = user_record[0] if user_record else record["user_id"]
         full_name = str(user_record[1].get("full_name") or "") if user_record else ""
         registration_number = (
