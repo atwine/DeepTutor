@@ -131,11 +131,11 @@ export default function CourseUnitNotesPage() {
             </button>
           ) : (
             <Link
-              href="/courses"
+              href="/courses/my"
               className="mb-4 inline-flex items-center gap-1.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
             >
               <ArrowLeft size={16} />
-              {t("Back to Course Catalog")}
+              {t("Back to My Course Units")}
             </Link>
           )}
           <h1 className="font-serif text-xl font-semibold text-[var(--foreground)]">
