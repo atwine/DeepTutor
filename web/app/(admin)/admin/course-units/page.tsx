@@ -278,7 +278,7 @@ export default function CourseUnitsPage() {
             {formatDate(unit.created_at, lang)}
           </td>
           <td className="px-5 py-3.5">
-            <div className="flex items-center justify-end gap-1.5">
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
               <button
                 onClick={() =>
                   setExpandedUnitId((current) =>
@@ -377,7 +377,7 @@ export default function CourseUnitsPage() {
 
   return (
     <div className="h-screen overflow-y-auto bg-[var(--background)] px-4 py-10 [scrollbar-gutter:stable]">
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-5xl">
         <div className="mb-8">
           <div className="mb-4 flex items-center justify-between">
             <Link
@@ -549,10 +549,6 @@ export default function CourseUnitsPage() {
             )}
           </div>
         )}
-
-        <p className="mt-8 text-center text-xs text-[var(--muted-foreground)]">
-          {t("DeepTutor Admin Â· Course Units")}
-        </p>
       </div>
 
       <ConfirmDialog
