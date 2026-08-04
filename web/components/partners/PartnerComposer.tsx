@@ -342,7 +342,10 @@ export const PartnerComposer = memo(function PartnerComposer({
               {t("Drop files here")}
             </span>
             <span className="text-[11px] text-[var(--primary)]/70">
-              {t("Images, Office docs, code & text")}
+              {t("Images, Office docs, code & text")} ·{" "}
+              {t("Max {{size}} per file", {
+                size: formatBytes(attachmentLimits.maxFileBytes),
+              })}
             </span>
           </div>
         </div>
@@ -489,7 +492,7 @@ export const PartnerComposer = memo(function PartnerComposer({
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled || streaming}
             aria-label={t("Attach files")}
-            title={t("Attach files")}
+            title={`${t("Attach files")} · ${t("Images, Office docs, code & text")} · ${t("Max {{size}} per file", { size: formatBytes(attachmentLimits.maxFileBytes) })}`}
             className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--muted-foreground)] transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)] disabled:opacity-30"
           >
             <Paperclip className="h-4 w-4" strokeWidth={1.9} />

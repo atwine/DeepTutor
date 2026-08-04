@@ -389,6 +389,15 @@ export default function CourseUnitMaterialsPage() {
               <p className="text-[11px] text-[var(--muted-foreground)]">
                 {t("Click to browse or drag and drop")}
               </p>
+              {/* Supported types + per-file size limit, sourced from the
+                  backend (_COURSE_MATERIAL_MAX_BYTES = 200 MB and
+                  FileTypeRouter supported extensions). Keeps users from
+                  uploading videos/audio/large files that won't be indexed. */}
+              <p className="text-[11px] text-[var(--muted-foreground)]">
+                {t(
+                  "Supported: PDF, Word, PowerPoint, Excel, Markdown, Text, Notebook (.ipynb), images. Max 200 MB per file. Videos and audio are not indexed.",
+                )}
+              </p>
             </div>
           </button>
           <input

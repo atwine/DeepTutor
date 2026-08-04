@@ -551,7 +551,7 @@ export default function BookChatPanel({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="mb-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[var(--muted-foreground)] transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
-            title={t("Attach files")}
+            title={`${t("Attach files")} · ${t("Images, Office docs, code & text")} · ${t("Max {{size}} per file", { size: formatBytes(attachmentLimits.maxFileBytes) })}`}
             aria-label={t("Attach files")}
           >
             <Paperclip className="h-4 w-4" />
