@@ -17,6 +17,16 @@ logger = logging.getLogger(__name__)
 _warning_lock = threading.Lock()
 _warning_logged = False
 
+# The OpenAI SDK's own default timeout is 600s (10 minutes) per attempt, with
+# no override anywhere in this codebase — confirmed the root cause of chat
+# turns hanging for many minutes against a degraded/half-alive vLLM or
+# OpenRouter connection before DeepTutor's own retry-or-fail wrapper
+# (provider_core/base.py, up to 9 attempts) even gets a chance to run.
+# `connect` fails fast (10s) when the endpoint is truly unreachable; `read`
+# stays generous (120s) since a real 70B-model response can legitimately take
+# 40-90s under load — this must not misfire on a slow-but-working call.
+DEFAULT_LLM_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
+
 
 def disable_ssl_verify_enabled() -> bool:
     """Return whether outbound TLS verification should be disabled."""
@@ -35,17 +45,20 @@ def disable_ssl_verify_enabled() -> bool:
     return True
 
 
-def build_openai_http_client(**kwargs: Any) -> httpx.AsyncClient | None:
-    """Build a custom SDK httpx client when DISABLE_SSL_VERIFY is enabled."""
-    if not disable_ssl_verify_enabled():
-        return None
-    return httpx.AsyncClient(verify=False, **kwargs)  # nosec B501
+def build_openai_http_client(**kwargs: Any) -> httpx.AsyncClient:
+    """Build the httpx client every ``AsyncOpenAI`` instance in this codebase
+    uses — always sets ``DEFAULT_LLM_TIMEOUT`` (see its docstring for why),
+    and additionally disables TLS verification when DISABLE_SSL_VERIFY is on.
+    """
+    kwargs.setdefault("timeout", DEFAULT_LLM_TIMEOUT)
+    if disable_ssl_verify_enabled():
+        kwargs["verify"] = False  # nosec B501
+    return httpx.AsyncClient(**kwargs)
 
 
 def openai_client_kwargs(**httpx_kwargs: Any) -> dict[str, httpx.AsyncClient]:
     """Return kwargs to pass into ``AsyncOpenAI`` for custom HTTP behavior."""
-    client = build_openai_http_client(**httpx_kwargs)
-    return {"http_client": client} if client is not None else {}
+    return {"http_client": build_openai_http_client(**httpx_kwargs)}
 
 
 __all__ = [
