@@ -1,7 +1,8 @@
-// Learning Space is admin-only: the RoleGuard here blocks direct URL
-// access (and every sub-route — /space/notebooks, /space/cli-apps, etc.)
-// for students and instructors, redirecting them to "/". Matches the
-// partners layout pattern. Auth-disabled deployments are unaffected.
+// Learning Space is an admin/instructor workspace: the RoleGuard here
+// blocks direct URL access (and every sub-route — /space/notebooks,
+// /space/cli-apps, etc.) for students, redirecting them to "/".
+// Instructors are allowed (issue #56). Auth-disabled deployments are
+// unaffected.
 import { RoleGuard } from "@/components/auth/RoleGuard";
 import SpaceMain from "@/components/space/SpaceMain";
 
@@ -11,7 +12,7 @@ export default function SpaceLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <RoleGuard allow={["admin"]} redirectTo="/">
+    <RoleGuard allow={["admin", "instructor"]} redirectTo="/">
       <SpaceMain>{children}</SpaceMain>
     </RoleGuard>
   );

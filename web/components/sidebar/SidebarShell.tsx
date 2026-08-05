@@ -52,6 +52,12 @@ interface NavEntry {
    * Ignored when auth is disabled (solo/local use, where the single user
    * is effectively the admin). */
   adminOnly?: boolean;
+  /** Only meaningful alongside adminOnly: true. Exempts instructors from
+   * the admin-only lock, so the item unlocks for admin + instructor and
+   * stays locked for students only. Use for features that are genuinely
+   * "admin/instructor", not just "admin" — adminOnly alone can't express
+   * that distinction. */
+  instructorAllowed?: boolean;
 }
 
 const PRIMARY_NAV: NavEntry[] = [
@@ -170,22 +176,27 @@ const PRIMARY_NAV: NavEntry[] = [
     // Book is an admin/instructor feature for creating curated course
     // content. Locked (greyed + padlock, non-clickable) for students —
     // they access published books via course notes, not the Book builder.
+    // instructorAllowed unlocks it for instructors too (issue #56 — the
+    // adminOnly flag alone can't express "admin+instructor, not student").
     href: "/book",
     label: "Book",
     icon: Library,
     tooltipKey: "Book tooltip",
     requires: "llm",
     adminOnly: true,
+    instructorAllowed: true,
   },
   {
     // Learning Space is an admin/instructor workspace for managing
     // notebooks and agent configurations. Locked for students — they
-    // don't have workspace management capabilities.
+    // don't have workspace management capabilities. instructorAllowed
+    // unlocks it for instructors too (issue #56).
     href: "/space",
     label: "Learning Space",
     icon: LayoutGrid,
     tooltipKey: "Space tooltip",
     adminOnly: true,
+    instructorAllowed: true,
   },
 ];
 
@@ -306,6 +317,7 @@ export function SidebarShell({
   const roleLocked = (item: NavEntry) => {
     if (!item.adminOnly) return false;
     if (!authEnabled) return false;
+    if (item.instructorAllowed && role === "instructor") return false;
     return role !== "admin";
   };
   const navLocked = (item: NavEntry) =>
