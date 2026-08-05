@@ -37,12 +37,12 @@ nobody sees options they don't need:
 | Sidebar item | Who sees it | What it's for |
 |---|---|---|
 | **Home** | Everyone | Chat with the tutor — the default starting point for any question |
-| **Partners** | Everyone | Persistent AI companions with their own personality, connected over chat |
-| **My Agents** | Admin, Instructor | Connect and consult external coding assistants (Claude Code, Codex, etc.) |
+| **Partners** | Admin only | Persistent AI companions with their own personality, connected over chat |
+| **My Agents** | Admin only | Connect and consult external coding assistants (Claude Code, Codex, etc.) |
 | **Co-Writer** | Everyone | A document editor for drafting notes, reports, or long write-ups with AI help |
-| **Book** | Everyone | Turn source material into an interactive, chapter-based "living book" |
-| **Learning Space** | Everyone | Your saved chat history, notebooks, question bank, skills, and personas |
-| **Memory** | Everyone | What the tutor remembers about you, and why — fully inspectable |
+| **Book** | Admin, Instructor | Turn source material into an interactive, chapter-based "living book" |
+| **Learning Space** | Admin, Instructor | Your saved chat history, notebooks, question bank, skills, and personas |
+| **Memory** | Admin only | What the tutor remembers about you, and why — fully inspectable |
 | **Knowledge Center** | Admin only | Manage the document libraries that ground answers in real sources |
 | **Settings** | Admin only | Model providers, network config, and other system-level configuration |
 | **Browse Courses** | Everyone | See course units open for enrollment and request to join one |
