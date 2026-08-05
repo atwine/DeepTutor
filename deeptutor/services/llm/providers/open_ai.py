@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 import logging
-import os
 from typing import Callable, Protocol, TypeVar, cast
 
-import httpx
 import openai
 
-from deeptutor.services.config import load_system_settings
+from deeptutor.services.llm.openai_http_client import build_openai_http_client
 
 from ..config import LLMConfig, get_token_limit_kwargs
 from ..exceptions import LLMConfigError
@@ -57,16 +55,15 @@ class OpenAIProvider(BaseLLMProvider):
 
     def __init__(self, config: LLMConfig) -> None:
         super().__init__(config)
-        http_client = None
-        if load_system_settings()["disable_ssl_verify"]:
-            if os.getenv("ENVIRONMENT", "").lower() in ("prod", "production"):
-                raise LLMConfigError("DISABLE_SSL_VERIFY is not allowed in production")
-            logger.warning("SSL verification disabled for OpenAI HTTP client")
-            http_client = httpx.AsyncClient(verify=False)  # nosec B501
+        # build_openai_http_client() always applies a sane connect/read
+        # timeout (the OpenAI SDK's own default is 600s per attempt with
+        # nothing overriding it — confirmed root cause of chat turns hanging
+        # for many minutes against a degraded connection), plus the existing
+        # DISABLE_SSL_VERIFY bypass behavior.
         self.client = openai.AsyncOpenAI(
             api_key=self.api_key,
             base_url=self.base_url or None,
-            http_client=http_client,
+            http_client=build_openai_http_client(),
         )
 
     @_typed_track_llm_call("openai")

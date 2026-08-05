@@ -14,11 +14,10 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
-import httpx
 from openai import AsyncAzureOpenAI, AsyncOpenAI
 
-from deeptutor.services.config import load_system_settings
 from deeptutor.services.llm import get_token_limit_kwargs, supports_tools
+from deeptutor.services.llm.openai_http_client import build_openai_http_client
 from deeptutor.services.llm.reasoning_params import (
     build_openai_compatible_reasoning_kwargs,
 )
@@ -62,9 +61,13 @@ def build_openai_client(config: LLMClientConfig) -> Any:
         if native_adapter is not None:
             return native_adapter
 
-    http_client = None
-    if load_system_settings()["disable_ssl_verify"]:
-        http_client = httpx.AsyncClient(verify=False)  # nosec B501
+    # Issue: the OpenAI SDK's own default timeout is 600s (10 minutes) per
+    # attempt with nothing overriding it here — confirmed root cause of chat
+    # turns hanging for many minutes against a degraded vLLM/OpenRouter
+    # connection. build_openai_http_client() always applies a sane
+    # connect/read timeout (see openai_http_client.py's DEFAULT_LLM_TIMEOUT),
+    # in addition to the existing SSL-bypass behavior.
+    http_client = build_openai_http_client()
     if config.binding == "azure_openai" or (config.binding == "openai" and config.api_version):
         return AsyncAzureOpenAI(
             api_key=config.api_key or "sk-no-key-required",
