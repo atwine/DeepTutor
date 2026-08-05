@@ -4270,3 +4270,131 @@ code review.
 **Net**: 5 of 6 issues (via 6 GitHub issues, #56-#61) fully fixed, tested
 live, and closed. #60 correctly left open as a real remaining hardening
 item, not falsely closed. Next: push `development` → `staging`.
+
+---
+
+## 2026-08-05 (cont. 5) — Live demo crisis, LLM timeout root-cause fix, Windows/OneDrive infra bug found and fixed
+
+Repo owner had a live demo scheduled with ~4 hours notice, then ~20 minutes
+notice, to fix and verify #60 and #53 on `development` (explicitly:
+`staging` untouched, since that's what the demo depended on). What
+followed was a real production incident during active demo prep — logged
+in full since the root causes (one real code bug, one real infra bug) are
+exactly the kind of thing worth a permanent record.
+
+### #60 — fast-fail on repeated tool failure (fixed, tested)
+
+The agent loop's existing design was already sound (bounded at
+`DEFAULT_MAX_ROUNDS = 8`, graceful forced-finish on error or budget
+exhaustion) — the actual gap was that a tool failing repeatedly (e.g. the
+RAG bug from #57, before it was fixed) made every round re-attempt the
+same failing call, taking 2+ minutes to exhaust the round budget. Added
+`DispatchOutcome.failed_tool_names` (`tool_dispatch.py`) and
+`AgentLoopState.consecutive_tool_failures`/`.last_failed_tool`
+(`agent_loop.py`) — two consecutive failures of the *same* tool now
+triggers an immediate forced-finish instead of continuing to retry.
+Verified live: a real chat turn that hit two consecutive `code_execution`
+failures (sandbox-runner was genuinely unreachable at the time) resolved
+in exactly 3 LLM calls (2 failed attempts + 1 finish) instead of
+exhausting the full round budget.
+
+### #53 — rescoped to O(1) identity lookups (fixed, tested)
+
+Given the demo timeline, rescoped from the original full Postgres
+migration to a safer, faster win: `get_user_by_id()`/`get_users_by_ids()`
+used to linear-scan every user on every call (username is the dict key;
+id is not) even though the underlying `load_users()` was already
+TTL-cached (issue #45). Added a lazily-built id-indexed lookup table in
+`identity.py`, invalidated by the cached dict's object identity. Verified
+functionally via direct API calls (gradebook, which depends on
+`get_users_by_ids()`) — correct data returned, no regression.
+
+### The chat-hang bug: root-caused and fixed
+
+While testing the above with a real LLM, chat started hanging
+indefinitely and "cannot reach server" errors appeared — right before the
+demo. Root-caused to: **no AsyncOpenAI client anywhere in the codebase had
+a request timeout configured**, so every LLM call silently used the
+OpenAI SDK's own default of 600 seconds (10 minutes) per attempt. Combined
+with the existing retry wrapper (up to 9 attempts with growing backoff) in
+`provider_core/base.py`, a single degraded connection to vLLM or
+OpenRouter could hang for many minutes to over an hour before ever
+surfacing an error — while the frontend's own shorter timeout gave up
+first and showed "cannot reach server," leaving the backend still
+silently churning on the abandoned request.
+
+Fixed in `openai_http_client.py`: `build_openai_http_client()` now always
+applies `DEFAULT_LLM_TIMEOUT` (connect=10s, read=120s, write=30s,
+pool=10s) via a real `httpx.AsyncClient`, previously only built when
+`DISABLE_SSL_VERIFY` was on (returning `None` otherwise, silently falling
+through to the SDK default). `openai_client_kwargs()` — already used by
+the openai_compat and azure_openai providers — picks this up for free.
+Two more call sites that built their own client inline without going
+through the shared helper were also fixed: `core/agentic/client.py` (used
+for any capability doing a streaming tool-calling LLM call — very likely
+the actual chat hot path) and `services/llm/providers/open_ai.py`.
+
+Verified: a client pointed at a deliberately unreachable address now
+fails deterministically in ~32s instead of hanging (previously up to
+600s+ per attempt); the backend's own `/auth/status` endpoint stayed fast
+(31ms) while that hung connection was in progress, confirming the async
+client isn't blocking the event loop for unrelated requests; a real call
+to the working vLLM endpoint still succeeds normally (1.1s), unaffected
+by the new timeout.
+
+### The infra bug: Docker Desktop + OneDrive + Windows Defender, not the app
+
+After the LLM fix, a *second*, separate symptom remained: intermittent
+slowness affecting literally everything, including fully static,
+dependency-free endpoints (`/docs`, `/openapi.json`) with zero application
+logic. Root-caused via elimination, not guessing:
+- Not host CPU (36%) or container CPU (7%) — no compute saturation.
+- Not file descriptors (33 open, nowhere near limits).
+- Not TCP/connect time (0.0003s consistently) — the entire delay was
+  server-side time-to-first-byte.
+- Reproduced identically via `docker exec` calls fully inside the
+  container, ruling out Windows/WSL2 host-networking entirely as the
+  direct cause of *this* symptom (a separate, real WSL2 NAT idle-wake
+  quirk was also observed on the host-to-container path, likely
+  aggravated by a VPN toggle earlier in the session, and resolved
+  separately by restarting Docker Desktop).
+
+The actual cause: the repo lived at
+`C:\Users\ic\OneDrive\Desktop\DeepTutor` — a live OneDrive-synced folder —
+with Docker's `data/` directory bind-mounted from inside it and written to
+constantly (settings, KB indexes, logs). Every write was intercepted by
+three separate systems simultaneously: WSL2's virtualized filesystem
+layer, OneDrive's sync filter driver, and Windows Defender's real-time
+scanner. This is a well-documented Docker-Desktop-on-Windows performance
+pattern, not a DeepTutor code issue.
+
+**Fix**: moved the entire repo to `C:\dev\DeepTutor` (outside any
+OneDrive-synced path), rebuilt, and brought the stack back up — Docker
+Compose reused the same named Postgres volume automatically (same
+directory *name*, same project namespace), so all test data and accounts
+survived the move intact. Added Windows Defender exclusions for
+`C:\dev\DeepTutor` and Docker's WSL vhdx path. Verified: repeated
+`/auth/status` calls dropped from 9-35s (fluctuating) to a consistent
+4-15ms, including after idle gaps that previously triggered the slow
+path; a full live chat turn (with a real `web_search` tool call) completed
+correctly in 30s with the backend staying fast (7ms) immediately
+afterward — no lingering degradation, which is exactly the failure mode
+that broke everything before.
+
+Repo owner also has Kaspersky installed alongside Windows Defender — if
+this class of slowness ever recurs, Kaspersky's own real-time scanner
+would need the same exclusion added separately in its own settings, since
+Defender exclusions don't cover it. Not needed now since the OneDrive move
+already resolved the observed symptom.
+
+**Net for this pass**: two real, verified code fixes (chat-hang timeout,
+#60 fast-fail) plus one rescoped perf fix (#53), and one real infrastructure
+finding/fix (OneDrive+Defender+Docker contention) that is NOT an app bug —
+directly relevant to the repo owner's Railway deployment question: Railway
+runs on real Linux infrastructure with none of WSL2 virtualization,
+OneDrive sync-locking, or Windows Defender real-time scanning in the path,
+so this entire class of symptom should not reproduce there.
+
+**Important operational note for future sessions**: the repo now lives at
+`C:\dev\DeepTutor`, not the old OneDrive path. Update any saved paths,
+shortcuts, or muscle-memory `cd` commands accordingly.
