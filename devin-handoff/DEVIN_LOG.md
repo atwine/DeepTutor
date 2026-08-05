@@ -4047,3 +4047,66 @@ filed but unfixed — next up per repo owner's plan: wipe all data, rebuild
 instructor/student roles, adversarial testing, and independent
 re-verification of the earlier performance claims (SCALABILITY_AUDIT.md /
 the 8 perf-fix issues). Will keep appending to this log as that proceeds.
+
+---
+
+## 2026-08-05 (cont.) — Live admin/student walkthrough: mojibake bug found+fixed, real LLM/embedding configured, RAG empirically confirmed broken
+
+Continued the independent evaluation pass. After the clean data wipe/rebuild,
+did a live click-through of every admin page (auth enabled, `testadmin`/
+`testinstr`/`teststud` test accounts created), then configured a real LLM
+(vLLM/Llama-3.3-70B-Instruct-AWQ-INT4, network-hosted) and embedding model
+(Ollama/nomic-embed-text:v1.5) to test actual chat and RAG behavior rather
+than just static code.
+
+**Found and fixed a real rendering bug**: `web/app/(admin)/admin/course-units/page.tsx`
+had literal mojibake bytes committed in source — every em-dash, ellipsis,
+and curly quote in that file was UTF-8 text re-encoded as Latin-1 at some
+point before being saved (e.g. "User Management â†’" instead of "User
+Management →"). Fixed all instances (11 in that file, plus comment-only
+occurrences in `web/lib/course-units-api.ts`), rebuilt, and verified live
+that all affected strings now render correctly. Root cause is almost
+certainly an editor/tool encoding mismatch at authoring time — worth a
+repo-wide grep for the same byte pattern (`â€`) periodically, since it can
+recur silently.
+
+**Confirmed live: chat + LLM pipeline works correctly end-to-end.** Asked a
+real question with the vLLM-backed model; got an accurate, well-formed
+answer, correct auto-titling, and correct cost/token tracking (49s, 2
+calls, 12.5k tokens, $0.0019) — the core tutoring loop is solid.
+
+**Confirmed live: course-material RAG does not reach student chat (#57),
+and refined the finding.** Created a course, enrolled a student, uploaded
+and published a material with a unique marker string, confirmed
+`ingestion_status: "ready"`. As the student, the course KB *did* appear as
+a selectable option in the chat composer (correcting my earlier code-only
+trace, which found no path granting it) — but selecting it and asking for
+the marker string failed server-side: `Tool rag failed` / `Tool kb_files
+failed`, with no traceback reaching logs despite `tool_dispatch.py` logging
+with `exc_info=True`. A second attempt hung in a silent "Reasoning" retry
+loop for 2+ minutes (5+ retries, no error, no termination) and left nothing
+in the transcript when manually stopped — filed as new issue #60, since
+it's a distinct reliability gap from the RAG-access issue itself. Whatever
+the exact root cause, the practical, now-empirically-confirmed result
+matches the original finding: a student cannot get a course-material-backed
+answer through chat today.
+
+**Also found and filed #59**: the in-app "How This Platform Works" doc page
+(`web/lib/docs-content.ts`) claims Partners and Memory are available to
+"Everyone," but both are intentionally admin-only in code (confirmed via
+their own inline comments and route `RoleGuard`s) — the doc table was never
+updated to match. Distinct from #56 (where the *code* contradicts its own
+intent for Book/Learning Space) — this one is the *docs* being stale
+against otherwise-correct, intentional code.
+
+**GitHub issues filed this pass**: #56 (Book/Space instructor lockout,
+code-level, done in prior entry), #57 (RAG-to-chat gap, now with live
+confirmation), #58 (Book block hand-editing gap), #59 (docs table wrong for
+Partners/Memory), #60 (silent retry hang).
+
+**Left for later / handing back**: instructor-role and student-role
+systematic walkthroughs (buttons, rendering, timing) not yet done;
+adversarial/edge-case testing not yet started; performance-claim
+re-verification not yet started. Test accounts (`testadmin`/`testinstr`/
+`teststud`, all with strong non-default passwords) and one course unit
+("Test Data Structures") remain in the environment for continued testing.
