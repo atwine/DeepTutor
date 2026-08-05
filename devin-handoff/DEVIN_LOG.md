@@ -4215,3 +4215,58 @@ schema/source inspection) rather than trusted from prior log entries.
 Remaining backlog item: task #21 (this log itself is the running record;
 no separate consolidated report was requested beyond what's captured
 across these entries).
+
+---
+
+## 2026-08-05 (cont. 4) — Fixed, tested, and verified all issues from the evaluation pass
+
+Worked through every issue filed during the live evaluation (#56-#61), one
+at a time: fix, rebuild, test live, verify, commit, close. All fixes are
+on `development` and verified against the actual running app, not just
+code review.
+
+1. **Mojibake fix** (course-units page.tsx) — committed properly this time
+   (it was fixed and tested earlier in the session but never actually
+   committed, just baked into a docker image). Verified live: arrows,
+   em-dashes, ellipses, quotes all render correctly now.
+2. **#56 — Book/Learning Space instructor lockout.** Added an
+   `instructorAllowed` flag on `NavEntry`, widened both route guards to
+   `allow={["admin", "instructor"]}`. Verified live: instructor's sidebar
+   shows real links (not locked), direct navigation to `/book`/`/space`
+   works, and the "New book" form is reachable — the Course Notes
+   dead-end I found earlier is now unblocked at the root cause.
+3. **#61 — Missing course-name validation.** Added a Pydantic
+   `field_validator` on `CourseUnitCreate`/`CourseUnitUpdate` requiring a
+   non-empty, trimmed name. Verified: empty/whitespace name now returns
+   422 on both create and update; valid names still work.
+4. **#59 — Stale docs table.** Corrected `docs-content.ts`'s sidebar
+   reference table: Partners/My Agents/Memory → "Admin only" (matching
+   intentional code), Book/Learning Space → "Admin, Instructor" (matching
+   the #56 fix). Verified live on `/docs`.
+5. **#58 — Book blocks couldn't be hand-edited.** Added
+   `BookEngine.edit_block_content()` (direct payload overwrite, no LLM
+   call, scoped to text/callout/user_note block types), a new
+   `POST /books/edit-block` endpoint, and a Pencil "Edit content" button
+   in the block toolbar with an inline textarea. Verified by generating a
+   **real book** through the actual vLLM-backed pipeline, editing a real
+   generated block, and confirming the edit survived a full page reload.
+6. **#57 + #60 — RAG-to-chat gap.** Root cause confirmed: enrollment
+   never wrote to the grants file `resolve_kb()` actually checks for a
+   non-admin user. Added `_sync_course_kb_grant()`, hooked into every
+   enrollment-status transition (enroll/approve/reject-leave grant
+   access; approve-leave/unenroll revoke it) — writes into the student's
+   existing grants file, the same shape as an admin-assigned KB grant, so
+   the existing authorization code picks it up with no further changes.
+   **Verified end-to-end with a real LLM**: uploaded a material with a
+   unique marker string, re-synced an existing enrollment, and as that
+   student asked chat for the marker — got the correct answer via a real
+   `rag` tool call in 47s, no errors. #60 is left **open** — its specific
+   trigger is gone, but the general "cap retries, surface an error
+   instead of hanging silently" hardening it asked for was not
+   implemented; didn't want to make speculative changes to the shared
+   agentic turn loop without being able to reproduce the failure
+   independently of #57's now-fixed root cause.
+
+**Net**: 5 of 6 issues (via 6 GitHub issues, #56-#61) fully fixed, tested
+live, and closed. #60 correctly left open as a real remaining hardening
+item, not falsely closed. Next: push `development` → `staging`.
