@@ -7,7 +7,7 @@ export interface CourseUnit {
   term: string;
   description: string;
   instructor_ids: string[];
-  /** Server-resolved usernames for `instructor_ids`, same order â€” lets a
+  /** Server-resolved usernames for `instructor_ids`, same order — lets a
    * non-admin instructor see a co-instructor's name without needing the
    * admin-only user list. */
   instructor_usernames: string[];
@@ -23,7 +23,7 @@ export interface CourseUnit {
 
 /** A course unit as shown in the student-facing catalog: `my_status` is the
  * caller's own relationship to it. "teaching" means the caller is one of
- * the unit's instructors (shown instead of an enrollment status â€” an
+ * the unit's instructors (shown instead of an enrollment status — an
  * instructor doesn't request to join their own course). */
 export interface CatalogCourseUnit extends CourseUnit {
   my_status: "pending" | "approved" | "leave_requested" | "teaching" | null;
@@ -199,7 +199,7 @@ export async function deleteCourseUnit(courseUnitId: string): Promise<void> {
   await unwrap<{ ok: boolean }>(res, "Failed to delete course unit");
 }
 
-/** Round 3: archive a course unit â€” blocks students the same way an
+/** Round 3: archive a course unit — blocks students the same way an
  * expired course does, while instructor/admin access is unaffected. */
 export async function archiveCourseUnit(courseUnitId: string): Promise<CourseUnit> {
   const res = await apiFetch(
@@ -370,7 +370,7 @@ export async function rejectEnrollmentRequest(
   await unwrap<{ ok: boolean }>(res, "Failed to reject request");
 }
 
-/** Every course unit, annotated with the caller's own enrollment status â€”
+/** Every course unit, annotated with the caller's own enrollment status —
  * the student-facing "what can I join" browse view. */
 export async function getCourseCatalog(): Promise<CatalogCourseUnit[]> {
   const res = await apiFetch(apiUrl("/api/v1/multi-user/course-units/catalog"));
@@ -421,7 +421,7 @@ export async function getLeaveRequests(
   return data.requests;
 }
 
-/** Instructor confirms a leave request â€” removes the student from the roster. */
+/** Instructor confirms a leave request — removes the student from the roster. */
 export async function approveLeaveRequest(
   courseUnitId: string,
   userId: string,
@@ -435,7 +435,7 @@ export async function approveLeaveRequest(
   await unwrap<{ ok: boolean }>(res, "Failed to approve leave request");
 }
 
-/** Instructor rejects a leave request â€” student stays enrolled. */
+/** Instructor rejects a leave request — student stays enrolled. */
 export async function rejectLeaveRequest(
   courseUnitId: string,
   userId: string,
