@@ -3987,3 +3987,63 @@ Recommended top 5: (1) replace get_user_by_id() loops with
 get_users_by_ids() (already exists), (2) add missing DB indexes, (3) add
 pagination to list endpoints, (4) replace session.refresh loops with
 selectinload, (5) add virtualization to gradebook/student tables.
+
+---
+
+## 2026-08-05 — Independent verification pass: Book/Learning Space instructor lockout, RAG-to-student-chat gap, Book editability
+
+Repo owner asked for an independent evaluation of the claimed work on
+`development` — not trusting this log, but checking claims against actual
+code and behavior, plus a full stress-test/UI walkthrough plan. Started
+with three specific product questions the owner raised directly. All three
+checked by reading code (not by trusting comments or prior log entries).
+
+**1. Book/Learning Space are hard-locked for instructors, not just
+students — confirmed bug, GitHub issue #56.**
+`web/app/(workspace)/book/layout.tsx` and `web/app/(utility)/space/layout.tsx`
+both use `RoleGuard allow={["admin"]}`, which redirects any non-admin
+(including instructors) straight back to `/`, even on a direct URL visit.
+Both entries' own inline comments describe them as "admin/instructor"
+features, and `RoleGuard`'s own type (`"admin" | "instructor" | "user"`)
+confirms `instructor` was meant to be a valid option here — it just wasn't
+included when the admin-only lock was added. Sidebar-side, `SidebarShell.tsx`
+uses a binary `adminOnly` flag on the Book/Learning Space nav entries that
+can't express "admin+instructor, not student." This is a real regression:
+instructors currently cannot compile Books (course notes) or use Learning
+Space at all.
+
+**2. Course-material RAG is indexed but never reachable by student chat —
+confirmed bug, GitHub issue #57.** Traced the full pipeline: uploads index
+correctly into a per-course KB (`course_{unit_id}`, `course_units.py`), and
+the generic `rag` chat tool can query any KB a user is authorized to see.
+But `enroll_student()` only writes an `Enrollment` row — it never adds the
+course KB to the student's grant record, and `list_visible_knowledge_bases()`
+has no enrollment-aware branch. The only callers of `get_course_kb_name()`
+are the instructor-side materials upload/delete/download routes. Net
+result: instructors see uploads succeed and get indexed, but students can
+never actually consult that content through chat — no error, just silently
+absent. This is the most significant of the three findings: it means the
+"upload materials so students can be taught from them" claim does not
+currently hold end-to-end.
+
+**3. Book block editing is mostly real, with one gap — GitHub issue #58.**
+Move/insert/delete/regenerate/change-type are all genuinely implemented
+and wired end-to-end (verified real backend endpoints in
+`deeptutor/api/routers/book.py` calling real `engine.*` methods, real
+frontend handlers in `web/app/(workspace)/book/page.tsx`, not stubs or
+decorative buttons). The gap: no block type except `user_note` supports
+direct hand-editing of existing content — the only way to change wording is
+to regenerate the whole block via the LLM. Falls short of "arrange the
+notes the way they need to" if that includes manual text fixes.
+
+**Method note**: findings 1 and 3 were verified directly; finding 2 was
+delegated to a focused background research pass tracing every caller of
+`get_course_kb_name()` and `list_visible_knowledge_bases()` to confirm the
+gap wasn't just an unread code path.
+
+**Left for later / handing back**: all three issues (#56, #57, #58) are
+filed but unfixed — next up per repo owner's plan: wipe all data, rebuild
+`development` fresh, then a full live UI walkthrough across admin/
+instructor/student roles, adversarial testing, and independent
+re-verification of the earlier performance claims (SCALABILITY_AUDIT.md /
+the 8 perf-fix issues). Will keep appending to this log as that proceeds.
