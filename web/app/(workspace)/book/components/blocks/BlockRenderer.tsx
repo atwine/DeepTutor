@@ -9,6 +9,7 @@ import {
   ArrowUp,
   ArrowDown,
   Replace,
+  Pencil,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Block, BlockType } from "@/lib/book-types";
@@ -29,6 +30,13 @@ import ConceptGraphBlock from "./ConceptGraphBlock";
 import SectionBlock from "./SectionBlock";
 import PlaceholderBlock from "./PlaceholderBlock";
 
+// Issue #58: block types whose payload carries a single `body` markdown
+// string, which is what direct hand-editing (as opposed to regenerate)
+// can meaningfully overwrite. Types like `section` have a structured
+// multi-part payload (intro/subsections/key_takeaway) that doesn't fit a
+// single-string edit and are excluded here.
+const EDITABLE_BODY_TYPES: BlockType[] = ["text", "callout", "user_note"];
+
 const CHANGEABLE_TYPES: BlockType[] = [
   "text",
   "section",
@@ -46,6 +54,7 @@ const CHANGEABLE_TYPES: BlockType[] = [
 export interface BlockRendererProps {
   block: Block;
   onRegenerate?: (block: Block) => void;
+  onEditContent?: (block: Block, body: string) => void;
   onDelete?: (block: Block) => void;
   onMove?: (block: Block, direction: "up" | "down") => void;
   onChangeType?: (block: Block, newType: BlockType) => void;
@@ -63,6 +72,7 @@ export interface BlockRendererProps {
 export default function BlockRenderer({
   block,
   onRegenerate,
+  onEditContent,
   onDelete,
   onMove,
   onChangeType,
@@ -75,6 +85,12 @@ export default function BlockRenderer({
 }: BlockRendererProps) {
   const { t } = useTranslation();
   const [showTypeMenu, setShowTypeMenu] = useState(false);
+  const [isEditingBody, setIsEditingBody] = useState(false);
+  const currentBody = String(
+    (block.payload as Record<string, unknown> | undefined)?.body ?? "",
+  );
+  const [draftBody, setDraftBody] = useState(currentBody);
+  const canEditBody = !!onEditContent && EDITABLE_BODY_TYPES.includes(block.type);
 
   if (block.status === "pending" || block.status === "generating") {
     return (
@@ -173,7 +189,8 @@ export default function BlockRenderer({
       body = <PlaceholderBlock block={block} />;
   }
 
-  const hasActions = !!onRegenerate || !!onDelete || !!onMove || !!onChangeType;
+  const hasActions =
+    !!onRegenerate || !!onDelete || !!onMove || !!onChangeType || canEditBody;
 
   const bridgeText = String(
     (block.payload as Record<string, unknown> | undefined)?.bridge_text ?? "",
@@ -236,6 +253,18 @@ export default function BlockRenderer({
               )}
             </div>
           )}
+          {canEditBody && (
+            <button
+              onClick={() => {
+                setDraftBody(currentBody);
+                setIsEditingBody(true);
+              }}
+              className="pointer-events-auto rounded p-1 hover:bg-[var(--background)] hover:text-[var(--foreground)]"
+              title={t("Edit content")}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          )}
           {onRegenerate && (
             <button
               onClick={() => onRegenerate(block)}
@@ -256,7 +285,36 @@ export default function BlockRenderer({
           )}
         </div>
       )}
-      {body}
+      {isEditingBody ? (
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
+          <textarea
+            value={draftBody}
+            onChange={(e) => setDraftBody(e.target.value)}
+            rows={8}
+            autoFocus
+            className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--background)] p-2 text-sm text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--foreground)]"
+          />
+          <div className="mt-2 flex justify-end gap-2">
+            <button
+              onClick={() => setIsEditingBody(false)}
+              className="rounded-md px-3 py-1 text-xs text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-[var(--foreground)]"
+            >
+              {t("Cancel")}
+            </button>
+            <button
+              onClick={() => {
+                onEditContent?.(block, draftBody);
+                setIsEditingBody(false);
+              }}
+              className="rounded-md bg-[var(--foreground)] px-3 py-1 text-xs font-medium text-[var(--background)]"
+            >
+              {t("Save")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        body
+      )}
     </div>
   );
 }

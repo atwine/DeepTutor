@@ -169,6 +169,17 @@ export const bookApi = {
       body: JSON.stringify({ book_id, page_id, block_id, new_position }),
     }),
 
+  editBlockContent: (
+    book_id: string,
+    page_id: string,
+    block_id: string,
+    body: string,
+  ) =>
+    request<{ block: Block }>("/books/edit-block", {
+      method: "POST",
+      body: JSON.stringify({ book_id, page_id, block_id, body }),
+    }),
+
   changeBlockType: (params: {
     book_id: string;
     page_id: string;

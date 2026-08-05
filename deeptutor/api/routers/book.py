@@ -108,6 +108,15 @@ class MoveBlockRequest(BaseModel):
     new_position: int
 
 
+class EditBlockContentRequest(BaseModel):
+    """Request body for directly overwriting a text-bearing block's content."""
+
+    book_id: str
+    page_id: str
+    block_id: str
+    body: str
+
+
 class ChangeBlockTypeRequest(BaseModel):
     """Request body for changing the type of an existing block."""
 
@@ -476,6 +485,35 @@ async def move_block(req: MoveBlockRequest) -> dict[str, Any]:
     if not ok:
         raise HTTPException(status_code=404, detail="Block not found")
     return {"ok": True}
+
+
+@router.post("/books/edit-block")
+async def edit_block_content(req: EditBlockContentRequest) -> dict[str, Any]:
+    """Directly overwrite a text-bearing block's content, no LLM call.
+
+    Issue #58: the only way to change a generated block's wording used to
+    be "regenerate" (re-runs the LLM, can produce a very different result).
+    This lets an instructor hand-edit the text directly.
+
+    Args:
+        req: The edit request containing book, page, block IDs and the new body text.
+
+    Returns:
+        A dict with the updated ``block``.
+
+    Raises:
+        HTTPException: 404 if the block is not found.
+    """
+    engine = get_book_engine()
+    block = await engine.edit_block_content(
+        book_id=req.book_id,
+        page_id=req.page_id,
+        block_id=req.block_id,
+        body=req.body,
+    )
+    if block is None:
+        raise HTTPException(status_code=404, detail="Block not found")
+    return {"block": block.model_dump(mode="json")}
 
 
 @router.post("/books/change-block-type")

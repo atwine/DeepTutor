@@ -30,6 +30,7 @@ const INSERTABLE_TYPES: BlockType[] = [
 export interface PageReaderProps {
   page: Page | null;
   onRegenerateBlock?: (block: Block) => void;
+  onEditBlockContent?: (block: Block, body: string) => void;
   onDeleteBlock?: (block: Block) => void;
   onMoveBlock?: (block: Block, direction: "up" | "down") => void;
   onChangeBlockType?: (block: Block, newType: BlockType) => void;
@@ -49,6 +50,7 @@ export interface PageReaderProps {
 export default function PageReader({
   page,
   onRegenerateBlock,
+  onEditBlockContent,
   onDeleteBlock,
   onMoveBlock,
   onChangeBlockType,
@@ -268,6 +270,7 @@ export default function PageReader({
                 <BlockRenderer
                   block={block}
                   onRegenerate={onRegenerateBlock}
+                  onEditContent={onEditBlockContent}
                   onDelete={onDeleteBlock}
                   onMove={onMoveBlock}
                   onChangeType={onChangeBlockType}
