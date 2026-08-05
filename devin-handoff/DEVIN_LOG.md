@@ -4154,3 +4154,64 @@ stale onboarding docs (#59).
 
 **Remaining**: adversarial/edge-case testing (task #19) and independent
 performance-claim re-verification (task #20) not yet done.
+
+---
+
+## 2026-08-05 (cont. 3) — Adversarial testing and performance-claim spot-check
+
+**Adversarial/edge-case testing (task #19)**: ran a focused set of attacks
+against the live `development` environment (auth enabled, real test
+accounts):
+- Permission bypass: student attempts against 6 admin/instructor-only
+  endpoints (list users, delete course unit, self-promote to admin, view
+  gradebook, upload materials, view another course's roster) — all
+  correctly blocked with proper 403/405 responses.
+- XSS: `<script>alert(1)</script>` as a course name rendered as literal
+  text in Browse Courses — React's default escaping holds, no injection.
+- SQL injection: a `'; DROP TABLE course_units;--` string stored safely as
+  plain text (parameterized queries via SQLAlchemy).
+- Login rate-limiting: confirmed 3 failed attempts → 429 lockout, exactly
+  as documented.
+- Username-enumeration timing: re-tested cleanly (first attempt was
+  confounded by an already-rate-limited test account) — unknown vs. known
+  username now within ~30ms of each other (0.343s vs 0.319s), confirming
+  the dummy-bcrypt-check protection works.
+- Self-disable guard: admin correctly blocked from disabling their own
+  account.
+- Duplicate self-enrollment request: idempotent, returns the existing
+  approved enrollment rather than erroring or duplicating.
+- Assignment attempt limit: enforced server-side (`asg.../submit` returns
+  "Attempt limit reached (1)."), not just a UI-level restriction — direct
+  API resubmission correctly rejected.
+- Malformed JSON and unauthenticated requests both handled with correct
+  422/401-equivalent responses.
+- **Found one new real bug**: `POST /course-units` accepts and creates a
+  course unit with an **empty name** — the "Name is required" check only
+  exists client-side in the React form, nothing enforces it server-side.
+  Filed as **issue #61**. Cleaned up the test record after confirming.
+
+**Performance-claim spot-check (task #20)**: didn't have seed data at the
+scale of the original benchmarks (30-100 students), so did a targeted
+verification that the underlying mechanisms are real rather than re-running
+full load simulations:
+- Confirmed all 8 indexes from migration `a1b2c3d4e5f6` genuinely exist in
+  the live Postgres schema (`\di` inside the `deeptutor-postgres`
+  container) — not just claimed in the log.
+- Confirmed `identity.py`'s 5-second TTL cache and `get_users_by_ids()`
+  batch lookup both genuinely exist in source, matching issue #45's
+  description.
+- Confirmed the gradebook N+1 fix (issue #31) is real: `build_gradebook()`
+  calls a single-query `get_latest_submissions_batch()` in
+  `assignments.py`. One correction to the log's own description: it's
+  implemented with `ROW_NUMBER() OVER (PARTITION BY assignment_id,
+  user_id ORDER BY submitted_at DESC)`, not literally `SELECT DISTINCT ON`
+  as an earlier log entry described — a more portable choice (works on
+  both Postgres and SQLite) with the same N+1-elimination effect. Minor
+  wording imprecision in the log, not a functional gap.
+
+**Net for this evaluation pass**: 6 GitHub issues filed (#56-#61), all
+verified against real behavior (live UI clicks, direct API calls, or
+schema/source inspection) rather than trusted from prior log entries.
+Remaining backlog item: task #21 (this log itself is the running record;
+no separate consolidated report was requested beyond what's captured
+across these entries).
