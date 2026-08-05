@@ -69,6 +69,11 @@ class DispatchOutcome:
     pause: bool = False
     pause_payload: dict[str, Any] | None = None
     pause_tool_call_id: str | None = None
+    # Issue #60: names of tools that reported failure this iteration (empty
+    # if every call succeeded). Lets the loop detect "the model keeps
+    # retrying the same failing tool" and fast-fail to a graceful finish
+    # instead of burning through the whole round budget on repeats.
+    failed_tool_names: list[str] = field(default_factory=list)
 
 
 async def dispatch_tool_calls(
@@ -531,6 +536,7 @@ async def _collect_outcome(
     pause = False
     pause_payload: dict[str, Any] | None = None
     pause_tool_call_id: str | None = None
+    failed_tool_names: list[str] = []
     suppress_ui_indices = suppress_ui_indices or set()
     for tool_index, ((tool_call_id, tool_name, _exec_args), result) in enumerate(
         zip(prepared, results, strict=False)
@@ -563,6 +569,8 @@ async def _collect_outcome(
         )
         if isinstance(tool_extra_meta, dict) and tool_extra_meta:
             tool_metadata_by_id[tool_call_id] = dict(tool_extra_meta)
+        if result.get("success") is False:
+            failed_tool_names.append(tool_name)
         if result.get("terminate_turn") and not terminate:
             terminate = True
             terminate_payload = {
@@ -588,4 +596,5 @@ async def _collect_outcome(
         pause=pause,
         pause_payload=pause_payload,
         pause_tool_call_id=pause_tool_call_id,
+        failed_tool_names=failed_tool_names,
     )

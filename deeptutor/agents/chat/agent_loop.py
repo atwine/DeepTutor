@@ -126,6 +126,12 @@ class AgentLoopState:
     rounds: int = 0
     tool_steps: int = 0
     sources: list[dict[str, Any]] = field(default_factory=list)
+    # Issue #60: consecutive rounds where the same tool name failed. Reset
+    # whenever a round has no failures or a different tool fails. Lets the
+    # loop fast-fail instead of burning through the whole round budget when
+    # the model keeps retrying a tool that isn't going to succeed.
+    last_failed_tool: str = ""
+    consecutive_tool_failures: int = 0
 
 
 @dataclass(slots=True)
@@ -339,6 +345,30 @@ class AgentLoop:
             state.sources.extend(dispatch.sources)
             messages.extend(dispatch.tool_messages)
 
+            # Issue #60: fast-fail on repeated failures of the same tool,
+            # instead of silently burning through the whole round budget
+            # (observed: a broken RAG grant made every round re-attempt
+            # `rag`, taking 2+ minutes before the budget ran out — and if
+            # the user gave up and stopped the turn before that, nothing
+            # was ever shown). Two consecutive failures of the same tool
+            # is enough signal that retrying isn't going to help.
+            if len(dispatch.failed_tool_names) == 1:
+                failed_name = dispatch.failed_tool_names[0]
+                if failed_name == state.last_failed_tool:
+                    state.consecutive_tool_failures += 1
+                else:
+                    state.last_failed_tool = failed_name
+                    state.consecutive_tool_failures = 1
+            else:
+                state.last_failed_tool = ""
+                state.consecutive_tool_failures = 0
+            if (
+                state.consecutive_tool_failures >= 2
+                and not dispatch.pause
+                and not dispatch.terminate
+            ):
+                return await self._forced_finish(messages, state, reason="tool_failure")
+
             if dispatch.pause:
                 resumed = await self.pipeline._await_user_reply_and_resolve(
                     context=self.context,
@@ -401,6 +431,14 @@ class AgentLoop:
             notice = self.pipeline._t(
                 "notices.loop_error_finish",
                 default="A step failed; answering with what has been gathered.",
+            )
+        elif reason == "tool_failure":
+            notice = self.pipeline._t(
+                "notices.loop_tool_failure_finish",
+                default=(
+                    "A tool kept failing on retry; answering with what has "
+                    "been gathered instead of continuing to retry it."
+                ),
             )
         else:
             notice = self.pipeline._t(
