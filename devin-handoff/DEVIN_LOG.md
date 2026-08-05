@@ -4110,3 +4110,47 @@ adversarial/edge-case testing not yet started; performance-claim
 re-verification not yet started. Test accounts (`testadmin`/`testinstr`/
 `teststud`, all with strong non-default passwords) and one course unit
 ("Test Data Structures") remain in the environment for continued testing.
+
+---
+
+## 2026-08-05 (cont. 2) — Instructor and student role walkthroughs
+
+Continued the live evaluation as `testinstr` and `teststud`.
+
+**Instructor walkthrough**: Course Units (correctly scoped to own courses,
+Delete button correctly absent — not just hidden client-side, missing from
+the DOM entirely), created and published a real assignment ("Test Quiz 1",
+confirmed the "Optional assignment" checkbox from issue #32 is present and
+real), Gradebook (renders correctly, picks up the new assignment column
+live), My Students (scoped correctly to own course). **Confirmed the
+practical, load-bearing impact of #56 directly**: visited Course Notes,
+which explicitly instructs "Write a book in your Book Library, then assign
+it here" — but the instructor's Book Library is fully blocked by the route
+guard, so "Assign a book" has nothing to offer ("Every book in your library
+is already assigned here, or you haven't written one yet"). This is not a
+theoretical gap — publishing course notes via Book is completely dead for
+instructors today. Added to #56. Also found a third docs-table row wrong
+(My Agents — code is intentionally admin-only per its own comment, docs
+claim "Admin, Instructor"), added to #59.
+
+**Student walkthrough**: My Course Units (issue #54) renders correctly,
+took the real published assignment end-to-end — submission accepted
+instantly with a "Results loading…" state, AI grading returned a full,
+accurate, well-structured score (10/10) with breakdown ("what you got
+right" / "what's wrong" / "how to fix it") in well under the documented
+30-second event-loop-blocking window, attempt-limit enforcement worked
+correctly ("You've used all of your attempts"), and completion status
+correctly flipped to "Completed" on the course card afterward. Notification
+bell correctly showed "New assignment: Test Quiz 1." Did not specifically
+load-test concurrent submissions, so this doesn't contradict the
+documented event-loop-blocking risk under concurrent load — a single
+student's submission performed well.
+
+**Net**: assignment creation → publish → student submission → AI grading →
+completion tracking → gradebook is a genuinely solid, working pipeline
+end-to-end. The confirmed gaps remain scoped to Book/Learning Space access
+(#56), the RAG-to-chat bridge (#57, #60), Book content editing (#58), and
+stale onboarding docs (#59).
+
+**Remaining**: adversarial/edge-case testing (task #19) and independent
+performance-claim re-verification (task #20) not yet done.
