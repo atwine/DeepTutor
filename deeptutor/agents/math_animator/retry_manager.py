@@ -19,6 +19,8 @@ def _is_non_retriable_environment_error(message: str) -> bool:
 
 
 class CodeRetryManager:
+    """Manages the render-fix-regenerate retry loop for Manim code."""
+
     def __init__(
         self,
         *,
@@ -31,6 +33,18 @@ class CodeRetryManager:
         repair_timeout_seconds: float = 180.0,
         review_timeout_seconds: float = 120.0,
     ) -> None:
+        """Initialize the retry manager with render and repair callbacks.
+
+        Args:
+            renderer: The Manim render service used to render code.
+            repair_callback: Async callback that generates repaired code.
+            review_callback: Optional async callback for visual quality review.
+            on_retry: Optional async callback invoked on each retry attempt.
+            on_status: Optional async callback for status messages.
+            max_retries: Maximum number of repair-render retries.
+            repair_timeout_seconds: Timeout for each repair call.
+            review_timeout_seconds: Timeout for each visual review call.
+        """
         self.renderer = renderer
         self.repair_callback = repair_callback
         self.review_callback = review_callback
@@ -47,6 +61,19 @@ class CodeRetryManager:
         output_mode: str,
         quality: str,
     ):
+        """Render code and retry with LLM-generated repairs on failure.
+
+        Args:
+            initial_code: The initial Manim source code to render.
+            output_mode: Either ``"video"`` or ``"image"``.
+            quality: Render quality (``"low"``, ``"medium"``, or ``"high"``).
+
+        Returns:
+            A tuple of (final_code, render_result).
+
+        Raises:
+            ManimRenderError: If rendering fails after all retries are exhausted.
+        """
         code = initial_code
         retry_history: list[RetryAttempt] = []
 

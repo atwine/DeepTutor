@@ -14,12 +14,22 @@ function getTarget(): EventTarget | null {
   return window;
 }
 
+/**
+ * Notify all subscribers that a Co-Writer document has changed.
+ * Dispatches a window-level event so disparate routes can refresh.
+ */
 export function notifyCoWriterChanged(): void {
   const target = getTarget();
   if (!target) return;
   target.dispatchEvent(new Event(EVENT_NAME));
 }
 
+/**
+ * Subscribe to Co-Writer document change events.
+ *
+ * @param listener - Callback invoked when a document changes.
+ * @returns An unsubscribe function.
+ */
 export function subscribeCoWriterChanges(listener: Listener): () => void {
   const target = getTarget();
   if (!target) return () => {};

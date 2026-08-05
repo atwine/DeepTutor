@@ -28,6 +28,7 @@ class Allowlist:
 
     @classmethod
     def unrestricted(cls) -> "Allowlist":
+        """Build an allowlist that permits every tool name."""
         return cls(names=None)
 
     @classmethod
@@ -39,9 +40,11 @@ class Allowlist:
 
     @property
     def is_unrestricted(self) -> bool:
+        """Whether this allowlist permits every tool name."""
         return self.names is None
 
     def allows(self, name: str) -> bool:
+        """Return ``True`` when *name* is permitted by this allowlist."""
         return self.names is None or name in self.names
 
     def narrow(self, other: "Allowlist") -> "Allowlist":

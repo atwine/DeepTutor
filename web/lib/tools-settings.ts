@@ -1,5 +1,6 @@
 import { apiFetch, apiUrl } from "@/lib/api";
 
+/** Response shape from the `/api/v1/tools` endpoint. */
 export interface ToolSettingsResponse {
   enabled_optional_tools: string[];
 }
@@ -30,6 +31,7 @@ export async function getEnabledOptionalTools(options?: {
   return cached.then((list) => list.slice());
 }
 
+/** Drop the cached enabled-tools response so the next call refetches. */
 export function invalidateEnabledOptionalToolsCache(): void {
   cached = null;
 }

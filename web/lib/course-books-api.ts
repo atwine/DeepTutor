@@ -1,6 +1,7 @@
 import { apiFetch, apiUrl } from "@/lib/api";
 import type { Book, Page, Spine } from "@/lib/book-types";
 
+/** Summary of a book assigned to a course unit. */
 export interface CourseBookSummary {
   book_id: string;
   id: string;
@@ -11,6 +12,7 @@ export interface CourseBookSummary {
   status: "draft" | "published";
 }
 
+/** Full content of a course book — book metadata, spine, and pages. */
 export interface CourseBookContent {
   book: Book;
   spine: Spine | null;
@@ -56,6 +58,11 @@ export async function assignBookToCourseUnit(
   await unwrap<{ entry: unknown }>(res, "Failed to assign book");
 }
 
+/**
+ * Remove a book's assignment from its course unit.
+ *
+ * @param bookId - ID of the book to unassign.
+ */
 export async function unassignBookFromCourseUnit(bookId: string): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/books/${encodeURIComponent(bookId)}/course-unit`),
@@ -64,6 +71,11 @@ export async function unassignBookFromCourseUnit(bookId: string): Promise<void> 
   await unwrap<{ ok: boolean }>(res, "Failed to remove book");
 }
 
+/**
+ * Publish a course book so enrolled students can read it.
+ *
+ * @param bookId - ID of the book to publish.
+ */
 export async function publishCourseBook(bookId: string): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/books/${encodeURIComponent(bookId)}/publish`),
@@ -72,6 +84,11 @@ export async function publishCourseBook(bookId: string): Promise<void> {
   await unwrap<{ entry: unknown }>(res, "Failed to publish");
 }
 
+/**
+ * Unpublish a course book, reverting it to draft status.
+ *
+ * @param bookId - ID of the book to unpublish.
+ */
 export async function unpublishCourseBook(bookId: string): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/books/${encodeURIComponent(bookId)}/unpublish`),

@@ -1,16 +1,20 @@
+/** Deep research output mode (notes, report, comparison, learning path). */
 export type ResearchMode =
   | ""
   | "notes"
   | "report"
   | "comparison"
   | "learning_path";
+/** Research depth level (quick, standard, deep, or manual). */
 export type ResearchDepth = "" | "quick" | "standard" | "deep" | "manual";
 
+/** A single outline item with title and overview. */
 export interface OutlineItem {
   title: string;
   overview: string;
 }
 
+/** Form configuration for the deep_research capability. */
 export interface DeepResearchFormConfig {
   mode: ResearchMode;
   depth: ResearchDepth;
@@ -19,11 +23,14 @@ export interface DeepResearchFormConfig {
   confirmed_outline?: OutlineItem[];
 }
 
+/** Result of validating a research config (valid flag + per-field errors). */
 export interface ResearchConfigValidationResult {
   valid: boolean;
   errors: Record<string, string>;
 }
 
+/** Create an empty research config with default mode and depth.
+ * @returns A fresh DeepResearchFormConfig with empty mode and depth. */
 export function createEmptyResearchConfig(): DeepResearchFormConfig {
   return {
     mode: "",
@@ -31,6 +38,9 @@ export function createEmptyResearchConfig(): DeepResearchFormConfig {
   };
 }
 
+/** Normalize a raw config object into a valid DeepResearchFormConfig.
+ * @param raw - Untrusted config object (or undefined).
+ * @returns Config with validated mode and depth (defaults for invalid values). */
 export function normalizeResearchConfig(
   raw: Record<string, unknown> | undefined,
 ): DeepResearchFormConfig {
@@ -53,6 +63,9 @@ export function normalizeResearchConfig(
   };
 }
 
+/** Validate that a research config has required mode and depth.
+ * @param cfg - The config to validate.
+ * @returns Validation result with per-field error messages. */
 export function validateResearchConfig(
   cfg: DeepResearchFormConfig,
 ): ResearchConfigValidationResult {
@@ -68,6 +81,11 @@ export function validateResearchConfig(
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
+/** Build the WebSocket config payload for a deep research request.
+ * @param cfg - The validated research form config.
+ * @param confirmedOutline - Optional confirmed outline items.
+ * @returns Config object for the WS start_turn message.
+ * @throws Error if the config is incomplete. */
 export function buildResearchWSConfig(
   cfg: DeepResearchFormConfig,
   confirmedOutline?: OutlineItem[],
@@ -111,6 +129,10 @@ const RESEARCH_DEPTH_LABELS: Record<string, string> = {
   manual: "Manual",
 };
 
+/** One-line summary of the research config for the collapsed settings chevron.
+ * @param cfg - The research form config.
+ * @param translate - Optional i18n translate function.
+ * @returns Human-readable summary string (e.g. "Study Notes · Deep"). */
 export function summarizeResearchConfig(
   cfg: DeepResearchFormConfig,
   translate?: (key: string) => string,

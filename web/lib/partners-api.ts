@@ -3,6 +3,7 @@
 import { apiFetch, apiUrl } from "@/lib/api";
 import type { LLMSelection } from "@/lib/unified-ws";
 
+/** Full partner info returned by the partners API. */
 export interface PartnerInfo {
   partner_id: string;
   name: string;
@@ -27,27 +28,32 @@ export interface PartnerInfo {
   start_error?: string;
 }
 
+/** Result of provisioning assets onto a partner. */
 export interface ProvisioningReport {
   copied: Record<string, string[]>;
   errors: { type: string; name: string; error: string }[];
 }
 
+/** A reusable soul (personality) template from the library. */
 export interface SoulTemplate {
   id: string;
   name: string;
   content: string;
 }
 
+/** Available soul sources (library templates + personas). */
 export interface SoulSources {
   library: SoulTemplate[];
   personas: { name: string; description: string; content?: string }[];
 }
 
+/** A selectable tool with name and description. */
 export interface ToolOption {
   name: string;
   description: string;
 }
 
+/** An MCP tool option with provider grouping metadata. */
 export interface McpToolOption extends ToolOption {
   /** Provider grouping key; `server` is its pre-provider spelling. */
   provider_id: string;
@@ -56,6 +62,7 @@ export interface McpToolOption extends ToolOption {
   kind: string;
 }
 
+/** All tool options available for partner configuration. */
 export interface ToolOptions {
   tools: ToolOption[];
   /** Auto-mounted built-in tools an owner may allow/deny (default: all). */
@@ -63,12 +70,14 @@ export interface ToolOptions {
   mcp_tools: McpToolOption[];
 }
 
+/** Assets (knowledge bases, skills, notebooks) attached to a partner. */
 export interface PartnerAssets {
   knowledge_bases: { name: string; documents?: number }[];
   skills: { name: string }[];
   notebooks: { id: string; name: string; record_count?: number }[];
 }
 
+/** Summary of a partner's conversation session. */
 export interface PartnerSessionInfo {
   session_key: string;
   /** Opening user message, trimmed — the conversation's human label. */
@@ -79,18 +88,21 @@ export interface PartnerSessionInfo {
   archived?: boolean;
 }
 
+/** A slash command exposed by a partner. */
 export interface PartnerCommandInfo {
   command: string;
   description: string;
   arg_hint?: string;
 }
 
+/** Specifies where a partner's soul comes from (default, library, persona, custom). */
 export interface SoulSpec {
   source: "default" | "library" | "persona" | "custom";
   id?: string;
   content?: string;
 }
 
+/** Payload for creating a new partner. */
 export interface CreatePartnerPayload {
   partner_id?: string;
   name: string;
@@ -129,12 +141,18 @@ async function json<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** List all partners.
+ * @returns Array of partner info. */
 export async function listPartners(): Promise<PartnerInfo[]> {
   return json(
     await apiFetch(apiUrl("/api/v1/partners"), { cache: "no-store" }),
   );
 }
 
+/** Fetch a single partner by id.
+ * @param partnerId - The partner's id.
+ * @param options - Pass `includeSecrets` to include masked channel secrets.
+ * @returns The partner's info. */
 export async function getPartner(
   partnerId: string,
   options?: { includeSecrets?: boolean },
@@ -147,6 +165,9 @@ export async function getPartner(
   );
 }
 
+/** Create a new partner.
+ * @param payload - Partner configuration (name, channels, LLM, assets, etc.).
+ * @returns The created partner info. */
 export async function createPartner(
   payload: CreatePartnerPayload,
 ): Promise<PartnerInfo> {
@@ -159,6 +180,10 @@ export async function createPartner(
   );
 }
 
+/** Update an existing partner's configuration.
+ * @param partnerId - The partner's id.
+ * @param payload - Partial partner fields to update.
+ * @returns The updated partner info. */
 export async function updatePartner(
   partnerId: string,
   payload: Partial<CreatePartnerPayload> & {
@@ -177,6 +202,9 @@ export async function updatePartner(
   );
 }
 
+/** Start a partner's runtime.
+ * @param partnerId - The partner's id.
+ * @returns The partner info with updated running state. */
 export async function startPartner(partnerId: string): Promise<PartnerInfo> {
   return json(
     await apiFetch(
@@ -186,6 +214,8 @@ export async function startPartner(partnerId: string): Promise<PartnerInfo> {
   );
 }
 
+/** Stop a running partner.
+ * @param partnerId - The partner's id. */
 export async function stopPartner(partnerId: string): Promise<void> {
   await json(
     await apiFetch(
@@ -195,6 +225,8 @@ export async function stopPartner(partnerId: string): Promise<void> {
   );
 }
 
+/** Permanently delete a partner and its data.
+ * @param partnerId - The partner's id. */
 export async function destroyPartner(partnerId: string): Promise<void> {
   await json(
     await apiFetch(
@@ -206,6 +238,9 @@ export async function destroyPartner(partnerId: string): Promise<void> {
   );
 }
 
+/** Fetch a partner's soul (personality) content.
+ * @param partnerId - The partner's id.
+ * @returns The soul prompt text (empty string if unset). */
 export async function getPartnerSoul(partnerId: string): Promise<string> {
   const data = await json<{ content: string }>(
     await apiFetch(
@@ -215,6 +250,9 @@ export async function getPartnerSoul(partnerId: string): Promise<string> {
   return data.content ?? "";
 }
 
+/** Save a partner's soul (personality) content.
+ * @param partnerId - The partner's id.
+ * @param content - The soul prompt text. */
 export async function savePartnerSoul(
   partnerId: string,
   content: string,
@@ -231,10 +269,17 @@ export async function savePartnerSoul(
   );
 }
 
+/** Fetch available soul sources (library templates + personas).
+ * @returns Soul sources for the soul picker. */
 export async function getSoulSources(): Promise<SoulSources> {
   return json(await apiFetch(apiUrl("/api/v1/partners/soul-sources")));
 }
 
+/** Create a new reusable soul template in the library.
+ * @param id - Template id.
+ * @param name - Display name.
+ * @param content - Soul prompt text.
+ * @returns The created template. */
 export async function createSoulTemplate(
   id: string,
   name: string,
@@ -249,10 +294,14 @@ export async function createSoulTemplate(
   );
 }
 
+/** Fetch all tool options available for partner configuration.
+ * @returns Built-in, auto-mounted, and MCP tool options. */
 export async function getToolOptions(): Promise<ToolOptions> {
   return json(await apiFetch(apiUrl("/api/v1/partners/tool-options")));
 }
 
+/** Fetch the partner slash-command palette.
+ * @returns Array of command info entries. */
 export async function getPartnerCommands(): Promise<PartnerCommandInfo[]> {
   const data = await json<{ commands: PartnerCommandInfo[] }>(
     await apiFetch(apiUrl("/api/v1/partners/commands/palette")),
@@ -260,6 +309,9 @@ export async function getPartnerCommands(): Promise<PartnerCommandInfo[]> {
   return data.commands;
 }
 
+/** Fetch the assets attached to a partner.
+ * @param partnerId - The partner's id.
+ * @returns Knowledge bases, skills, and notebooks linked to the partner. */
 export async function getPartnerAssets(
   partnerId: string,
 ): Promise<PartnerAssets> {
@@ -270,6 +322,10 @@ export async function getPartnerAssets(
   );
 }
 
+/** Add assets (knowledge bases, skills, notebooks) to a partner.
+ * @param partnerId - The partner's id.
+ * @param assets - Names of assets to attach.
+ * @returns Updated assets and provisioning report. */
 export async function addPartnerAssets(
   partnerId: string,
   assets: {
@@ -290,6 +346,11 @@ export async function addPartnerAssets(
   );
 }
 
+/** Remove a single asset from a partner.
+ * @param partnerId - The partner's id.
+ * @param assetType - The asset kind (knowledge_base, skill, or notebook).
+ * @param name - The asset name.
+ * @returns Updated assets list. */
 export async function removePartnerAsset(
   partnerId: string,
   assetType: "knowledge_base" | "skill" | "notebook",
@@ -305,6 +366,7 @@ export async function removePartnerAsset(
   );
 }
 
+/** Schema for one partner channel (config fields, secrets, availability). */
 export interface ChannelSchemaEntry {
   name: string;
   display_name: string;
@@ -317,10 +379,13 @@ export interface ChannelSchemaEntry {
   unavailable_reason?: string;
 }
 
+/** Response containing schemas for all available partner channels. */
 export interface ChannelsSchemaResponse {
   channels: Record<string, ChannelSchemaEntry>;
 }
 
+/** Fetch live channel schemas (availability reflects current server imports).
+ * @returns Channel schemas keyed by channel name. */
 export async function getChannelSchemas(): Promise<ChannelsSchemaResponse> {
   // no-store: availability reflects live server imports (e.g. a dependency
   // installed minutes ago) — a cached copy here shows phantom-missing channels.
@@ -331,6 +396,10 @@ export async function getChannelSchemas(): Promise<ChannelsSchemaResponse> {
   );
 }
 
+/** Fetch a partner's conversation history.
+ * @param partnerId - The partner's id.
+ * @param options - Optional session key/id and limit.
+ * @returns Array of message rows with role, content, and optional trace events. */
 export async function getPartnerHistory(
   partnerId: string,
   options?: { sessionKey?: string; sessionId?: string; limit?: number },
@@ -359,6 +428,9 @@ export async function getPartnerHistory(
   );
 }
 
+/** List all conversation sessions for a partner.
+ * @param partnerId - The partner's id.
+ * @returns Array of session summaries. */
 export async function getPartnerSessions(
   partnerId: string,
 ): Promise<PartnerSessionInfo[]> {
@@ -399,6 +471,11 @@ export function deletePartnerSession(partnerId: string, sessionKey: string) {
   return postSessionAction(partnerId, "delete", sessionKey);
 }
 
+/** Branch a partner session into a new conversation.
+ * @param partnerId - The partner's id.
+ * @param sourceKey - The source session key to branch from.
+ * @param newKey - The new session key for the branch.
+ * @returns The new branched session info. */
 export async function branchPartnerSession(
   partnerId: string,
   sourceKey: string,

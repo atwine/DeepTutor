@@ -124,6 +124,7 @@ class NextStep:
     pending_prompt: str = ""
 
     def to_dict(self) -> dict:
+        """Return this step as a plain dict for serialization to the model/UI."""
         return {
             "action": self.action,
             "module_id": self.module_id,

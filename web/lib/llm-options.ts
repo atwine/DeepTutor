@@ -4,6 +4,7 @@ import type { LLMSelection } from "@/lib/unified-ws";
 
 const LLM_OPTIONS_CACHE_KEY = "llm-options:list";
 
+/** A selectable LLM model profile with display metadata. */
 export interface LLMOption extends LLMSelection {
   profile_name: string;
   model_name: string;
@@ -15,16 +16,30 @@ export interface LLMOption extends LLMSelection {
   is_active_default: boolean;
 }
 
+/** Response from the LLM options endpoint — active selection and all options. */
 export interface LLMOptionsResponse {
   active: LLMSelection | null;
   options: LLMOption[];
 }
 
+/**
+ * Build a stable cache key from an LLM selection.
+ *
+ * @param selection - LLM selection, or null/undefined.
+ * @returns A "profileId:modelId" key, or empty string if incomplete.
+ */
 export function llmSelectionKey(selection: LLMSelection | null | undefined) {
   if (!selection?.profile_id || !selection.model_id) return "";
   return `${selection.profile_id}:${selection.model_id}`;
 }
 
+/**
+ * Check whether two LLM selections refer to the same profile and model.
+ *
+ * @param a - First selection.
+ * @param b - Second selection.
+ * @returns True if both selections have the same profile and model IDs.
+ */
 export function sameLLMSelection(
   a: LLMSelection | null | undefined,
   b: LLMSelection | null | undefined,
@@ -60,6 +75,7 @@ export async function listLLMOptions(options?: {
   );
 }
 
+/** Invalidate the cached LLM options so the next list call re-fetches. */
 export function invalidateLLMOptionsCache(): void {
   invalidateClientCache(LLM_OPTIONS_CACHE_KEY);
 }

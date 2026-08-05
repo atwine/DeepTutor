@@ -15,11 +15,19 @@ from .renderer import ManimRenderError
 
 
 class VisualReviewService:
+    """Extracts review frames from rendered artifacts for visual quality inspection."""
+
     def __init__(
         self,
         turn_id: str,
         progress_callback: Callable[[str, bool], Awaitable[None]] | None = None,
     ) -> None:
+        """Initialize the visual review service and create the review directory.
+
+        Args:
+            turn_id: Unique identifier for the turn (used for file paths).
+            progress_callback: Optional async callback for progress updates.
+        """
         self.turn_id = turn_id
         self.progress_callback = progress_callback
         path_service = get_path_service()
@@ -29,6 +37,17 @@ class VisualReviewService:
         self.review_dir.mkdir(parents=True, exist_ok=True)
 
     async def build_attachments(self, render_result: RenderResult) -> list[Attachment]:
+        """Build image attachments from rendered artifacts for visual review.
+
+        For image mode, the rendered images are used directly. For video mode,
+        representative frames are extracted via ffmpeg.
+
+        Args:
+            render_result: The render result containing artifacts to review.
+
+        Returns:
+            A list of :class:`Attachment` instances for the review agent.
+        """
         if render_result.output_mode == "image":
             await self._emit_progress(
                 f"Preparing {len(render_result.artifacts)} rendered image(s) for visual review."

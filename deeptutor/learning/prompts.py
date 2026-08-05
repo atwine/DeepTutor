@@ -43,10 +43,30 @@ def get_learning_prompts(language: str = "zh") -> dict[str, Any]:
 
 
 def prompt_text(language: str, path: str, default: str = "") -> str:
+    """Look up a localized prompt string by dotted path.
+
+    Args:
+        language: The UI language code (e.g. ``"en"``, ``"zh"``).
+        path: Dotted key path into the prompt YAML (e.g. ``"diagnostic.system"``).
+        default: Fallback value when the path is not found.
+
+    Returns:
+        The prompt text, or ``default`` if the path does not exist.
+    """
     return _get_nested(get_learning_prompts(language), path, default)
 
 
 def notebook_generation_prompts(language: str, records_json: str) -> tuple[str, str]:
+    """Build the system and user prompts for notebook-based module generation.
+
+    Args:
+        language: The UI language code (e.g. ``"en"``, ``"zh"``).
+        records_json: JSON string of knowledge records to feed the generator.
+
+    Returns:
+        A ``(system_prompt, user_prompt)`` tuple with the language directive
+        appended.
+    """
     prompts = get_learning_prompts(language)
     system_prompt = _get_nested(prompts, "notebook.system", NOTEBOOK_SYSTEM)
     user_template = _get_nested(prompts, "notebook.user", NOTEBOOK_USER)
@@ -59,6 +79,15 @@ def notebook_generation_prompts(language: str, records_json: str) -> tuple[str, 
 
 
 def default_module_name(language: str, index: int) -> str:
+    """Return a localized default module name for the given 1-based index.
+
+    Args:
+        language: The UI language code (e.g. ``"en"``, ``"zh"``).
+        index: The 1-based module index.
+
+    Returns:
+        The formatted default module name string.
+    """
     template = prompt_text(language, "notebook.default_module_name", "模块 {index}")
     return template.format(index=index)
 

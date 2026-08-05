@@ -48,6 +48,18 @@ class AgentCoordinator:
         enabled_tools: list[str] | None = None,
         enable_idea_rag: bool | None = None,
     ) -> None:
+        """Initialize the legacy coordinator with optional provider settings.
+
+        Args:
+            api_key: LLM provider API key (kept for compatibility).
+            base_url: LLM provider base URL (kept for compatibility).
+            api_version: API version for Azure OpenAI (kept for compatibility).
+            kb_name: Optional knowledge base name for RAG.
+            language: UI language code (defaults to the configured UI language).
+            output_dir: Optional output directory for generated artifacts.
+            enabled_tools: List of tool names enabled for the pipeline.
+            enable_idea_rag: Whether to enable RAG for idea generation.
+        """
         # The new pipeline reads provider settings from the shared config
         # service. Keep these attributes only for compatibility/debugging.
         self.api_key = api_key
@@ -61,6 +73,11 @@ class AgentCoordinator:
         self._ws_callback: WsCallback | None = None
 
     def set_ws_callback(self, callback: WsCallback | None) -> None:
+        """Register a WebSocket callback for forwarding stream events.
+
+        Args:
+            callback: The callback to register, or ``None`` to clear.
+        """
         self._ws_callback = callback
 
     async def generate_from_topic(

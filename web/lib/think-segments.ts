@@ -23,11 +23,13 @@
  * and skips any tags that live inside fenced code blocks.
  */
 
+/** A plain-text segment of the assistant response. */
 export interface TextSegment {
   kind: "text";
   content: string;
 }
 
+/** A model-thinking (scratchpad) segment of the response. */
 export interface ThinkSegment {
   kind: "think";
   content: string;
@@ -35,6 +37,7 @@ export interface ThinkSegment {
   closed: boolean;
 }
 
+/** A parsed segment of the assistant response (text or thinking). */
 export type ContentSegment = TextSegment | ThinkSegment;
 
 const FENCED_CODE_REGEX = /```[\s\S]*?```/g;
@@ -76,6 +79,9 @@ function trimThinkContent(content: string): string {
   return content.replace(/^\s+/, "").replace(/\s+$/, "");
 }
 
+/** Parse a raw assistant response into text and thinking segments.
+ * @param input - The raw response text (may contain `<think>`/`<thinking>` blocks).
+ * @returns Array of content segments (text and think), or a single text segment if no thinking blocks. */
 export function parseModelThinkingSegments(input: string): ContentSegment[] {
   if (!input) return [];
   if (!/<\s*think(?:ing)?\b/i.test(input)) {

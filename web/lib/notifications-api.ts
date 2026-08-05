@@ -30,6 +30,8 @@ export async function listNotifications(): Promise<Notification[]> {
   return data.notifications;
 }
 
+/** Mark a single notification as read.
+ * @param notificationId - The notification's id. */
 export async function markNotificationRead(notificationId: string): Promise<void> {
   const res = await apiFetch(
     apiUrl(`/api/v1/multi-user/notifications/${encodeURIComponent(notificationId)}/read`),

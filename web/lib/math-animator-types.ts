@@ -1,5 +1,7 @@
+/** Output mode for a math animator render — video or image. */
 export type MathAnimatorOutputMode = "video" | "image";
 
+/** A rendered artifact (video or image) produced by the math animator. */
 export interface MathAnimatorArtifact {
   type: "video" | "image";
   url: string;
@@ -8,6 +10,7 @@ export interface MathAnimatorArtifact {
   label?: string;
 }
 
+/** Full result from a math animator capability run. */
 export interface MathAnimatorResult {
   response: string;
   output_mode: MathAnimatorOutputMode;
@@ -38,6 +41,14 @@ export interface MathAnimatorResult {
   };
 }
 
+/**
+ * Extract a math animator result from raw capability metadata.
+ *
+ * Returns null when the metadata does not carry math-animator-specific fields.
+ *
+ * @param resultMetadata - Raw metadata from the capability result event.
+ * @returns The parsed result, or null if not a math animator result.
+ */
 export function extractMathAnimatorResult(
   resultMetadata: Record<string, unknown> | undefined,
 ): MathAnimatorResult | null {

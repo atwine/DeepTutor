@@ -19,6 +19,7 @@ export interface ProviderToolLike {
   kind?: string;
 }
 
+/** A group of provider tools sharing the same provider ID. */
 export interface ProviderToolGroup<T extends ProviderToolLike> {
   id: string;
   kind: string;
@@ -31,6 +32,12 @@ export type GroupSelection = "all" | "none" | "partial";
 /** Bucket for rows whose provider the backend could not name. */
 const UNGROUPED_ID = "other";
 
+/**
+ * Resolve the provider group ID for a tool row.
+ *
+ * @param tool - Tool row to inspect.
+ * @returns The provider ID, server name, or "other" if unnamed.
+ */
 export function providerGroupId(tool: ProviderToolLike): string {
   return tool.provider_id || tool.server || UNGROUPED_ID;
 }
@@ -69,6 +76,13 @@ export function groupCounts(
   };
 }
 
+/**
+ * Determine the tri-state selection of a group based on which tools are selected.
+ *
+ * @param tools - Tool rows in the group.
+ * @param selected - Flat list of selected tool names.
+ * @returns "all", "none", or "partial".
+ */
 export function groupSelection(
   tools: readonly ProviderToolLike[],
   selected: readonly string[],
@@ -81,6 +95,12 @@ export function groupSelection(
   return hits === total ? "all" : "partial";
 }
 
+/**
+ * Derive the tri-state selection from pre-computed hit/total counts.
+ *
+ * @param counts - Object with hits and total counts.
+ * @returns "all", "none", or "partial".
+ */
 export function selectionFromCounts(counts: {
   hits: number;
   total: number;

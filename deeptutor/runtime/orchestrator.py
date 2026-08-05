@@ -30,6 +30,7 @@ class ChatOrchestrator:
     """
 
     def __init__(self) -> None:
+        """Initialise the orchestrator with the global capability and tool registries."""
         self._cap_registry = get_capability_registry()
         self._tool_registry = get_tool_registry()
 
@@ -114,13 +115,25 @@ class ChatOrchestrator:
             logger.debug("EventBus publish failed (may not be running)", exc_info=True)
 
     def list_tools(self) -> list[str]:
+        """Return the names of all registered tools."""
         return self._tool_registry.list_tools()
 
     def list_capabilities(self) -> list[str]:
+        """Return the names of all registered capabilities."""
         return self._cap_registry.list_capabilities()
 
     def get_capability_manifests(self) -> list[dict[str, Any]]:
+        """Return manifest dictionaries for every registered capability."""
         return self._cap_registry.get_manifests()
 
     def get_tool_schemas(self, names: list[str] | None = None) -> list[dict[str, Any]]:
+        """Return OpenAI tool schemas for the given tool names (or all if ``None``).
+
+        Args:
+            names: Optional list of tool names to include. When ``None``,
+                schemas for all registered tools are returned.
+
+        Returns:
+            A list of OpenAI function-calling schema dictionaries.
+        """
         return self._tool_registry.build_openai_schemas(names)

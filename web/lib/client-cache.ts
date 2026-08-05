@@ -11,6 +11,15 @@ interface CacheOptions {
   force?: boolean;
 }
 
+/**
+ * Fetch with a client-side cache: returns cached data if fresh, otherwise
+ * calls the loader and stores the result with a TTL.
+ *
+ * @param key - Cache key for the entry.
+ * @param loader - Function that produces the value when cache misses.
+ * @param options - Optional TTL (ms) and force-refresh flag.
+ * @returns The cached or freshly loaded value.
+ */
 export async function withClientCache<T>(
   key: string,
   loader: () => Promise<T>,
@@ -54,6 +63,11 @@ export async function withClientCache<T>(
   return promise;
 }
 
+/**
+ * Remove all cache entries whose key starts with the given prefix.
+ *
+ * @param prefix - Key prefix to match for invalidation.
+ */
 export function invalidateClientCache(prefix: string): void {
   for (const key of clientCache.keys()) {
     if (key.startsWith(prefix)) {

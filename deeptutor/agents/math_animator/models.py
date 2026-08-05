@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ConceptAnalysis(BaseModel):
+    """Structured analysis of a math concept for animation planning."""
+
     model_config = ConfigDict(extra="ignore")
 
     learning_goal: str = ""
@@ -17,6 +19,8 @@ class ConceptAnalysis(BaseModel):
 
 
 class SceneDesign(BaseModel):
+    """Design specification for a Manim scene (outline, style, constraints)."""
+
     model_config = ConfigDict(extra="ignore")
 
     title: str = ""
@@ -28,6 +32,8 @@ class SceneDesign(BaseModel):
 
 
 class GeneratedCode(BaseModel):
+    """Manim source code produced by the code generation or repair stage."""
+
     model_config = ConfigDict(extra="ignore")
 
     code: str = ""
@@ -35,6 +41,8 @@ class GeneratedCode(BaseModel):
 
 
 class SummaryPayload(BaseModel):
+    """Human-readable summary of the math animation output."""
+
     model_config = ConfigDict(extra="ignore")
 
     summary_text: str = ""
@@ -44,6 +52,8 @@ class SummaryPayload(BaseModel):
 
 
 class RenderedArtifact(BaseModel):
+    """A single rendered artifact (video file or image file) with metadata."""
+
     model_config = ConfigDict(extra="ignore")
 
     type: str
@@ -54,6 +64,8 @@ class RenderedArtifact(BaseModel):
 
 
 class RetryAttempt(BaseModel):
+    """Record of a single render-retry attempt with its error message."""
+
     model_config = ConfigDict(extra="ignore")
 
     attempt: int
@@ -61,6 +73,8 @@ class RetryAttempt(BaseModel):
 
 
 class VisualReviewResult(BaseModel):
+    """Outcome of a visual quality review of rendered frames."""
+
     model_config = ConfigDict(extra="ignore")
 
     passed: bool = True
@@ -71,6 +85,8 @@ class VisualReviewResult(BaseModel):
 
 
 class RenderResult(BaseModel):
+    """Final result of the Manim render stage (artifacts, paths, retry history)."""
+
     model_config = ConfigDict(extra="ignore")
 
     output_mode: str

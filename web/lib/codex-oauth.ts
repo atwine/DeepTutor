@@ -1,5 +1,6 @@
 import { apiFetch, apiUrl } from "@/lib/api";
 
+/** Status of the OpenAI Codex OAuth connection flow. */
 export type CodexOAuthStatus = {
   connection: "disconnected" | "authorizing" | "connected" | "error";
   operation_id: string | null;
@@ -30,6 +31,7 @@ export type CodexOAuthStatus = {
   error_code: string | null;
 };
 
+/** Payload returned when starting a Codex OAuth login flow. */
 export type CodexLoginStart = {
   operation_id: string;
   authorize_url: string;
@@ -40,8 +42,10 @@ export type CodexLoginStart = {
   ssh_forward_command: string;
 };
 
+/** Connection guidance for a remote (SSH-forwarded) Codex OAuth callback. */
 export type CodexRemoteGuidance = Omit<CodexLoginStart, "ssh_forward_command">;
 
+/** Error thrown by the Codex OAuth API client, carrying a stable error code. */
 export class CodexOAuthApiError extends Error {
   code: string;
 
@@ -54,6 +58,12 @@ export class CodexOAuthApiError extends Error {
 
 const BASE = "/api/v1/settings/providers/openai-codex";
 
+/**
+ * Check whether a hostname is a loopback address (localhost, 127.x.x.x, ::1).
+ *
+ * @param hostname - Hostname to check.
+ * @returns True if the hostname is a loopback address.
+ */
 export function isLoopbackHostname(hostname: string): boolean {
   const normalized = hostname.trim().toLowerCase().replace(/\.$/, "");
   if (
@@ -76,6 +86,14 @@ export function isLoopbackHostname(hostname: string): boolean {
   );
 }
 
+/**
+ * Build an SSH port-forwarding command for a remote Codex OAuth callback.
+ *
+ * @param callbackPort - Local port to forward.
+ * @param hostname - Remote server hostname.
+ * @param forwardPort - Remote port to forward to.
+ * @returns The SSH command string.
+ */
 export function buildSshForwardCommand(
   callbackPort: number,
   hostname: string,
@@ -85,6 +103,13 @@ export function buildSshForwardCommand(
   return `ssh -N -L ${callbackPort}:127.0.0.1:${forwardPort} <ssh-user>@${serverHost}`;
 }
 
+/**
+ * Derive remote connection guidance from the current OAuth status and login start.
+ *
+ * @param status - Current OAuth status, or null.
+ * @param loginStart - Login start payload, or null.
+ * @returns Connection guidance if the operation is waiting, otherwise null.
+ */
 export function codexRemoteGuidance(
   status: CodexOAuthStatus | null,
   loginStart: CodexLoginStart | null,
@@ -119,6 +144,14 @@ export function codexRemoteGuidance(
   };
 }
 
+/**
+ * Send a request to the Codex OAuth API and parse the JSON response.
+ *
+ * @param path - API path relative to the Codex base.
+ * @param method - HTTP method ("GET" or "POST").
+ * @param fetchImpl - Fetch implementation to use (defaults to apiFetch).
+ * @returns The parsed JSON response.
+ */
 export async function requestCodex<T>(
   path: string,
   method: "GET" | "POST",
@@ -153,26 +186,37 @@ export async function requestCodex<T>(
   throw new CodexOAuthApiError(code, message);
 }
 
+/** Fetch the current Codex OAuth connection status. */
 export function getCodexStatus(): Promise<CodexOAuthStatus> {
   return requestCodex<CodexOAuthStatus>("/oauth/status", "GET");
 }
 
+/** Start a new Codex OAuth login flow. */
 export function startCodexLogin(): Promise<CodexLoginStart> {
   return requestCodex<CodexLoginStart>("/oauth/start", "POST");
 }
 
+/** Cancel an in-progress Codex OAuth login flow. */
 export function cancelCodexLogin(): Promise<CodexOAuthStatus> {
   return requestCodex<CodexOAuthStatus>("/oauth/cancel", "POST");
 }
 
+/** Trigger a refresh of the Codex model catalog. */
 export function refreshCodexModels(): Promise<CodexOAuthStatus> {
   return requestCodex<CodexOAuthStatus>("/models/refresh", "POST");
 }
 
+/** Log out of the Codex OAuth connection. */
 export function logoutCodex(): Promise<CodexOAuthStatus> {
   return requestCodex<CodexOAuthStatus>("/oauth/logout", "POST");
 }
 
+/**
+ * Determine whether the UI should keep polling for Codex OAuth status updates.
+ *
+ * @param status - Current OAuth status.
+ * @returns True if the operation is in an in-progress state.
+ */
 export function shouldPollCodexStatus(status: CodexOAuthStatus): boolean {
   return (
     status.operation_state === "waiting" ||
@@ -181,6 +225,12 @@ export function shouldPollCodexStatus(status: CodexOAuthStatus): boolean {
   );
 }
 
+/**
+ * Map a Codex error code to an i18n message key.
+ *
+ * @param code - Error code from the API, or null.
+ * @returns i18n key for the localized error message.
+ */
 export function codexErrorMessageKey(code: string | null): string {
   if (code === "catalog_unavailable" || code === "catalog_invalid") {
     return "codex.oauth.catalogFailed";
@@ -198,6 +248,12 @@ export function codexErrorMessageKey(code: string | null): string {
   return "codex.oauth.requestFailed";
 }
 
+/**
+ * Derive an i18n status message key from the current Codex OAuth status.
+ *
+ * @param status - Current OAuth status.
+ * @returns i18n key for the localized status message.
+ */
 export function codexStatusMessageKey(status: CodexOAuthStatus): string {
   if (status.error_code) return codexErrorMessageKey(status.error_code);
   if (shouldPollCodexStatus(status)) return "codex.oauth.waiting";

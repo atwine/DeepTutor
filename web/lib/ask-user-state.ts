@@ -68,6 +68,13 @@ export function hasPendingAskUser(
   return pending.size > 0;
 }
 
+/**
+ * Check whether any message in a list has a pending ask_user card.
+ *
+ * @param messages - Messages whose events should be inspected.
+ * @param turnId - Optional turn ID to scope the check.
+ * @returns True if at least one message has a pending ask_user card.
+ */
 export function hasPendingAskUserInMessages(
   messages: MessageWithEvents[],
   turnId?: string | null,

@@ -22,6 +22,8 @@ _ERROR_TYPE_LEGACY: dict[str, str] = {
 
 
 class KnowledgeType(str, Enum):
+    """Taxonomy of knowledge point types used for gating and scheduling."""
+
     MEMORY = "memory"
     CONCEPT = "concept"
     PROCEDURE = "procedure"
@@ -34,6 +36,8 @@ class KnowledgeType(str, Enum):
 
 
 class ErrorType(str, Enum):
+    """Coarse classification of learner errors during Mastery Path."""
+
     KNOWLEDGE_STRUCTURAL = "structural"
     UNDERSTANDING_DEVIATION = "deviation"
     APPLICATION_ERROR = "application"
@@ -78,6 +82,8 @@ class LearningStage(str, Enum):
 
 
 class KnowledgePoint(BaseModel):
+    """A single atomic unit of knowledge within a learning module."""
+
     model_config = ConfigDict(extra="ignore")
 
     id: str
@@ -87,6 +93,8 @@ class KnowledgePoint(BaseModel):
 
 
 class LearningModule(BaseModel):
+    """An ordered group of knowledge points forming a learning unit."""
+
     model_config = ConfigDict(extra="ignore")
 
     id: str
@@ -97,6 +105,8 @@ class LearningModule(BaseModel):
 
 
 class DiagnosticResult(BaseModel):
+    """Outcome of the initial diagnostic quiz for a book."""
+
     model_config = ConfigDict(extra="ignore")
 
     total_questions: int = 0
@@ -105,6 +115,8 @@ class DiagnosticResult(BaseModel):
 
 
 class QuizAttempt(BaseModel):
+    """A single graded answer attempt for one knowledge point."""
+
     model_config = ConfigDict(extra="ignore")
 
     question_id: str
@@ -119,6 +131,8 @@ class QuizAttempt(BaseModel):
 
 
 class RetryAttempt(BaseModel):
+    """One retry of a previously-failed question."""
+
     model_config = ConfigDict(extra="ignore")
 
     timestamp: float
@@ -127,6 +141,8 @@ class RetryAttempt(BaseModel):
 
 
 class ErrorRecord(BaseModel):
+    """A tracked error on a knowledge point with its retry history."""
+
     model_config = ConfigDict(extra="ignore")
 
     id: str
@@ -142,6 +158,8 @@ class ErrorRecord(BaseModel):
 
 
 class RepetitionState(BaseModel):
+    """Spaced-repetition scheduling state for one knowledge point."""
+
     model_config = ConfigDict(extra="ignore")
 
     interval_index: int = 0
@@ -151,6 +169,8 @@ class RepetitionState(BaseModel):
 
 
 class ReviewTask(BaseModel):
+    """A due spaced-repetition review item for a knowledge point."""
+
     model_config = ConfigDict(extra="ignore")
 
     id: str
@@ -183,6 +203,8 @@ class PendingQuestion(BaseModel):
 
 
 class LearningProgress(BaseModel):
+    """Full persisted learning state for one book across all modules and stages."""
+
     model_config = ConfigDict(extra="ignore")
 
     book_id: str

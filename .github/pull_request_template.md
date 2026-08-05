@@ -1,7 +1,21 @@
 <!--
 Thank you for contributing to DeepTutor! 🚀
-Please ensure your PR is ready for review and follows our contribution guidelines.
-For more details, see our [CONTRIBUTING.md](https://github.com/HKUDS/DeepTutor/blob/dev/CONTRIBUTING.md).
+
+## Branching Workflow
+
+This repo uses a four-stage promotion flow:
+
+```
+feature/*  →  development  →  staging  →  main
+```
+
+- **Feature branches** should fork from `development` and target
+  `development` in their PR. Do NOT open PRs against `main` or
+  `staging` directly.
+- **`main`** is protected — only receives promotions from `staging`
+  via a PR. No direct pushes.
+- See [AGENTS.md](https://github.com/atwine/DeepTutor/blob/development/AGENTS.md)
+  for the full branching workflow and architecture overview.
 -->
 
 ### Description
@@ -17,6 +31,7 @@ For more details, see our [CONTRIBUTING.md](https://github.com/HKUDS/DeepTutor/b
 - [ ] `config`
 - [ ] `core`
 - [ ] `knowledge`
+- [ ] `learning`
 - [ ] `logging`
 - [ ] `services`
 - [ ] `tools`
@@ -28,11 +43,11 @@ For more details, see our [CONTRIBUTING.md](https://github.com/HKUDS/DeepTutor/b
 - [ ] Other: `...`
 
 ### Checklist
-- [ ] I have read and followed the [contribution guidelines](https://github.com/HKUDS/DeepTutor/blob/dev/CONTRIBUTING.md).
+- [ ] My branch is forked from `development` (not `main`).
 - [ ] My code follows the project's coding standards.
-- [ ] I have run `pre-commit run --all-files` and fixed any issues.
+- [ ] I have run `ruff check .` and `ruff format --check .` and fixed any issues.
 - [ ] I have added relevant tests for my changes.
-- [ ] I have updated the documentation (if necessary).
+- [ ] I have added/updated docstrings (Google-style for Python, TSDoc for TypeScript).
 - [ ] My changes do not introduce any new security vulnerabilities.
 
 ### Additional Notes

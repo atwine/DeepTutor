@@ -323,6 +323,8 @@ def _format_per_type_counts(per_type_counts: dict[str, int]) -> str:
 
 @dataclass(frozen=True)
 class QuizTemplate:
+    """A single question template for the quiz generation pipeline."""
+
     question_id: str
     topic: str
     question_type: str
@@ -337,6 +339,8 @@ class QuizTemplate:
 
 @dataclass(frozen=True)
 class QuizPlan:
+    """The planner's output: an analysis string plus a list of templates."""
+
     analysis: str
     templates: list[QuizTemplate] = field(default_factory=list)
 
@@ -389,6 +393,16 @@ class QuestionPipeline:
         max_quiz_iterations_per_question: int = DEFAULT_MAX_QUIZ_ITERATIONS_PER_QUESTION,
         runtime_config: dict[str, Any] | None = None,
     ) -> None:
+        """Initialize the question pipeline for one turn.
+
+        Args:
+            language: Language code (``"zh"`` or ``"en"``).
+            kb_name: Optional knowledge base name for RAG retrieval.
+            enabled_tools: List of tool names enabled for the pipeline.
+            max_explore_iterations: Maximum iterations for the explore phase.
+            max_quiz_iterations_per_question: Max iterations per quiz question.
+            runtime_config: Optional runtime configuration dictionary.
+        """
         self.language = parse_language(language)
         self.kb_name = (kb_name or "").strip() or None
         self.enabled_tools = list(enabled_tools or [])
@@ -1918,12 +1932,21 @@ class _BaseLoopHost:
         context: UnifiedContext,
         client: Any,
     ) -> None:
+        """Initialize the base loop host with its pipeline and context.
+
+        Args:
+            pipeline: The owning question pipeline.
+            stream: The stream bus for emitting events.
+            context: The unified context for the current turn.
+            client: The LLM client for completion calls.
+        """
         self._pipeline = pipeline
         self._stream = stream
         self._context = context
         self._client = client
 
     async def guard_context_window(self, messages: list[dict[str, Any]]) -> None:
+        """No-op context-window guard for the quiz pipeline (v1 does not trim)."""
         # v1 doesn't run an in-loop trimmer for the quiz pipeline. Per-phase
         # message buffers are bounded by max_iterations × per-call size.
         return
@@ -1934,6 +1957,15 @@ class _BaseLoopHost:
         iteration: int,
         tool_calls: list[dict[str, Any]],
     ) -> DispatchOutcome:
+        """Dispatch tool calls for one loop iteration.
+
+        Args:
+            iteration: The current iteration index.
+            tool_calls: List of tool call dicts from the LLM response.
+
+        Returns:
+            A :class:`DispatchOutcome` with tool results and sources.
+        """
         too_many = None
         if len(tool_calls) > MAX_PARALLEL_TOOL_CALLS:
             too_many = self._pipeline._t(
@@ -1969,21 +2001,32 @@ class _BaseLoopHost:
         )
 
     async def resolve_pause(self, dispatch: DispatchOutcome) -> bool:
+        """Resolve an ``ask_user`` pause (always returns ``False`` in v1)."""
         # ``ask_user`` would pause the turn — quiz pipeline v1 doesn't wire up
         # the wait/resume path. Terminate the loop so the turn closes cleanly.
         return False
 
     async def emit_terminator(self, payload: dict[str, Any] | None) -> None:
+        """Emit a terminator tool's final payload (no-op for the quiz pipeline)."""
         # No quiz tool is wired to terminate the loop with content.
         return
 
     def protocol_retry_notice(self) -> str:
+        """Return the user-facing notice for a protocol retry."""
         return self._pipeline._t(
             "notices.protocol_retry",
             default="The model violated the action-label protocol; retrying.",
         )
 
     def protocol_repair_message(self, violation: str) -> str:
+        """Return a corrective message for a specific protocol violation.
+
+        Args:
+            violation: The violation identifier string.
+
+        Returns:
+            The repair instruction text for the model.
+        """
         return self._pipeline._t(
             f"protocol.{violation}",
             default=f"Protocol violation: {violation}.",
@@ -2038,6 +2081,15 @@ class _ExploreLoopHost(_BaseLoopHost):
         iteration: int,
         tool_calls: list[dict[str, Any]],
     ) -> DispatchOutcome:
+        """Dispatch tools and summarize raw results via the Tool Summarizer.
+
+        Args:
+            iteration: The current iteration index.
+            tool_calls: List of tool call dicts from the LLM response.
+
+        Returns:
+            A :class:`DispatchOutcome` with summarized tool messages.
+        """
         outcome = await super().dispatch_tools(iteration=iteration, tool_calls=tool_calls)
         if not self._pipeline.tool_summarizer_enabled or not outcome.tool_messages:
             return outcome
@@ -2078,6 +2130,14 @@ class _ExploreLoopHost(_BaseLoopHost):
         )
 
     def build_iteration_trace_meta(self, iteration: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Build trace metadata for one explore-phase iteration.
+
+        Args:
+            iteration: The current iteration index.
+
+        Returns:
+            A tuple of (iteration_meta, final_meta) trace metadata dicts.
+        """
         iter_call_id = new_call_id(f"quiz-explore-iter-{iteration}")
         iter_meta = build_trace_metadata(
             call_id=iter_call_id,
@@ -2101,6 +2161,7 @@ class _ExploreLoopHost(_BaseLoopHost):
         return iter_meta, final_meta
 
     async def emit_final(self, text: str, final_meta: dict[str, Any]) -> None:
+        """Emit the explore phase's final text (no-op when streaming live)."""
         # Reached when ``stream_body_live=False`` would have been set; the
         # explore loop runs with ``stream_body_live=True`` so the
         # ``run_agentic_loop`` skips this. Kept for protocol compliance.
@@ -2119,6 +2180,7 @@ class _ExploreLoopHost(_BaseLoopHost):
         messages: list[dict[str, Any]],
         start_iteration: int,
     ) -> tuple[str, bool, int]:
+        """Force a finish when the explore loop's iteration budget is exhausted."""
         return await self._pipeline._force_finish(
             client=self._client,
             messages=messages,
@@ -2154,11 +2216,28 @@ class _QuizLoopHost(_BaseLoopHost):
         context: UnifiedContext,
         client: Any,
     ) -> None:
+        """Initialize the quiz loop host for one question template.
+
+        Args:
+            pipeline: The owning question pipeline.
+            template: The quiz template for this question.
+            stream: The stream bus for emitting events.
+            context: The unified context for the current turn.
+            client: The LLM client for completion calls.
+        """
         super().__init__(pipeline=pipeline, stream=stream, context=context, client=client)
         self._template = template
         self._trace_id_prefix = f"quiz-{template.question_id}-iter"
 
     def build_iteration_trace_meta(self, iteration: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Build trace metadata for one quiz-phase iteration.
+
+        Args:
+            iteration: The current iteration index.
+
+        Returns:
+            A tuple of (iteration_meta, final_meta) trace metadata dicts.
+        """
         iter_call_id = new_call_id(f"quiz-{self._template.question_id}-iter-{iteration}")
         iter_meta = build_trace_metadata(
             call_id=iter_call_id,
@@ -2177,6 +2256,7 @@ class _QuizLoopHost(_BaseLoopHost):
         return iter_meta, iter_meta
 
     async def emit_final(self, text: str, final_meta: dict[str, Any]) -> None:
+        """Intentional no-op — the pipeline emits the structured card after the loop."""
         # Intentional no-op. See class docstring.
         return
 
@@ -2186,6 +2266,7 @@ class _QuizLoopHost(_BaseLoopHost):
         messages: list[dict[str, Any]],
         start_iteration: int,
     ) -> tuple[str, bool, int]:
+        """Force a finish when the quiz loop's iteration budget is exhausted."""
         return await self._pipeline._force_finish(
             client=self._client,
             messages=messages,

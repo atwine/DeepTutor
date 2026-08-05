@@ -11,6 +11,8 @@ from ..utils import extract_json_object
 
 
 class AnalysisAgent(BaseAgent):
+    """Analyzes a visualization request and decides the render type."""
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -18,6 +20,14 @@ class AnalysisAgent(BaseAgent):
         api_version: str | None = None,
         language: str = "zh",
     ) -> None:
+        """Initialize the visualization analysis agent.
+
+        Args:
+            api_key: LLM provider API key.
+            base_url: LLM provider base URL.
+            api_version: API version for Azure OpenAI (optional).
+            language: Language code (``"zh"`` or ``"en"``).
+        """
         super().__init__(
             module_name="visualize",
             agent_name="analysis_agent",
@@ -35,6 +45,20 @@ class AnalysisAgent(BaseAgent):
         render_mode: str = "auto",
         attachments: list[Attachment] | None = None,
     ) -> VisualizationAnalysis:
+        """Analyze the visualization request and produce a structured brief.
+
+        Args:
+            user_input: The user's visualization request text.
+            history_context: Prior conversation context for continuity.
+            render_mode: Requested render mode (``"auto"``, ``"svg"``, etc.).
+            attachments: Optional image attachments for reference.
+
+        Returns:
+            A :class:`VisualizationAnalysis` with the chosen render type and brief.
+
+        Raises:
+            ValueError: If the analysis prompts are not configured.
+        """
         # Manim modes short-circuit the LLM call entirely — MathAnimatorPipeline
         # has its own ConceptAnalysisAgent that produces the manim-specific
         # design brief. We only need a stub VisualizationAnalysis here so the

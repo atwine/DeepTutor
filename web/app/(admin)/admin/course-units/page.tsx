@@ -36,11 +36,11 @@ import Link from "next/link";
 import { formatDate as formatLocaleDate, type Language } from "@/lib/datetime";
 
 function formatDate(iso: string, lang: Language): string {
-  if (!iso) return "â€”";
+  if (!iso) return "—";
   try {
     return formatLocaleDate(new Date(iso), lang);
   } catch {
-    return "â€”";
+    return "—";
   }
 }
 
@@ -269,7 +269,7 @@ export default function CourseUnitsPage() {
             </div>
           </td>
           <td className="px-5 py-3 text-[var(--muted-foreground)]">
-            {unit.term || "â€”"}
+            {unit.term || "—"}
           </td>
           <td className="px-5 py-3 text-[var(--muted-foreground)]">
             {instructorNames(unit)}
@@ -338,10 +338,10 @@ export default function CourseUnitsPage() {
                 )}
               </button>
               {/* Round 4 Task 2: Edit opened to instructor-or-admin on the
-                  backend (PUT /course-units/{id}), matching Archive above â€”
+                  backend (PUT /course-units/{id}), matching Archive above —
                   shown to everyone who can reach this page, since the list
                   itself is already scoped to "units I teach" for a non-admin.
-                  Delete stays admin-only (irreversible cascade â€” see the
+                  Delete stays admin-only (irreversible cascade — see the
                   backend endpoint's docstring for the full reasoning). */}
               <button
                 onClick={() => openEdit(unit)}
@@ -392,7 +392,7 @@ export default function CourseUnitsPage() {
                 href="/admin/users"
                 className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
               >
-                {t("User Management")} â†’
+                {t("User Management")} →
               </Link>
             )}
           </div>
@@ -482,7 +482,7 @@ export default function CourseUnitsPage() {
                 {t("No active course units")}
               </p>
               <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                {t("Every course unit here is archived â€” see the archived section below.")}
+                {t("Every course unit here is archived — see the archived section below.")}
               </p>
             </div>
           ) : (
@@ -556,7 +556,7 @@ export default function CourseUnitsPage() {
         title={t("Delete course unit")}
         tone="danger"
         confirmLabel={t("Delete")}
-        busyLabel={t("Deletingâ€¦")}
+        busyLabel={t("Deleting…")}
         busy={deleteBusy}
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteTarget(null)}
@@ -565,7 +565,7 @@ export default function CourseUnitsPage() {
           <div className="space-y-2">
             <p>
               {t(
-                "This permanently removes â€œ{{name}}â€ along with all its enrollments, assignments, and student submissions. This cannot be undone.",
+                "This permanently removes “{{name}}” along with all its enrollments, assignments, and student submissions. This cannot be undone.",
                 { name: deleteTarget.name },
               )}
             </p>
@@ -634,7 +634,7 @@ export default function CourseUnitsPage() {
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
                 disabled={formSubmitting}
                 rows={3}
-                placeholder={t("What this course unit covers â€” shown to students browsing the catalog.")}
+                placeholder={t("What this course unit covers — shown to students browsing the catalog.")}
                 className="mt-1 w-full resize-none rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--ring)]"
               />
             </label>
@@ -669,7 +669,7 @@ export default function CourseUnitsPage() {
               {isAdmin ? (
                 instructors.length === 0 ? (
                   <p className="text-xs text-[var(--muted-foreground)]">
-                    {t("No instructor accounts yet â€” promote a user to instructor first.")}
+                    {t("No instructor accounts yet — promote a user to instructor first.")}
                   </p>
                 ) : (
                 <div className="max-h-36 space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] p-2">
@@ -724,7 +724,7 @@ export default function CourseUnitsPage() {
                 className="rounded-lg bg-[var(--foreground)] px-3 py-1.5 text-sm font-medium text-[var(--background)] hover:opacity-90 disabled:opacity-40"
               >
                 {formSubmitting
-                  ? t("Savingâ€¦")
+                  ? t("Saving…")
                   : form.id
                     ? t("Save")
                     : t("Create")}

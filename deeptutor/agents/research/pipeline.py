@@ -255,6 +255,8 @@ class ReportSectionPlan:
 
 @dataclass(frozen=True)
 class ReportOutline:
+    """A research report outline with a title and ordered sections."""
+
     title: str
     sections: tuple[ReportSectionPlan, ...]
 
@@ -281,6 +283,14 @@ class ResearchPipeline:
         kb_name: str | None = None,
         enabled_tools: list[str] | None = None,
     ) -> None:
+        """Initialize the research pipeline for one turn.
+
+        Args:
+            language: Language code (``"zh"`` or ``"en"``).
+            runtime_config: Optional runtime configuration dictionary.
+            kb_name: Optional knowledge base name for RAG retrieval.
+            enabled_tools: List of tool names enabled for the pipeline.
+        """
         self.language = parse_language(language)
         self.kb_name = (kb_name or "").strip() or None
         self.enabled_tools = list(enabled_tools or [])
@@ -2245,8 +2255,19 @@ class _BlockLoopHost:
         context: UnifiedContext,
         client: Any,
     ) -> None:
+        """Initialize the block loop host with its pipeline, block, and queue.
+
+        Args:
+            pipeline: The owning research pipeline.
+            block: The topic block being researched.
+            queue: The dynamic topic queue for APPEND operations.
+            citations: The citation manager for recording sources.
+            topic: The overall research topic string.
+            stream: The stream bus for emitting events.
+            context: The unified context for the current turn.
+            client: The LLM client for completion calls.
+        """
         self._pipeline = pipeline
-        self._block = block
         self._queue = queue
         self._citations = citations
         self._topic = topic
@@ -2256,10 +2277,19 @@ class _BlockLoopHost:
         self._tool_rounds_used = 0
 
     async def guard_context_window(self, messages: list[dict[str, Any]]) -> None:
+        """No-op context-window guard (per-block budgets keep messages bounded)."""
         # Per-block budgets keep messages bounded; no trimming for v1.
         return None
 
     def build_iteration_trace_meta(self, iteration: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Build trace metadata for one research-block iteration.
+
+        Args:
+            iteration: The current iteration index.
+
+        Returns:
+            A tuple of (iteration_meta, final_meta) trace metadata dicts.
+        """
         status_meta = _research_topic_status_meta(self._block)
         iter_call_id = new_call_id(f"research-{self._block.block_id}-iter-{iteration}")
         iter_meta = build_trace_metadata(
@@ -2296,6 +2326,15 @@ class _BlockLoopHost:
         iteration: int,
         tool_calls: list[dict[str, Any]],
     ) -> DispatchOutcome:
+        """Dispatch tool calls and record citable results via the note agent.
+
+        Args:
+            iteration: The current iteration index.
+            tool_calls: List of tool call dicts from the LLM response.
+
+        Returns:
+            A :class:`DispatchOutcome` with summarized tool messages.
+        """
         too_many = None
         if len(tool_calls) > MAX_PARALLEL_TOOL_CALLS:
             too_many = self._pipeline._t(
@@ -2415,14 +2454,17 @@ class _BlockLoopHost:
                 )
 
     async def resolve_pause(self, dispatch: DispatchOutcome) -> bool:
+        """Resolve an ``ask_user`` pause (always ``False`` — research blocks don't pause)."""
         # Per-block research never surfaces ask_user; clarification only
         # happens in the rephrase phase.
         return False
 
     async def emit_terminator(self, payload: dict[str, Any] | None) -> None:
+        """Emit a terminator tool's final payload (no-op for research blocks)."""
         return None
 
     async def emit_final(self, text: str, final_meta: dict[str, Any]) -> None:
+        """Emit the block's final text (no-op — consumed by the reporting phase)."""
         # Block FINISH text is consumed by the reporting phase, not
         # streamed live as user-facing content — streaming it here would
         # dump raw per-block findings into the chat bubble before the
@@ -2430,12 +2472,21 @@ class _BlockLoopHost:
         return None
 
     def protocol_retry_notice(self) -> str:
+        """Return the user-facing notice for a protocol retry."""
         return self._pipeline._t(
             "notices.protocol_retry",
             default="The model violated the action-label protocol; retrying.",
         )
 
     def protocol_repair_message(self, violation: str) -> str:
+        """Return a corrective message for a specific protocol violation.
+
+        Args:
+            violation: The violation identifier string.
+
+        Returns:
+            The repair instruction text for the model.
+        """
         return self._pipeline._t(
             f"protocol.{violation}",
             default=f"Protocol violation: {violation}.",
@@ -2447,6 +2498,7 @@ class _BlockLoopHost:
         messages: list[dict[str, Any]],
         start_iteration: int,
     ) -> tuple[str, bool, int]:
+        """Force a finish when the block's iteration budget is exhausted."""
         return await self._pipeline._force_finish_block(
             client=self._client,
             messages=messages,
@@ -2586,6 +2638,15 @@ class _RephraseLoopHost:
         client: Any,
         max_rounds: int,
     ) -> None:
+        """Initialize the rephrase loop host with a round cap.
+
+        Args:
+            pipeline: The owning research pipeline.
+            stream: The stream bus for emitting events.
+            context: The unified context for the current turn.
+            client: The LLM client for completion calls.
+            max_rounds: Maximum number of ``ask_user`` rounds allowed.
+        """
         self._pipeline = pipeline
         self._stream = stream
         self._context = context
@@ -2600,9 +2661,18 @@ class _RephraseLoopHost:
         self._shared_iter_call_id = new_call_id("research-rephrase-iter")
 
     async def guard_context_window(self, messages: list[dict[str, Any]]) -> None:
+        """No-op context-window guard for the rephrase mini-loop."""
         return None
 
     def build_iteration_trace_meta(self, iteration: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Build trace metadata for one rephase iteration.
+
+        Args:
+            iteration: The current iteration index.
+
+        Returns:
+            A tuple of (iteration_meta, final_meta) trace metadata dicts.
+        """
         iter_meta = build_trace_metadata(
             call_id=self._shared_iter_call_id,
             phase="rephrasing",
@@ -2630,6 +2700,15 @@ class _RephraseLoopHost:
         iteration: int,
         tool_calls: list[dict[str, Any]],
     ) -> DispatchOutcome:
+        """Dispatch tool calls, allowing only ``ask_user`` in the rephrase phase.
+
+        Args:
+            iteration: The current iteration index.
+            tool_calls: List of tool call dicts from the LLM response.
+
+        Returns:
+            A :class:`DispatchOutcome` with tool messages (allowed + rejected).
+        """
         allowed: list[dict[str, Any]] = []
         rejected: list[dict[str, Any]] = []
         for tc in tool_calls:
@@ -2712,6 +2791,14 @@ class _RephraseLoopHost:
         return outcome
 
     async def resolve_pause(self, dispatch: DispatchOutcome) -> bool:
+        """Resolve an ``ask_user`` pause by waiting for the user's reply.
+
+        Args:
+            dispatch: The dispatch outcome carrying the pause payload.
+
+        Returns:
+            ``True`` if the user replied and the loop should continue.
+        """
         from deeptutor.agents.chat.agentic_pipeline import (
             _format_user_reply_body,
             _normalise_user_reply,
@@ -2746,19 +2833,30 @@ class _RephraseLoopHost:
         return True
 
     async def emit_terminator(self, payload: dict[str, Any] | None) -> None:
+        """Emit a terminator tool's final payload (no-op for rephrase)."""
         return None
 
     async def emit_final(self, text: str, final_meta: dict[str, Any]) -> None:
+        """Emit the rephrase final text (no-op — the refined topic is internal)."""
         # The refined topic is internal; not streamed as user content.
         return None
 
     def protocol_retry_notice(self) -> str:
+        """Return the user-facing notice for a protocol retry."""
         return self._pipeline._t(
             "notices.protocol_retry",
             default="The model violated the action-label protocol; retrying.",
         )
 
     def protocol_repair_message(self, violation: str) -> str:
+        """Return a corrective message for a specific protocol violation.
+
+        Args:
+            violation: The violation identifier string.
+
+        Returns:
+            The repair instruction text for the model.
+        """
         return self._pipeline._t(
             f"protocol.{violation}",
             default=f"Protocol violation: {violation}.",
@@ -2770,6 +2868,7 @@ class _RephraseLoopHost:
         messages: list[dict[str, Any]],
         start_iteration: int,
     ) -> tuple[str, bool, int]:
+        """Force a finish when the rephrase round cap is exhausted."""
         # Rephrase exhaustion falls back to the raw topic (handled by
         # the caller); we report no extra calls and "not completed" so
         # the loop returns with an empty final_text.

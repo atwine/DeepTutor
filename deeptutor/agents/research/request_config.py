@@ -18,11 +18,15 @@ ResearchDepth = Literal["quick", "standard", "deep", "manual"]
 
 
 class OutlineItem(BaseModel):
+    """A single outline item with a title and optional overview."""
+
     title: str
     overview: str = ""
 
 
 class DeepResearchRequestConfig(BaseModel):
+    """Validated configuration for a deep research request."""
+
     model_config = ConfigDict(extra="forbid")
 
     mode: ResearchMode
@@ -36,6 +40,7 @@ class DeepResearchRequestConfig(BaseModel):
     @field_validator("manual_subtopics")
     @classmethod
     def validate_manual_subtopics(cls, value: int | None) -> int | None:
+        """Clamp the manual subtopic count to the 1–10 range."""
         if value is not None:
             return max(1, min(value, 10))
         return value
@@ -43,6 +48,7 @@ class DeepResearchRequestConfig(BaseModel):
     @field_validator("manual_max_iterations")
     @classmethod
     def validate_manual_max_iterations(cls, value: int | None) -> int | None:
+        """Clamp the manual max-iterations count to the 1–10 range."""
         if value is not None:
             return max(1, min(value, 10))
         return value
@@ -51,6 +57,17 @@ class DeepResearchRequestConfig(BaseModel):
 def validate_research_request_config(
     raw_config: dict[str, Any] | None,
 ) -> DeepResearchRequestConfig:
+    """Validate and parse a raw config dict into a :class:`DeepResearchRequestConfig`.
+
+    Args:
+        raw_config: Raw configuration dictionary from the request.
+
+    Returns:
+        A validated :class:`DeepResearchRequestConfig` instance.
+
+    Raises:
+        ValueError: If the config is not a dict or fails Pydantic validation.
+    """
     if not isinstance(raw_config, dict):
         raise ValueError("Deep research requires an explicit config object.")
     try:
@@ -67,6 +84,15 @@ def build_research_execution_policy(
     *,
     request_config: DeepResearchRequestConfig,
 ) -> dict[str, Any]:
+    """Build the execution policy dict from the validated request config.
+
+    Args:
+        request_config: The validated deep research request configuration.
+
+    Returns:
+        A dictionary with ``planning``, ``researching``, ``reporting``,
+        ``queue``, and ``intent`` sections.
+    """
     depth_policy = _build_depth_policy(
         request_config.depth,
         manual_max_iterations=request_config.manual_max_iterations,
@@ -125,6 +151,19 @@ def build_research_runtime_config(
     request_config: DeepResearchRequestConfig,
     kb_name: str | None,
 ) -> dict[str, Any]:
+    """Build the full runtime config dict for :class:`ResearchPipeline`.
+
+    Merges the base service config with the execution policy and KB name.
+
+    Args:
+        base_config: The loaded base service config (e.g. from ``main.yaml``).
+        request_config: The validated deep research request configuration.
+        kb_name: Optional knowledge base name for RAG.
+
+    Returns:
+        A runtime config dictionary with planning, researching, reporting,
+        queue, rag, and intent sections.
+    """
     capabilities = (
         base_config.get("capabilities", {})
         if isinstance(base_config.get("capabilities"), dict)

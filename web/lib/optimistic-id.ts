@@ -20,6 +20,8 @@
 
 let lastOptimisticId = 0;
 
+/** Mint the next strictly-decreasing optimistic id for a chat row.
+ * @returns A negative number smaller than all previous returns. */
 export function nextOptimisticId(): number {
   const stamp = -Date.now();
   lastOptimisticId = stamp < lastOptimisticId ? stamp : lastOptimisticId - 1;

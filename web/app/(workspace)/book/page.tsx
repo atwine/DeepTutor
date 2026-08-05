@@ -370,6 +370,22 @@ function BookPageInner() {
     }
   };
 
+  const handleEditBlockContent = async (block: Block, body: string) => {
+    if (!detail || !selectedPage) return;
+    try {
+      await bookApi.editBlockContent(detail.book.id, selectedPage.id, block.id, body);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      notify(`Edit block failed: ${msg}`, {
+        tone: "error",
+        durationMs: 8000,
+      });
+      console.error("editBlockContent failed:", err);
+    } finally {
+      await loadBookDetail(detail.book.id);
+    }
+  };
+
   const handleDeleteBlock = async (block: Block) => {
     if (!detail || !selectedPage) return;
     if (!confirm(t("Delete this {{type}} block?", { type: block.type })))
@@ -561,6 +577,9 @@ function BookPageInner() {
                   !!compilingPageId && compilingPageId === selectedPage?.id
                 }
                 onRegenerateBlock={(block) => void handleRegenerateBlock(block)}
+                onEditBlockContent={(block, body) =>
+                  void handleEditBlockContent(block, body)
+                }
                 onDeleteBlock={(block) => void handleDeleteBlock(block)}
                 onMoveBlock={(block, dir) => void handleMoveBlock(block, dir)}
                 onChangeBlockType={(block, t) =>

@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+/** Key identifying a Space sidebar item. */
 export type SpaceItemKey =
   | "chat_history"
   | "agents"
@@ -18,8 +19,10 @@ export type SpaceItemKey =
   | "personas"
   | "skills";
 
+/** Kind of memory file in the Space (summary or profile). */
 export type SpaceMemoryFile = "summary" | "profile";
 
+/** A single Space sidebar navigation item. */
 export interface SpaceItem {
   key: SpaceItemKey;
   href: string;
@@ -28,6 +31,7 @@ export interface SpaceItem {
   icon: LucideIcon;
 }
 
+/** All Space sidebar navigation items. */
 export const SPACE_ITEMS: SpaceItem[] = [
   {
     key: "chat_history",

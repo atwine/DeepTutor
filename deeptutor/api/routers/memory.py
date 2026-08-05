@@ -83,6 +83,7 @@ def _validate_surface(surface: str) -> Surface:
 
 @router.get("/overview")
 async def get_overview():
+    """Return all memory docs' state plus the L1 backlog and backup list."""
     store = get_memory_store()
     rows = [asdict(r) for r in store.overview()]
     backup_dir = paths.backup_root()
@@ -123,6 +124,7 @@ async def resolve_entry(entry_id: str):
 
 @router.get("/backup")
 async def list_backups():
+    """List v1-migration backup directories and their files."""
     backup_dir = paths.backup_root()
     if not backup_dir.exists():
         return {"backups": []}
@@ -139,17 +141,44 @@ async def list_backups():
 
 @router.get("/doc/{layer}/{key}")
 async def get_doc(layer: str, key: str):
+    """Retrieve the raw markdown content of a memory document.
+
+    Args:
+        layer: The memory layer (``L2`` or ``L3``).
+        key: The document key (surface name or L3 slot).
+
+    Returns:
+        A dict with the layer, key, and raw content string.
+
+    Raises:
+        HTTPException: 400 if the layer is invalid; 404 if the key is unknown.
+    """
     lyr = _validate_layer(layer)
     _validate_doc_key(lyr, key)
     return {"layer": lyr, "key": key, "content": get_memory_store().read_raw(lyr, key)}
 
 
 class DocWriteRequest(BaseModel):
+    """Request body for overwriting a memory document's content."""
+
     content: str
 
 
 @router.put("/doc/{layer}/{key}")
 async def put_doc(layer: str, key: str, payload: DocWriteRequest):
+    """Overwrite a memory document with user-edited content.
+
+    Args:
+        layer: The memory layer (``L2`` or ``L3``).
+        key: The document key (surface name or L3 slot).
+        payload: The write request containing the new content.
+
+    Returns:
+        A dict confirming the save with layer and key.
+
+    Raises:
+        HTTPException: 400 if the layer is invalid; 404 if the key is unknown.
+    """
     lyr = _validate_layer(layer)
     _validate_doc_key(lyr, key)
     await get_memory_store().overwrite_doc(lyr, key, payload.content)
@@ -158,6 +187,20 @@ async def put_doc(layer: str, key: str, payload: DocWriteRequest):
 
 @router.delete("/doc/{layer}/{key}/entry/{entry_id}")
 async def delete_entry(layer: str, key: str, entry_id: str):
+    """Delete a single entry from a memory document.
+
+    Args:
+        layer: The memory layer (``L2`` or ``L3``).
+        key: The document key (surface name or L3 slot).
+        entry_id: The unique identifier of the entry to delete.
+
+    Returns:
+        A dict confirming deletion with layer, key, and entry_id.
+
+    Raises:
+        HTTPException: 400 if the layer is invalid; 404 if the key or entry
+            is not found.
+    """
     lyr = _validate_layer(layer)
     _validate_doc_key(lyr, key)
     ok = await get_memory_store().delete_entry(lyr, key, entry_id)
@@ -223,11 +266,15 @@ async def reset_doc(layer: str, key: str):
 
 
 class LLMSelectionPayload(BaseModel):
+    """LLM profile and model selection for a consolidator run."""
+
     profile_id: str
     model_id: str
 
 
 class RunStartRequest(BaseModel):
+    """Request body for starting a consolidator run (update/audit/dedup/merge)."""
+
     layer: str
     key: str
     mode: Literal["update", "audit", "dedup", "merge"]
@@ -352,6 +399,17 @@ async def start_run(req: RunStartRequest):
 
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str):
+    """Retrieve the current state of a consolidator run.
+
+    Args:
+        run_id: The unique identifier of the run.
+
+    Returns:
+        The serialized run state.
+
+    Raises:
+        HTTPException: 404 if the run_id is unknown.
+    """
     from deeptutor.services.memory.consolidator.runs import get_run_manager
 
     run = get_run_manager().get(run_id)
@@ -362,6 +420,17 @@ async def get_run(run_id: str):
 
 @router.post("/runs/{run_id}/cancel")
 async def cancel_run(run_id: str):
+    """Cooperatively cancel an active consolidator run.
+
+    Args:
+        run_id: The unique identifier of the run.
+
+    Returns:
+        A dict confirming cancellation.
+
+    Raises:
+        HTTPException: 409 if the run is not active.
+    """
     from deeptutor.services.memory.consolidator.runs import get_run_manager
 
     ok = await get_run_manager().cancel(run_id)
@@ -372,6 +441,18 @@ async def cancel_run(run_id: str):
 
 @router.post("/runs/{run_id}/undo")
 async def undo_run_edit(run_id: str):
+    """Restore the latest write produced by a consolidator run.
+
+    Args:
+        run_id: The unique identifier of the run.
+
+    Returns:
+        A dict with undo count and the reverted event payload.
+
+    Raises:
+        HTTPException: 404 if the run_id is unknown; 409 if the run is busy
+            or there is nothing to undo.
+    """
     from deeptutor.services.memory.consolidator.runs import (
         RunBusyError,
         get_run_manager,
@@ -397,6 +478,18 @@ async def undo_run_edit(run_id: str):
 
 @router.get("/runs")
 async def list_runs(layer: str | None = None, key: str | None = None):
+    """List active and recent consolidator runs, optionally filtered by doc.
+
+    Args:
+        layer: Optional memory layer (``L2`` or ``L3``) to filter by.
+        key: Optional document key to filter by (requires ``layer``).
+
+    Returns:
+        A dict with a list of serialized run states.
+
+    Raises:
+        HTTPException: 400 if the layer is invalid; 404 if the key is unknown.
+    """
     from deeptutor.services.memory.consolidator.runs import get_run_manager
 
     lyr = _validate_layer(layer) if layer is not None else None
@@ -509,18 +602,24 @@ def _legacy_run_stream(req: RunStartRequest) -> StreamingResponse:
 
 
 class UpdateRequest(BaseModel):
+    """Request body for the legacy update-mode consolidator endpoint."""
+
     language: str = "en"
     budget: int | None = None
     llm_selection: LLMSelectionPayload | None = None
 
 
 class AuditRequest(BaseModel):
+    """Request body for the legacy audit-mode consolidator endpoint."""
+
     language: str = "en"
     budget: int | None = None
     llm_selection: LLMSelectionPayload | None = None
 
 
 class DedupRequest(BaseModel):
+    """Request body for the legacy dedup-mode consolidator endpoint."""
+
     language: str = "en"
     iterations: int | None = None
     llm_selection: LLMSelectionPayload | None = None
@@ -528,6 +627,16 @@ class DedupRequest(BaseModel):
 
 @router.post("/doc/{layer}/{key}/update")
 async def update_doc(layer: str, key: str, payload: UpdateRequest | None = None):
+    """Legacy update-mode endpoint that streams consolidator events inline.
+
+    Args:
+        layer: The memory layer (``L2`` or ``L3``).
+        key: The document key (surface name or L3 slot).
+        payload: Optional request with language, budget, and LLM selection.
+
+    Returns:
+        A streaming response of consolidator events.
+    """
     lyr = _validate_layer(layer)
     _validate_doc_key(lyr, key)
     req = RunStartRequest(
@@ -543,6 +652,16 @@ async def update_doc(layer: str, key: str, payload: UpdateRequest | None = None)
 
 @router.post("/doc/{layer}/{key}/audit")
 async def audit_doc(layer: str, key: str, payload: AuditRequest | None = None):
+    """Legacy audit-mode endpoint that streams consolidator events inline.
+
+    Args:
+        layer: The memory layer (``L2`` or ``L3``).
+        key: The document key (surface name or L3 slot).
+        payload: Optional request with language, budget, and LLM selection.
+
+    Returns:
+        A streaming response of consolidator events.
+    """
     lyr = _validate_layer(layer)
     _validate_doc_key(lyr, key)
     req = RunStartRequest(
@@ -558,6 +677,16 @@ async def audit_doc(layer: str, key: str, payload: AuditRequest | None = None):
 
 @router.post("/doc/{layer}/{key}/dedup")
 async def dedup_doc(layer: str, key: str, payload: DedupRequest | None = None):
+    """Legacy dedup-mode endpoint that streams consolidator events inline.
+
+    Args:
+        layer: The memory layer (``L2`` or ``L3``).
+        key: The document key (surface name or L3 slot).
+        payload: Optional request with language, iterations, and LLM selection.
+
+    Returns:
+        A streaming response of consolidator events.
+    """
     lyr = _validate_layer(layer)
     _validate_doc_key(lyr, key)
     req = RunStartRequest(
@@ -643,6 +772,8 @@ def _default_title(layer: str, key: str) -> str:
 
 
 class ApplyOpsRequest(BaseModel):
+    """Request body for atomically applying a list of edit operations to a doc."""
+
     ops: list[dict]
 
 
@@ -679,6 +810,19 @@ async def apply_doc_ops(layer: str, key: str, payload: ApplyOpsRequest):
 
 @router.get("/trace/{surface}")
 async def get_trace(surface: str, limit: int = 200, offset: int = 0):
+    """Return paginated L1 trace events for a surface.
+
+    Args:
+        surface: The trace surface name.
+        limit: Maximum number of events to return (capped at 1000).
+        offset: Number of events to skip from the beginning.
+
+    Returns:
+        A dict with the surface, events, offset, and limit.
+
+    Raises:
+        HTTPException: 404 if the surface is unknown.
+    """
     surf = _validate_surface(surface)
     from deeptutor.services.memory.trace import iter_since
 
@@ -694,6 +838,17 @@ async def get_trace(surface: str, limit: int = 200, offset: int = 0):
 
 @router.delete("/trace/{surface}")
 async def clear_trace(surface: str):
+    """Delete all trace files for a surface.
+
+    Args:
+        surface: The trace surface name.
+
+    Returns:
+        A dict with the surface and count of removed files.
+
+    Raises:
+        HTTPException: 404 if the surface is unknown.
+    """
     surf = _validate_surface(surface)
     removed = 0
     for path in paths.trace_dir(surf).glob("*.jsonl"):
@@ -707,6 +862,19 @@ async def clear_trace(surface: str):
 
 @router.delete("/trace/{surface}/day/{day}")
 async def clear_trace_day(surface: str, day: str):
+    """Delete a single day's trace file for a surface.
+
+    Args:
+        surface: The trace surface name.
+        day: The date string in ``YYYY-MM-DD`` format.
+
+    Returns:
+        A dict confirming deletion with surface and day.
+
+    Raises:
+        HTTPException: 400 if the date format is invalid; 404 if no trace
+            exists for that day; 500 on OS errors.
+    """
     surf = _validate_surface(surface)
     try:
         parsed = date_cls.fromisoformat(day)
@@ -764,6 +932,19 @@ async def refresh_snapshot(surface: str):
 
 @router.get("/snapshot/{surface}/changes")
 async def get_changes(surface: str, limit: int = 200, offset: int = 0):
+    """Return paginated snapshot change entries for a surface.
+
+    Args:
+        surface: The trace surface name.
+        limit: Maximum number of change entries to return.
+        offset: Number of entries to skip from the beginning.
+
+    Returns:
+        A dict with the surface, change entries, limit, and offset.
+
+    Raises:
+        HTTPException: 404 if the surface is unknown.
+    """
     surf = _validate_surface(surface)
     from deeptutor.services.memory import snapshot as snap
 
@@ -778,6 +959,17 @@ async def get_changes(surface: str, limit: int = 200, offset: int = 0):
 
 @router.delete("/snapshot/{surface}/changes")
 async def clear_snapshot_changes(surface: str):
+    """Clear all recorded snapshot changes for a surface.
+
+    Args:
+        surface: The trace surface name.
+
+    Returns:
+        A dict confirming the changes were cleared.
+
+    Raises:
+        HTTPException: 404 if the surface is unknown.
+    """
     surf = _validate_surface(surface)
     from deeptutor.services.memory import snapshot as snap
 

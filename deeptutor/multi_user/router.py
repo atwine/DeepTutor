@@ -18,7 +18,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse, PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from deeptutor.api.routers.auth import (
     TokenPayload,
@@ -311,6 +311,17 @@ class CourseUnitCreate(BaseModel):
     start_date: str = ""
     end_date: str = ""
 
+    # Issue #61: the frontend form enforces "Name is required" client-side
+    # only — nothing stopped a direct API call from creating a permanently
+    # blank, unlabeled course unit that clutters Browse Courses for everyone.
+    @field_validator("name")
+    @classmethod
+    def name_must_not_be_blank(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("Course unit name is required.")
+        return trimmed
+
 
 class CourseUnitUpdate(BaseModel):
     name: str | None = None
@@ -319,6 +330,18 @@ class CourseUnitUpdate(BaseModel):
     instructor_ids: list[str] | None = None
     start_date: str | None = None
     end_date: str | None = None
+
+    # Issue #61: same gap on update — a caller could rename an existing
+    # course unit to a blank name.
+    @field_validator("name")
+    @classmethod
+    def name_must_not_be_blank(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("Course unit name is required.")
+        return trimmed
 
 
 class EnrollmentPayload(BaseModel):

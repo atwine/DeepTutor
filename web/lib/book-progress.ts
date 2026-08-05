@@ -14,6 +14,7 @@
 
 import type { BookWsEvent } from "@/lib/book-api";
 
+/** Identifier for a book generation pipeline stage. */
 export type StageId =
   | "ideation"
   | "exploration"
@@ -22,8 +23,10 @@ export type StageId =
   | "overview"
   | "compilation";
 
+/** Lifecycle state of a single pipeline stage. */
 export type StageState = "pending" | "running" | "completed" | "error";
 
+/** Display-ready view of a single pipeline stage. */
 export interface StageView {
   id: StageId;
   label: string;
@@ -34,6 +37,7 @@ export interface StageView {
   endedAt?: number;
 }
 
+/** Aggregated progress snapshot for a book generation pipeline. */
 export interface BookProgress {
   bookId: string | null;
   stages: Record<StageId, StageView>;
@@ -67,6 +71,7 @@ export interface BookProgress {
   updatedAt: number;
 }
 
+/** Ordered list of pipeline stage IDs, matching the backend execution order. */
 export const STAGE_ORDER: StageId[] = [
   "ideation",
   "exploration",
@@ -103,6 +108,11 @@ const STAGE_LABELS: Record<StageId, { label: string; description: string }> = {
   },
 };
 
+/**
+ * Create an initial empty book progress snapshot with all stages pending.
+ *
+ * @returns A fresh `BookProgress` with zeroed counters.
+ */
 export function emptyBookProgress(): BookProgress {
   const stages = Object.fromEntries(
     STAGE_ORDER.map((id) => [

@@ -40,13 +40,20 @@ class CapabilityRegistry:
     """Registry of available capabilities."""
 
     def __init__(self) -> None:
+        """Initialise an empty capability registry."""
         self._capabilities: dict[str, BaseCapability] = {}
 
     def register(self, capability: BaseCapability) -> None:
+        """Register a capability instance under its name.
+
+        Args:
+            capability: The capability to register.
+        """
         self._capabilities[capability.name] = capability
         logger.debug("Registered capability: %s", capability.name)
 
     def load_builtins(self) -> None:
+        """Instantiate and register all built-in capabilities."""
         for name, class_path in BUILTIN_CAPABILITY_CLASSES.items():
             if name in self._capabilities:
                 continue
@@ -57,6 +64,7 @@ class CapabilityRegistry:
                 logger.warning("Failed to load capability %s", name, exc_info=True)
 
     def load_plugins(self) -> None:
+        """Discover and register plugin capabilities via the plugin loader."""
         discover_plugins, load_plugin_capability = _load_plugin_hooks()
         if discover_plugins is None or load_plugin_capability is None:
             return
@@ -78,12 +86,15 @@ class CapabilityRegistry:
                 )
 
     def get(self, name: str) -> BaseCapability | None:
+        """Return the capability registered under *name*, or ``None`` if absent."""
         return self._capabilities.get(name)
 
     def list_capabilities(self) -> list[str]:
+        """Return the names of all registered capabilities."""
         return list(self._capabilities.keys())
 
     def get_manifests(self) -> list[dict[str, Any]]:
+        """Return manifest dictionaries for every registered capability."""
         return [
             {
                 "name": c.manifest.name,
@@ -106,6 +117,7 @@ _default_registry: CapabilityRegistry | None = None
 
 
 def get_capability_registry() -> CapabilityRegistry:
+    """Return the global capability registry, loading builtins and plugins on first call."""
     global _default_registry
     if _default_registry is None:
         _default_registry = CapabilityRegistry()

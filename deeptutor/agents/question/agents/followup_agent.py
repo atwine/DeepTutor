@@ -16,6 +16,12 @@ class FollowupAgent(BaseAgent):
     """Answer follow-up questions about a single quiz item in one LLM call."""
 
     def __init__(self, language: str = "en", **kwargs: Any) -> None:
+        """Initialize the follow-up agent.
+
+        Args:
+            language: Language code (``"zh"`` or ``"en"``).
+            **kwargs: Additional arguments passed to :class:`BaseAgent`.
+        """
         super().__init__(
             module_name="question",
             agent_name="followup_agent",
@@ -31,6 +37,17 @@ class FollowupAgent(BaseAgent):
         history_context: str = "",
         attachments: list[Any] | None = None,
     ) -> str:
+        """Answer a follow-up question about a single quiz item.
+
+        Args:
+            user_message: The user's follow-up question text.
+            question_context: Dict with the quiz question's metadata and content.
+            history_context: Prior conversation context for continuity.
+            attachments: Optional image/file attachments.
+
+        Returns:
+            The LLM's answer to the follow-up question.
+        """
         system_prompt = append_language_directive(
             self.get_prompt("system", ""),
             self.language,

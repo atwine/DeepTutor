@@ -9,6 +9,7 @@ export interface ExportableAttachment {
   mime_type?: string;
 }
 
+/** A message in the exportable chat transcript. */
 export interface ExportableMessage {
   role: string;
   content: string;
@@ -33,11 +34,19 @@ function formatAttachments(attachments?: ExportableAttachment[]): string {
   return `_Attachments:_ ${items}\n\n`;
 }
 
+/** Options for customizing the exported markdown title and timestamp. */
 export interface BuildChatMarkdownOptions {
   title?: string;
   exportedAt?: Date;
 }
 
+/**
+ * Serialize chat messages into a markdown document.
+ *
+ * @param messages - Messages to export.
+ * @param options - Optional title and export timestamp.
+ * @returns A markdown string representing the chat session.
+ */
 export function buildChatMarkdown(
   messages: ExportableMessage[],
   options: BuildChatMarkdownOptions = {},
@@ -65,6 +74,12 @@ function sanitizeFilename(input: string): string {
   return cleaned || "chat";
 }
 
+/**
+ * Build a markdown document from chat messages and trigger a browser download.
+ *
+ * @param messages - Messages to export.
+ * @param options - Optional title and export timestamp.
+ */
 export function downloadChatMarkdown(
   messages: ExportableMessage[],
   options: BuildChatMarkdownOptions = {},

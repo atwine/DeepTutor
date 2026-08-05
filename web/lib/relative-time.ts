@@ -14,8 +14,12 @@
  *    behaviour rather than throwing.
  */
 
+/** Stable day-grouping token for sidebar/session list grouping. */
 export type DayGroupKey = "today" | "yesterday" | "last_7_days" | "earlier";
 
+/** Return a stable day-group token for a Unix timestamp.
+ * @param timestamp - Unix timestamp in seconds.
+ * @returns Group key: today, yesterday, last_7_days, or earlier. */
 export function getDayGroupKey(timestamp: number): DayGroupKey {
   const now = new Date();
   const date = new Date(timestamp * 1000);
@@ -36,6 +40,10 @@ export function getDayGroupKey(timestamp: number): DayGroupKey {
   return "earlier";
 }
 
+/** Format a Unix timestamp as a locale-aware relative time string.
+ * @param timestamp - Unix timestamp in seconds.
+ * @param locale - BCP-47 locale tag (falls back to "en").
+ * @returns Relative time string (e.g. "3 minutes ago"). */
 export function formatRelativeTime(timestamp: number, locale: string): string {
   const diffSeconds = Math.round(timestamp - Date.now() / 1000);
   const formatter = new Intl.RelativeTimeFormat(locale || "en", {

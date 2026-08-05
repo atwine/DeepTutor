@@ -14,7 +14,20 @@ _cas_lock = threading.Lock()
 
 
 class LearningStore:
+    """JSON file-based persistence for ``LearningProgress`` objects.
+
+    Each book's progress is stored as a single JSON file under a root
+    directory. Writes are atomic and guarded by a module-level lock for
+    compare-and-swap semantics across store instances.
+    """
+
     def __init__(self, root: Path | None = None) -> None:
+        """Initialize the store, creating the root directory if needed.
+
+        Args:
+            root: Directory for progress JSON files; defaults to the
+                workspace ``learning`` subdirectory.
+        """
         self._root = root or (get_path_service().get_workspace_dir() / "learning")
         self._root.mkdir(parents=True, exist_ok=True)
 
@@ -24,6 +37,11 @@ class LearningStore:
         return self._root / f"{book_id}.json"
 
     def save(self, progress: LearningProgress) -> None:
+        """Atomically persist progress, bumping its version and timestamp.
+
+        Args:
+            progress: The learner's progress to save.
+        """
         with _cas_lock:
             progress.updated_at = time.time()
             progress.version += 1
@@ -32,6 +50,14 @@ class LearningStore:
             _atomic_write_text(self._path(progress.book_id), text)
 
     def load(self, book_id: str) -> LearningProgress | None:
+        """Load and deserialize progress for ``book_id``.
+
+        Args:
+            book_id: The identifier of the book/source.
+
+        Returns:
+            The stored ``LearningProgress``, or ``None`` if no file exists.
+        """
         path = self._path(book_id)
         if not path.exists():
             return None
@@ -39,12 +65,25 @@ class LearningStore:
         return LearningProgress.model_validate(data)
 
     def delete(self, book_id: str) -> None:
+        """Delete the stored progress file for ``book_id`` if it exists.
+
+        Args:
+            book_id: The identifier of the book/source.
+        """
         with _cas_lock:
             path = self._path(book_id)
             if path.exists():
                 path.unlink()
 
     def exists(self, book_id: str) -> bool:
+        """Check whether stored progress exists for ``book_id``.
+
+        Args:
+            book_id: The identifier of the book/source.
+
+        Returns:
+            True if a progress file exists for the book.
+        """
         return self._path(book_id).exists()
 
     def list_all(self) -> list[str]:

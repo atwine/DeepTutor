@@ -26,6 +26,8 @@ from deeptutor.runtime.request_contracts import get_capability_request_schema
 
 
 class DeepQuestionCapability(BaseCapability):
+    """Capability wrapper for the deep question generation pipeline."""
+
     manifest = CapabilityManifest(
         name="deep_question",
         description="Fast question generation (Template batches -> Generate).",
@@ -36,6 +38,15 @@ class DeepQuestionCapability(BaseCapability):
     )
 
     async def run(self, context: UnifiedContext, stream: StreamBus) -> None:
+        """Execute the deep question capability for one turn.
+
+        Routes the turn to the appropriate generation path: followup, custom
+        mode, or mimic mode.
+
+        Args:
+            context: The unified context for the current turn.
+            stream: The stream bus for emitting events to the frontend.
+        """
         from deeptutor.services.llm.config import get_llm_config
         from deeptutor.services.path_service import get_path_service
 

@@ -41,6 +41,47 @@ logger = logging.getLogger(__name__)
 COURSE_END_GRACE_PERIOD_DAYS = 7
 
 
+def _sync_course_kb_grant(user_id: str, kb_name: str | None, *, grant_access: bool) -> None:
+    """Issue #57: bridge enrollment to course-material RAG access.
+
+    A course's knowledge base lives in the admin workspace's KB store
+    (``_provision_course_kb``), so an enrolled student's own per-user
+    ``resolve_kb()``/``list_visible_knowledge_bases()`` check never
+    authorized it — materials indexed correctly, but chat could never
+    retrieve them for a student, matching the existing admin-assigned-KB
+    grant mechanism used elsewhere (``load_grant``/``save_grant`` in
+    ``grants.py``). Called on every enrollment-status transition that
+    grants or revokes course access; a no-op if the course has no KB
+    provisioned yet, or the user is an admin (admins already see every
+    KB and cannot hold a grants file — see ``save_grant``).
+    """
+    if not kb_name:
+        return
+    try:
+        from .grants import load_grant, save_grant
+        from .identity import get_user_by_id
+
+        record = get_user_by_id(user_id)
+        if record is None or str(record[1].get("role") or "user") == "admin":
+            return
+        grant = load_grant(user_id)
+        kb_list = grant.setdefault("knowledge_bases", [])
+        existing = [item for item in kb_list if str(item.get("name") or "") == kb_name]
+        if grant_access:
+            if not existing:
+                kb_list.append({"name": kb_name, "resource_id": f"admin:kb:{kb_name}"})
+                save_grant(user_id, grant)
+        elif existing:
+            grant["knowledge_bases"] = [
+                item for item in kb_list if str(item.get("name") or "") != kb_name
+            ]
+            save_grant(user_id, grant)
+    except Exception:
+        logger.warning(
+            "Failed to sync course KB grant for user %s, kb %s", user_id, kb_name, exc_info=True
+        )
+
+
 def new_course_unit_id() -> str:
     return f"cu_{uuid4().hex}"
 
@@ -468,17 +509,20 @@ async def enroll_student(course_unit_id: str, user_id: str) -> dict[str, Any] | 
             if existing.status != "approved":
                 existing.status = "approved"
                 existing.approved_at = now
-            return _enrollment_to_dict(existing)
-        enrollment = Enrollment(
-            id=new_enrollment_id(),
-            course_unit_id=course_unit_id,
-            user_id=str(user_id),
-            status="approved",
-            created_at=now,
-            approved_at=now,
-        )
-        session.add(enrollment)
-    return _enrollment_to_dict(enrollment)
+            kb_name = unit.kb_name
+        else:
+            enrollment = Enrollment(
+                id=new_enrollment_id(),
+                course_unit_id=course_unit_id,
+                user_id=str(user_id),
+                status="approved",
+                created_at=now,
+                approved_at=now,
+            )
+            session.add(enrollment)
+            kb_name = unit.kb_name
+    _sync_course_kb_grant(str(user_id), kb_name, grant_access=True)
+    return _enrollment_to_dict(existing if existing is not None else enrollment)
 
 
 class CourseUnitArchivedError(Exception):
@@ -544,6 +588,9 @@ async def approve_enrollment(course_unit_id: str, user_id: str) -> dict[str, Any
             return None
         enrollment.status = "approved"
         enrollment.approved_at = now
+        unit = await session.get(CourseUnit, course_unit_id)
+        kb_name = unit.kb_name if unit is not None else None
+    _sync_course_kb_grant(str(user_id), kb_name, grant_access=True)
     return _enrollment_to_dict(enrollment)
 
 
@@ -596,6 +643,9 @@ async def approve_leave(course_unit_id: str, user_id: str) -> bool:
         if enrollment is None:
             return False
         await session.delete(enrollment)
+        unit = await session.get(CourseUnit, course_unit_id)
+        kb_name = unit.kb_name if unit is not None else None
+    _sync_course_kb_grant(str(user_id), kb_name, grant_access=False)
     return True
 
 
@@ -615,6 +665,9 @@ async def reject_leave(course_unit_id: str, user_id: str) -> dict[str, Any] | No
         if enrollment is None:
             return None
         enrollment.status = "approved"
+        unit = await session.get(CourseUnit, course_unit_id)
+        kb_name = unit.kb_name if unit is not None else None
+    _sync_course_kb_grant(str(user_id), kb_name, grant_access=True)
     return _enrollment_to_dict(enrollment)
 
 
@@ -639,7 +692,12 @@ async def unenroll_student(course_unit_id: str, user_id: str) -> bool:
                 Enrollment.user_id == str(user_id),
             )
         )
-        return result.rowcount > 0
+        removed = result.rowcount > 0
+        unit = await session.get(CourseUnit, course_unit_id) if removed else None
+        kb_name = unit.kb_name if unit is not None else None
+    if removed:
+        _sync_course_kb_grant(str(user_id), kb_name, grant_access=False)
+    return removed
 
 
 async def list_enrollments_for_course(

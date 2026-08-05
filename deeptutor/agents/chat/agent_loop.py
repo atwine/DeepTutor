@@ -75,6 +75,7 @@ class InlineThinkFilter:
     """
 
     def __init__(self) -> None:
+        """Initialize the filter with an empty buffer and outside-think state."""
         self._buffer = ""
         self._in_think = False
 
@@ -129,6 +130,8 @@ class AgentLoopState:
 
 @dataclass(slots=True)
 class LLMCallResult:
+    """Result of a single LLM call within the agent loop."""
+
     text: str
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     finish_reason: str = ""
@@ -161,6 +164,16 @@ class AgentLoop:
         enabled_tools: list[str],
         tool_schemas: list[dict[str, Any]] | None,
     ) -> None:
+        """Initialize the agent loop with its pipeline, context, and tool configuration.
+
+        Args:
+            pipeline: The owning chat pipeline that provides prompts and dispatch.
+            context: The unified context for the current turn.
+            stream: The stream bus for emitting events to the frontend.
+            client: The LLM client used for completion calls.
+            enabled_tools: List of tool names enabled for this turn.
+            tool_schemas: OpenAI-format tool schemas, or ``None`` to disable tools.
+        """
         self.pipeline = pipeline
         self.context = context
         self.stream = stream
@@ -170,6 +183,7 @@ class AgentLoop:
         self._last_request: LLMRequestSnapshot | None = None
 
     async def run(self) -> None:
+        """Run the full agent loop for one chat turn and emit the result."""
         state = AgentLoopState()
         # Optional async pre-pass briefings (e.g. explore_context) run BEFORE
         # the answer stage so they form their own preceding activity group and

@@ -26,14 +26,20 @@ _RUNTIME_ONLY_KEYS = {
 
 
 class ChatRequestConfig(BaseModel):
+    """Request config schema for the ``chat`` capability (no public fields)."""
+
     model_config = ConfigDict(extra="forbid")
 
 
 class DeepSolveRequestConfig(BaseModel):
+    """Request config schema for the ``deep_solve`` capability (no public fields)."""
+
     model_config = ConfigDict(extra="forbid")
 
 
 class DeepQuestionRequestConfig(BaseModel):
+    """Request config schema for the ``deep_question`` capability."""
+
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["custom", "mimic"] = "custom"
@@ -52,6 +58,8 @@ class DeepQuestionRequestConfig(BaseModel):
 
 
 class VisualizeRequestConfig(BaseModel):
+    """Request config schema for the ``visualize`` capability."""
+
     model_config = ConfigDict(extra="forbid")
 
     render_mode: Literal[
@@ -100,28 +108,33 @@ def _validate_model(
 
 
 def validate_chat_request_config(raw_config: dict[str, Any] | None) -> ChatRequestConfig:
+    """Validate and return a ``ChatRequestConfig`` from *raw_config*."""
     return _validate_model(ChatRequestConfig, raw_config, label="chat")
 
 
 def validate_deep_solve_request_config(
     raw_config: dict[str, Any] | None,
 ) -> DeepSolveRequestConfig:
+    """Validate and return a ``DeepSolveRequestConfig`` from *raw_config*."""
     return _validate_model(DeepSolveRequestConfig, raw_config, label="deep solve")
 
 
 def validate_deep_question_request_config(
     raw_config: dict[str, Any] | None,
 ) -> DeepQuestionRequestConfig:
+    """Validate and return a ``DeepQuestionRequestConfig`` from *raw_config*."""
     return _validate_model(DeepQuestionRequestConfig, raw_config, label="deep question")
 
 
 def validate_visualize_request_config(
     raw_config: dict[str, Any] | None,
 ) -> VisualizeRequestConfig:
+    """Validate and return a ``VisualizeRequestConfig`` from *raw_config*."""
     return _validate_model(VisualizeRequestConfig, raw_config, label="visualize")
 
 
 def build_request_schema(model_type: type[BaseModel]) -> dict[str, Any]:
+    """Return the JSON validation schema for *model_type*."""
     return model_type.model_json_schema(mode="validation")
 
 
@@ -147,6 +160,18 @@ CAPABILITY_REQUEST_SCHEMAS: dict[str, dict[str, Any]] = {
 def validate_capability_config(
     capability: str, raw_config: dict[str, Any] | None
 ) -> dict[str, Any]:
+    """Validate *raw_config* against the schema for *capability*.
+
+    When no validator is registered for the capability, runtime-only keys
+    are stripped and the cleaned config is returned as-is.
+
+    Args:
+        capability: Name of the capability whose config to validate.
+        raw_config: Raw config dictionary from the request.
+
+    Returns:
+        A validated, serialised config dictionary.
+    """
     validator = CAPABILITY_CONFIG_VALIDATORS.get(capability)
     if validator is None:
         return _clean_public_config(raw_config)
@@ -157,6 +182,7 @@ def validate_capability_config(
 
 
 def get_capability_request_schema(capability: str) -> dict[str, Any]:
+    """Return the JSON request schema for *capability* (empty dict if unknown)."""
     return dict(CAPABILITY_REQUEST_SCHEMAS.get(capability, {}))
 
 

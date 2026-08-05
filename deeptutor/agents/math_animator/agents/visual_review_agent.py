@@ -14,6 +14,8 @@ from ..utils import extract_json_object
 
 
 class VisualReviewAgent(BaseAgent):
+    """Reviews rendered frames for visual quality issues."""
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -21,6 +23,14 @@ class VisualReviewAgent(BaseAgent):
         api_version: str | None = None,
         language: str = "zh",
     ) -> None:
+        """Initialize the visual review agent.
+
+        Args:
+            api_key: LLM provider API key.
+            base_url: LLM provider base URL.
+            api_version: API version for Azure OpenAI (optional).
+            language: Language code (``"zh"`` or ``"en"``).
+        """
         super().__init__(
             module_name="math_animator",
             agent_name="visual_review_agent",
@@ -39,6 +49,18 @@ class VisualReviewAgent(BaseAgent):
         render_result: RenderResult,
         attachments: list[Attachment],
     ) -> VisualReviewResult:
+        """Review rendered frames for visual quality issues.
+
+        Args:
+            user_input: The user's animation request text.
+            output_mode: Either ``"video"`` or ``"image"``.
+            current_code: The Manim source code that produced the render.
+            render_result: The render result being reviewed.
+            attachments: Image attachments (rendered frames) to inspect.
+
+        Returns:
+            A :class:`VisualReviewResult` with pass/fail and any issues found.
+        """
         if not attachments:
             return VisualReviewResult(
                 passed=True,

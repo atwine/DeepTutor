@@ -1,7 +1,9 @@
 import { apiFetch, apiUrl } from "@/lib/api";
 
+/** Transport protocol an MCP server uses to communicate. */
 export type McpTransport = "stdio" | "sse" | "streamableHttp";
 
+/** Connection status of an MCP server. */
 export type McpServerStatus =
   | "connecting"
   | "connected"
@@ -11,6 +13,7 @@ export type McpServerStatus =
   | "needs_auth"
   | "disabled";
 
+/** Full configuration for one MCP server. */
 export interface McpServerConfig {
   type: McpTransport | null;
   // stdio transport
@@ -44,11 +47,13 @@ export interface McpServerConfig {
   catalog_entry: string;
 }
 
+/** A tool exposed by an MCP server. */
 export interface McpTool {
   name: string;
   description: string;
 }
 
+/** Live status row for one MCP server. */
 export interface McpStatusRow {
   name: string;
   transport: string;
@@ -57,11 +62,13 @@ export interface McpStatusRow {
   tools: McpTool[];
 }
 
+/** MCP settings — server configs and their live status rows. */
 export interface McpSettings {
   servers: Record<string, McpServerConfig>;
   status: McpStatusRow[];
 }
 
+/** Result of testing an MCP server connection. */
 export interface McpTestResult {
   ok: boolean;
   tools: McpTool[];
@@ -98,6 +105,7 @@ export interface McpUserView {
   oauth: Record<string, { required: boolean; authorized: boolean }>;
 }
 
+/** Full MCP store state — settings plus per-user view. */
 export interface McpStoreState extends McpSettings {
   /** Null on the admin registry, which has none of the per-user extras. */
   user: McpUserView | null;
@@ -126,14 +134,27 @@ export const MCP_REMOTE_TRANSPORTS: readonly McpTransport[] = [
   "streamableHttp",
 ];
 
-// Mirrors `_SERVER_NAME_RE` in deeptutor/services/mcp/config.py: an invalid name
-// is rejected there with a 400, so the form checks it first and reports inline.
+/**
+ * Regex mirroring the backend server-name validation.
+ * An invalid name is rejected server-side with a 400.
+ */
 export const MCP_SERVER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
+/**
+ * Check whether a name is a valid MCP server name.
+ *
+ * @param name - Name to validate.
+ * @returns True if the name matches the server-name pattern.
+ */
 export function isValidMcpServerName(name: string): boolean {
   return MCP_SERVER_NAME_RE.test(name);
 }
 
+/**
+ * Create a fresh MCP server config with default values.
+ *
+ * @returns A new `McpServerConfig` with empty/neutral defaults.
+ */
 export function emptyMcpServerConfig(): McpServerConfig {
   return {
     type: null,
@@ -154,6 +175,12 @@ export function emptyMcpServerConfig(): McpServerConfig {
 
 // ── helpers: array <-> textarea (one item per line) ───────────────────────
 
+/**
+ * Split a textarea value into an array of trimmed, non-empty lines.
+ *
+ * @param value - Textarea content.
+ * @returns Array of non-empty lines.
+ */
 export function linesToArray(value: string): string[] {
   return value
     .split("\n")
@@ -161,18 +188,37 @@ export function linesToArray(value: string): string[] {
     .filter((line) => line.length > 0);
 }
 
+/**
+ * Join an array of strings into a single newline-separated string.
+ *
+ * @param value - Array of lines.
+ * @returns Newline-joined string.
+ */
 export function arrayToLines(value: string[]): string {
   return value.join("\n");
 }
 
 // ── helpers: dict <-> editable key/value rows ────────────────────────────
 
+/** A key-value pair for editable config rows. */
 export type McpKvPair = { key: string; value: string };
 
+/**
+ * Convert a record to an array of key-value pairs.
+ *
+ * @param dict - Record to convert.
+ * @returns Array of key-value pairs.
+ */
 export function dictToPairs(dict: Record<string, string>): McpKvPair[] {
   return Object.entries(dict).map(([key, value]) => ({ key, value }));
 }
 
+/**
+ * Convert an array of key-value pairs to a record, skipping blank keys.
+ *
+ * @param pairs - Key-value pairs to convert.
+ * @returns Record of non-blank keys to their values.
+ */
 export function pairsToDict(pairs: McpKvPair[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const { key, value } of pairs) {
@@ -200,6 +246,7 @@ export function resolveMcpTransport(cfg: McpServerConfig): McpTransport | null {
   return null;
 }
 
+/** Whether the transport is a remote (non-stdio) type. */
 export function isRemoteMcpTransport(transport: McpTransport | null): boolean {
   return transport === "sse" || transport === "streamableHttp";
 }
@@ -347,6 +394,12 @@ function normalizeStatusRow(raw: unknown): McpStatusRow {
   };
 }
 
+/**
+ * Normalize a raw server config value into a well-typed `McpServerConfig`.
+ *
+ * @param raw - Raw value from the backend.
+ * @returns A normalized server config.
+ */
 export function normalizeServerConfig(raw: unknown): McpServerConfig {
   const base = emptyMcpServerConfig();
   const item = (raw ?? {}) as Record<string, unknown>;
@@ -472,9 +525,12 @@ function normalizeStoreState(raw: unknown): McpStoreState {
   };
 }
 
-// `basePath` is explicit — the same components drive both the admin registry
-// and the per-user one, and defaulting it would let a per-user page silently
-// read or write the deployment-global config.
+/**
+ * Fetch MCP settings from the given base path (admin or per-user).
+ *
+ * @param basePath - API base path for the MCP settings endpoint.
+ * @returns Normalized MCP settings with servers and status.
+ */
 export async function getMcpSettings(basePath: string): Promise<McpSettings> {
   const response = await apiFetch(apiUrl(basePath), {
     cache: "no-store",
@@ -486,6 +542,13 @@ export async function getMcpSettings(basePath: string): Promise<McpSettings> {
   };
 }
 
+/**
+ * Replace the full server map at the given base path.
+ *
+ * @param basePath - API base path for the MCP settings endpoint.
+ * @param servers - Full server config map to persist.
+ * @returns Updated status rows.
+ */
 export async function updateMcpSettings(
   basePath: string,
   servers: Record<string, McpServerConfig>,
@@ -499,6 +562,13 @@ export async function updateMcpSettings(
   return normalizeStatusRows(data?.status);
 }
 
+/**
+ * Test an MCP server config without persisting it.
+ *
+ * @param basePath - API base path for the MCP settings endpoint.
+ * @param cfg - Server config to test.
+ * @returns Test result with discovered tools or an error.
+ */
 export async function testMcpServer(
   basePath: string,
   cfg: McpServerConfig,
@@ -520,6 +590,12 @@ export async function testMcpServer(
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
+/**
+ * Fetch the caller's full MCP store state (servers, status, and per-user view).
+ *
+ * @param basePath - API base path for the per-user MCP endpoint.
+ * @returns Normalized MCP store state.
+ */
 export async function getSpaceMcpState(
   basePath: string,
 ): Promise<McpStoreState> {
@@ -554,6 +630,13 @@ export async function putSpaceMcpServer(
   return normalizeStoreState(await asJson(response));
 }
 
+/**
+ * Delete one of the caller's MCP servers.
+ *
+ * @param basePath - API base path for the per-user MCP endpoint.
+ * @param name - Server name to delete.
+ * @returns Updated MCP store state.
+ */
 export async function deleteSpaceMcpServer(
   basePath: string,
   name: string,
@@ -583,6 +666,15 @@ export async function authorizeSpaceMcpServer(
   return String(data?.authorize_url ?? "");
 }
 
+/**
+ * Test one of the caller's MCP servers with an updated config and secrets.
+ *
+ * @param basePath - API base path for the per-user MCP endpoint.
+ * @param name - Server name to test.
+ * @param cfg - Server config to test.
+ * @param secrets - Optional credential values to include.
+ * @returns Test result with discovered tools or an error.
+ */
 export async function testSpaceMcpServer(
   basePath: string,
   name: string,
@@ -612,6 +704,7 @@ export interface McpCatalogField {
   placeholder: string;
 }
 
+/** A browsable MCP catalog entry with install metadata and credential fields. */
 export interface McpCatalogEntry {
   id: string;
   display_name: string;
@@ -640,6 +733,7 @@ export interface McpCatalogEntry {
   fields: McpCatalogField[];
 }
 
+/** A paginated page of MCP catalog entries with category counts. */
 export interface McpCatalogPage {
   entries: McpCatalogEntry[];
   /** Empty once the last page has been served. */
@@ -650,6 +744,7 @@ export interface McpCatalogPage {
   categories: Record<string, number>;
 }
 
+/** Query parameters for filtering and paginating the MCP catalog. */
 export interface McpCatalogQuery {
   q?: string;
   category?: string;
@@ -702,6 +797,13 @@ function normalizeCatalogEntry(raw: unknown): McpCatalogEntry {
   };
 }
 
+/**
+ * Fetch a page of the MCP catalog with optional filtering.
+ *
+ * @param basePath - API base path for the MCP endpoint.
+ * @param query - Optional search text, category, tier, cursor, and limit.
+ * @returns A page of catalog entries with category counts.
+ */
 export async function getMcpCatalog(
   basePath: string,
   query: McpCatalogQuery = {},

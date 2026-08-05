@@ -7,6 +7,7 @@ import { apiFetch, apiUrl } from "@/lib/api";
 // (NotebookRecordPicker) live in this system. They are distinct from the
 // "Question Notebook" categories below which only track quiz entries.
 
+/** Kind of record stored in a notebook (solve, question, research, etc.). */
 export type NotebookRecordType =
   | "solve"
   | "question"
@@ -15,6 +16,7 @@ export type NotebookRecordType =
   | "co_writer"
   | "tutorbot";
 
+/** Lightweight notebook metadata returned by the list endpoint. */
 export interface NotebookSummary {
   id: string;
   name: string;
@@ -26,6 +28,7 @@ export interface NotebookSummary {
   updated_at?: number;
 }
 
+/** A single record (saved output) inside a notebook. */
 export interface NotebookRecordItem {
   id: string;
   type: NotebookRecordType | string;
@@ -38,10 +41,13 @@ export interface NotebookRecordItem {
   kb_name?: string | null;
 }
 
+/** Full notebook detail including all records. */
 export interface NotebookDetail extends NotebookSummary {
   records: NotebookRecordItem[];
 }
 
+/** Fetch all notebooks for the current user.
+ * @returns Array of notebook summaries (empty if none). */
 export async function listNotebooks(): Promise<NotebookSummary[]> {
   const response = await apiFetch(apiUrl("/api/v1/notebook/list"), {
     cache: "no-store",
@@ -51,6 +57,9 @@ export async function listNotebooks(): Promise<NotebookSummary[]> {
   return data.notebooks ?? [];
 }
 
+/** Fetch a single notebook with all its records.
+ * @param notebookId - The notebook's id.
+ * @returns The notebook detail including records. */
 export async function getNotebook(notebookId: string): Promise<NotebookDetail> {
   const response = await apiFetch(apiUrl(`/api/v1/notebook/${notebookId}`), {
     cache: "no-store",
@@ -59,6 +68,9 @@ export async function getNotebook(notebookId: string): Promise<NotebookDetail> {
   return (await response.json()) as NotebookDetail;
 }
 
+/** Create a new notebook.
+ * @param payload - Name, optional description, color, and icon.
+ * @returns The created notebook summary. */
 export async function createNotebook(payload: {
   name: string;
   description?: string;
@@ -80,6 +92,10 @@ export async function createNotebook(payload: {
   return data.notebook;
 }
 
+/** Update a notebook's metadata (name, description, color, icon).
+ * @param notebookId - The notebook's id.
+ * @param payload - Fields to update.
+ * @returns The updated notebook summary. */
 export async function updateNotebook(
   notebookId: string,
   payload: {
@@ -99,6 +115,8 @@ export async function updateNotebook(
   return data.notebook;
 }
 
+/** Delete an entire notebook and all its records.
+ * @param notebookId - The notebook's id. */
 export async function deleteNotebook(notebookId: string): Promise<void> {
   const response = await apiFetch(apiUrl(`/api/v1/notebook/${notebookId}`), {
     method: "DELETE",
@@ -106,6 +124,9 @@ export async function deleteNotebook(notebookId: string): Promise<void> {
   if (!response.ok) throw new Error(`Request failed: ${response.status}`);
 }
 
+/** Delete a single record from a notebook.
+ * @param notebookId - The notebook's id.
+ * @param recordId - The record's id. */
 export async function deleteNotebookRecord(
   notebookId: string,
   recordId: string,
@@ -119,6 +140,7 @@ export async function deleteNotebookRecord(
 
 // ── Question notebook (quiz entries + categories) ─────────────────
 
+/** Image attached to a notebook answer entry. */
 export interface NotebookAnswerImage {
   id: string;
   url: string;
@@ -126,6 +148,7 @@ export interface NotebookAnswerImage {
   mime_type: string;
 }
 
+/** A quiz question entry saved to the question notebook. */
 export interface NotebookEntry {
   id: number;
   session_id: string;
@@ -150,6 +173,7 @@ export interface NotebookEntry {
   categories?: NotebookCategory[];
 }
 
+/** A user-created category for organizing notebook entries. */
 export interface NotebookCategory {
   id: number;
   name: string;
@@ -157,6 +181,7 @@ export interface NotebookCategory {
   entry_count: number;
 }
 
+/** Paginated response from the notebook entries list endpoint. */
 export interface NotebookEntryListResponse {
   items: NotebookEntry[];
   total: number;
@@ -171,6 +196,9 @@ async function expectJson<T>(response: Response): Promise<T> {
 
 // ── Entries ──────────────────────────────────────────────────────
 
+/** List question-notebook entries with optional filtering and pagination.
+ * @param filter - Optional category, bookmarked, correctness, and limit/offset filters.
+ * @returns Paginated list of notebook entries. */
 export async function listNotebookEntries(
   filter: {
     category_id?: number;
@@ -197,6 +225,9 @@ export async function listNotebookEntries(
   return expectJson<NotebookEntryListResponse>(response);
 }
 
+/** Fetch a single notebook entry by id.
+ * @param entryId - The entry's numeric id.
+ * @returns The notebook entry. */
 export async function getNotebookEntry(
   entryId: number,
 ): Promise<NotebookEntry> {
@@ -209,6 +240,11 @@ export async function getNotebookEntry(
   return expectJson<NotebookEntry>(response);
 }
 
+/** Look up a notebook entry by session and question id.
+ * @param sessionId - The chat session id.
+ * @param questionId - The question id within the session.
+ * @param turnId - Optional turn id to disambiguate.
+ * @returns The matching entry, or null if none exists yet. */
 export async function lookupNotebookEntry(
   sessionId: string,
   questionId: string,
@@ -230,6 +266,9 @@ export async function lookupNotebookEntry(
   return expectJson<NotebookEntry>(response);
 }
 
+/** Patch a notebook entry (bookmark, follow-up session, AI judgment).
+ * @param entryId - The entry's numeric id.
+ * @param updates - Fields to update. */
 export async function updateNotebookEntry(
   entryId: number,
   updates: {
@@ -249,6 +288,7 @@ export async function updateNotebookEntry(
   await expectJson<{ updated: boolean }>(response);
 }
 
+/** Upload shape for a notebook answer image (base64 or existing URL). */
 export interface NotebookAnswerImageUpload {
   id?: string;
   /** Base64 (no ``data:`` prefix) for a freshly-picked image. */
@@ -259,6 +299,9 @@ export interface NotebookAnswerImageUpload {
   mime_type: string;
 }
 
+/** Create or update a notebook entry (upsert by session/turn/question).
+ * @param data - Entry fields including session, question, and answer details.
+ * @returns The upserted notebook entry. */
 export async function upsertNotebookEntry(data: {
   session_id: string;
   turn_id?: string;
@@ -293,6 +336,8 @@ export async function upsertNotebookEntry(data: {
   return expectJson<NotebookEntry>(response);
 }
 
+/** Delete a notebook entry by id.
+ * @param entryId - The entry's numeric id. */
 export async function deleteNotebookEntry(entryId: number): Promise<void> {
   const response = await apiFetch(
     apiUrl(`/api/v1/question-notebook/entries/${entryId}`),
@@ -305,6 +350,9 @@ export async function deleteNotebookEntry(entryId: number): Promise<void> {
 
 // ── Entry ↔ Category ────────────────────────────────────────────
 
+/** Add a notebook entry to a category.
+ * @param entryId - The entry's numeric id.
+ * @param categoryId - The category's numeric id. */
 export async function addEntryToCategory(
   entryId: number,
   categoryId: number,
@@ -320,6 +368,9 @@ export async function addEntryToCategory(
   await expectJson<{ added: boolean }>(response);
 }
 
+/** Remove a notebook entry from a category.
+ * @param entryId - The entry's numeric id.
+ * @param categoryId - The category's numeric id. */
 export async function removeEntryFromCategory(
   entryId: number,
   categoryId: number,
@@ -335,6 +386,8 @@ export async function removeEntryFromCategory(
 
 // ── Categories ──────────────────────────────────────────────────
 
+/** List all question-notebook categories.
+ * @returns Array of categories with entry counts. */
 export async function listCategories(): Promise<NotebookCategory[]> {
   const response = await apiFetch(
     apiUrl("/api/v1/question-notebook/categories"),
@@ -345,6 +398,9 @@ export async function listCategories(): Promise<NotebookCategory[]> {
   return expectJson<NotebookCategory[]>(response);
 }
 
+/** Create a new question-notebook category.
+ * @param name - The category name.
+ * @returns The created category. */
 export async function createCategory(name: string): Promise<NotebookCategory> {
   const response = await apiFetch(
     apiUrl("/api/v1/question-notebook/categories"),
@@ -357,6 +413,9 @@ export async function createCategory(name: string): Promise<NotebookCategory> {
   return expectJson<NotebookCategory>(response);
 }
 
+/** Rename an existing category.
+ * @param categoryId - The category's numeric id.
+ * @param name - The new name. */
 export async function renameCategory(
   categoryId: number,
   name: string,
@@ -372,6 +431,8 @@ export async function renameCategory(
   await expectJson<{ updated: boolean }>(response);
 }
 
+/** Delete a category by id.
+ * @param categoryId - The category's numeric id. */
 export async function deleteCategory(categoryId: number): Promise<void> {
   const response = await apiFetch(
     apiUrl(`/api/v1/question-notebook/categories/${categoryId}`),

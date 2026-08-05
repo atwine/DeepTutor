@@ -44,6 +44,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** Payload for creating a new book via the book WebSocket API. */
 export interface CreateBookPayload {
   user_intent: string;
   chat_session_id?: string;
@@ -55,6 +56,10 @@ export interface CreateBookPayload {
   language?: string;
 }
 
+/**
+ * Client-side API for the book builder — wraps REST and WebSocket endpoints
+ * for listing, creating, compiling, and editing books and their pages/blocks.
+ */
 export const bookApi = {
   list: () => request<{ books: Book[] }>("/books"),
   get: (book_id: string) =>
@@ -164,6 +169,17 @@ export const bookApi = {
       body: JSON.stringify({ book_id, page_id, block_id, new_position }),
     }),
 
+  editBlockContent: (
+    book_id: string,
+    page_id: string,
+    block_id: string,
+    body: string,
+  ) =>
+    request<{ block: Block }>("/books/edit-block", {
+      method: "POST",
+      body: JSON.stringify({ book_id, page_id, block_id, body }),
+    }),
+
   changeBlockType: (params: {
     book_id: string;
     page_id: string;
@@ -250,11 +266,18 @@ export const bookApi = {
     }),
 };
 
+/** A legacy chat session with its messages, used for migration/import. */
 export interface LegacyChatSession {
   session_id: string;
   messages?: Array<{ role: string; content: string }>;
 }
 
+/**
+ * Fetch a legacy chat session by ID.
+ *
+ * @param session_id - ID of the chat session to retrieve.
+ * @returns The session with messages, or null if not found.
+ */
 export async function getLegacyChatSession(
   session_id: string,
 ): Promise<LegacyChatSession | null> {

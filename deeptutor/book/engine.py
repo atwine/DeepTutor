@@ -1094,6 +1094,36 @@ class BookEngine:
         )
         return True
 
+    async def edit_block_content(
+        self, *, book_id: str, page_id: str, block_id: str, body: str
+    ) -> Block | None:
+        """Directly overwrite a text-bearing block's content, no LLM call.
+
+        Issue #58: move/insert/delete/regenerate/change-type were all real,
+        but there was no way to hand-edit a generated block's wording —
+        the only option was "regenerate", which re-runs the LLM and can
+        produce a substantially different result. Scoped to block types
+        whose payload carries a single ``body`` string (text, callout,
+        user_note); section blocks have a structured multi-part payload
+        (intro/subsections/key_takeaway) that doesn't fit a single-string
+        edit and are out of scope here.
+        """
+        page = self.storage.load_page(book_id, page_id)
+        if page is None:
+            return None
+        block = page.block_by_id(block_id)
+        if block is None:
+            return None
+        block.payload = {**block.payload, "body": body}
+        block.status = BlockStatus.READY
+        block.error = ""
+        block.updated_at = time.time()
+        self.storage.save_page(page)
+        self.storage.append_log(
+            book_id, f"edited block {block_id} content on page {page_id}", op="edit_block"
+        )
+        return block
+
     async def move_block(
         self, *, book_id: str, page_id: str, block_id: str, new_position: int
     ) -> bool:

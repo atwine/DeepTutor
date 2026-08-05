@@ -48,6 +48,8 @@ _MANIM_RENDER_TYPES = {"manim_video", "manim_image"}
 
 
 class VisualizeCapability(BaseCapability):
+    """Capability wrapper for the visualization pipeline."""
+
     manifest = CapabilityManifest(
         name="visualize",
         description=(
@@ -61,6 +63,12 @@ class VisualizeCapability(BaseCapability):
     )
 
     async def run(self, context: UnifiedContext, stream: StreamBus) -> None:
+        """Execute the visualize capability for one turn.
+
+        Args:
+            context: The unified context for the current turn.
+            stream: The stream bus for emitting events to the frontend.
+        """
         from deeptutor.agents.visualize.models import ReviewResult
         from deeptutor.agents.visualize.pipeline import VisualizePipeline
         from deeptutor.agents.visualize.utils import (

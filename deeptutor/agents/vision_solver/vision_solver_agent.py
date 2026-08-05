@@ -28,6 +28,16 @@ class VisionSolverAgent(BaseAgent):
         language: str = "zh",
         **kwargs: Any,
     ):
+        """Initialize the vision solver agent.
+
+        Args:
+            api_key: LLM provider API key.
+            base_url: LLM provider base URL.
+            model: Default model name.
+            vision_model: Model name for vision calls (defaults to ``model``).
+            language: Language code (``"zh"`` or ``"en"``).
+            **kwargs: Additional arguments passed to :class:`BaseAgent`.
+        """
         super().__init__(
             module_name="vision_solver",
             agent_name="vision_solver_agent",

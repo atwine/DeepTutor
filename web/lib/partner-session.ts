@@ -9,10 +9,14 @@ function storageKey(partnerId: string): string {
   return `partner-session:${partnerId}`;
 }
 
+/** Generate a fresh random partner session key. */
 export function freshPartnerSessionKey(): string {
   return `web-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/** Load the persisted partner session key, creating one if none exists.
+ * @param partnerId - The partner's id.
+ * @returns The session key (existing or freshly minted). */
 export function loadPartnerSessionKey(partnerId: string): string {
   try {
     const existing = window.localStorage.getItem(storageKey(partnerId));
@@ -25,6 +29,9 @@ export function loadPartnerSessionKey(partnerId: string): string {
   }
 }
 
+/** Persist a partner session key to localStorage.
+ * @param partnerId - The partner's id.
+ * @param key - The session key to store. */
 export function persistPartnerSessionKey(partnerId: string, key: string): void {
   try {
     window.localStorage.setItem(storageKey(partnerId), key);

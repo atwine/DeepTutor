@@ -23,10 +23,30 @@ if TYPE_CHECKING:
 
 
 class LearningService:
+    """Business-logic layer for Mastery Path progress management.
+
+    Wraps a :class:`LearningStore` and provides methods for creating,
+    updating, grading, and querying learner progress.
+    """
+
     def __init__(self, store: LearningStore | None = None) -> None:
+        """Initialize the service with an optional store backend.
+
+        Args:
+            store: The persistence store to use; defaults to a new
+                ``LearningStore``.
+        """
         self._store = store or LearningStore()
 
     def get_or_create(self, book_id: str) -> LearningProgress:
+        """Load existing progress for ``book_id`` or create and persist a new one.
+
+        Args:
+            book_id: The identifier of the book/source.
+
+        Returns:
+            The existing or newly created ``LearningProgress``.
+        """
         existing = self._store.load(book_id)
         if existing is not None:
             return existing
@@ -75,6 +95,12 @@ class LearningService:
                 progress.knowledge_types[kp.id] = kp.type
 
     def advance_stage(self, progress: LearningProgress, next_stage: LearningStage) -> None:
+        """Set the current learning stage and update the timestamp.
+
+        Args:
+            progress: The learner's progress (mutated in place).
+            next_stage: The stage to advance to.
+        """
         progress.current_stage = next_stage
         progress.updated_at = time.time()
 
@@ -94,6 +120,15 @@ class LearningService:
         return found
 
     def record_quiz_attempt(self, progress: LearningProgress, attempt: QuizAttempt) -> None:
+        """Record a quiz attempt and update associated error records.
+
+        On a wrong answer, creates or appends to an error record for the
+        question. On a correct answer, graduates any active error record.
+
+        Args:
+            progress: The learner's progress (mutated in place).
+            attempt: The quiz attempt to record.
+        """
         if not attempt.is_correct and attempt.error_type is not None:
             # Find existing error record for this question + knowledge point.
             existing = None
@@ -155,6 +190,13 @@ class LearningService:
         return compute_mastery(correctness)
 
     def update_mastery(self, progress: LearningProgress, kp_id: str, level: float) -> None:
+        """Set the mastery level for a knowledge point and update the timestamp.
+
+        Args:
+            progress: The learner's progress (mutated in place).
+            kp_id: The knowledge point identifier.
+            level: The mastery level (0..1) to store.
+        """
         progress.mastery_levels[kp_id] = level
         progress.updated_at = time.time()
 
@@ -226,6 +268,11 @@ class LearningService:
         self.save(progress)
 
     def clear_pending_question(self, progress: LearningProgress) -> None:
+        """Remove the outstanding pending question and persist progress.
+
+        Args:
+            progress: The learner's progress (mutated in place).
+        """
         progress.pending_question = None
         progress.updated_at = time.time()
         self.save(progress)
@@ -296,6 +343,11 @@ class LearningService:
         return {"summaries": summaries, "errors": errors}
 
     def save(self, progress: LearningProgress) -> None:
+        """Persist the given progress to the store.
+
+        Args:
+            progress: The learner's progress to save.
+        """
         self._store.save(progress)
 
 

@@ -53,6 +53,17 @@ class ScopedToolRegistry:
         allowed: Allowlist | None = None,
         refusal_message: str = "",
     ) -> None:
+        """Initialise the scoped view over *base* with a per-turn *overlay*.
+
+        Args:
+            base: The shared process registry to read through.
+            overlay: Per-turn tools (e.g. owner-scoped MCP tools) that live
+                only in this view and never enter the process registry.
+            allowed: Allowlist governing which provider tools may be
+                dispatched. ``None`` means unrestricted.
+            refusal_message: Message returned when an unauthorised provider
+                tool is called.
+        """
         self._base = base
         self._allowed = allowed or Allowlist.unrestricted()
         self._refusal_message = refusal_message or _DEFAULT_REFUSAL
@@ -74,12 +85,14 @@ class ScopedToolRegistry:
     # ── lookup ─────────────────────────────────────────────────────────
 
     def get(self, name: str) -> BaseTool | None:
+        """Return the tool named *name* from the overlay or base registry."""
         tool = self._overlay.get(name)
         if tool is not None:
             return tool
         return self._base.get(name)
 
     def get_enabled(self, names: list[str]) -> list[BaseTool]:
+        """Return tool instances for the given names, skipping unknowns and duplicates."""
         enabled: list[BaseTool] = []
         seen: set[str] = set()
         for name in names:
@@ -91,6 +104,7 @@ class ScopedToolRegistry:
         return enabled
 
     def get_definitions(self, names: list[str] | None = None) -> list[ToolDefinition]:
+        """Return definitions for *names* (or all visible tools if ``None``)."""
         tools = self._visible_tools() if names is None else self.get_enabled(names)
         return [t.get_definition() for t in tools]
 
@@ -99,12 +113,15 @@ class ScopedToolRegistry:
         return [t for t in self._visible_tools() if getattr(t, "deferred", False)]
 
     def list_tools(self) -> list[str]:
+        """Return the names of all visible tools (shared plus overlay)."""
         return [t.name for t in self._visible_tools()]
 
     def build_openai_schemas(self, names: list[str] | None = None) -> list[dict[str, Any]]:
+        """Build OpenAI function-calling schemas for the given tool names."""
         return [d.to_openai_schema() for d in self.get_definitions(names)]
 
     def get_prompt_hints(self, names: list[str], language: str = "en") -> list[tuple[str, Any]]:
+        """Return prompt hints for the given tool names in the specified language."""
         return [
             (tool.name, tool.get_prompt_hints(language=language))
             for tool in self.get_enabled(names)
@@ -117,6 +134,7 @@ class ScopedToolRegistry:
         language: str = "en",
         **opts: Any,
     ) -> str:
+        """Compose prompt text for the given tools."""
         return compose_prompt_text(
             self.get_prompt_hints(names, language=language),
             format=format,

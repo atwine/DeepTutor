@@ -260,6 +260,7 @@ def resolve_language(default: str = "en") -> str:
 
 
 def labels_for(language: str | None) -> dict[str, str]:
+    """Return the label dictionary for *language*, falling back to English."""
     return LABELS[_pick_language(language)]
 
 

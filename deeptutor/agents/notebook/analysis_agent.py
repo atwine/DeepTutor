@@ -28,6 +28,11 @@ class NotebookAnalysisAgent:
     """Analyze selected notebook records before the main capability runs."""
 
     def __init__(self, language: str = "en") -> None:
+        """Initialize the notebook analysis agent with LLM config and prompts.
+
+        Args:
+            language: Language code (``"zh"`` or ``"en"``).
+        """
         self.language = "zh" if str(language or "en").lower().startswith("zh") else "en"
         self.llm_config = get_llm_config()
         self.model = getattr(self.llm_config, "model", None)
@@ -49,6 +54,16 @@ class NotebookAnalysisAgent:
         records: list[dict[str, Any]],
         emit: EventSink | None = None,
     ) -> str:
+        """Run the three-stage notebook analysis (think → act → observe).
+
+        Args:
+            user_question: The user's question to ground against notebook records.
+            records: List of notebook record dicts to analyze.
+            emit: Optional event sink for streaming stage events.
+
+        Returns:
+            The observation text summarizing the analysis.
+        """
         thinking_text = await self._stage_thinking(
             user_question=user_question, records=records, emit=emit
         )

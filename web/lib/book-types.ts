@@ -2,6 +2,7 @@
 // Kept loose (Record<string, unknown>) where the payload is block-type
 // specific so we don't have to keep these in lock-step.
 
+/** Lifecycle status of a book. */
 export type BookStatus =
   | "draft"
   | "spine_ready"
@@ -10,6 +11,7 @@ export type BookStatus =
   | "error"
   | "archived";
 
+/** Lifecycle status of a page within a book. */
 export type PageStatus =
   | "pending"
   | "planning"
@@ -18,6 +20,7 @@ export type PageStatus =
   | "partial"
   | "error";
 
+/** Lifecycle status of a block within a page. */
 export type BlockStatus =
   | "pending"
   | "generating"
@@ -25,6 +28,7 @@ export type BlockStatus =
   | "error"
   | "hidden";
 
+/** Supported block types rendered on a book page. */
 export type BlockType =
   | "text"
   | "callout"
@@ -40,6 +44,7 @@ export type BlockType =
   | "section"
   | "concept_graph";
 
+/** Content type classification for pages and chapters. */
 export type ContentType =
   | "theory"
   | "derivation"
@@ -48,6 +53,7 @@ export type ContentType =
   | "concept"
   | "overview";
 
+/** A node in a book's concept graph. */
 export interface ConceptNode {
   id: string;
   label: string;
@@ -56,6 +62,7 @@ export interface ConceptNode {
   weight: number;
 }
 
+/** A directed edge in a book's concept graph. */
 export interface ConceptEdge {
   src: string;
   dst: string;
@@ -63,17 +70,20 @@ export interface ConceptEdge {
   rationale: string;
 }
 
+/** A concept graph containing nodes and edges. */
 export interface ConceptGraph {
   nodes: ConceptNode[];
   edges: ConceptEdge[];
 }
 
+/** A source anchor referencing the origin of a block's content. */
 export interface SourceAnchor {
   kind: string;
   ref: string;
   snippet: string;
 }
 
+/** A content block within a book page. */
 export interface Block {
   id: string;
   type: BlockType;
@@ -88,6 +98,7 @@ export interface Block {
   updated_at: number;
 }
 
+/** A page within a book, containing ordered blocks. */
 export interface Page {
   id: string;
   book_id: string;
@@ -105,6 +116,7 @@ export interface Page {
   updated_at: number;
 }
 
+/** A chapter in a book's spine, grouping pages. */
 export interface Chapter {
   id: string;
   title: string;
@@ -117,6 +129,7 @@ export interface Chapter {
   order: number;
 }
 
+/** The structural spine of a book — chapters, concept graph, and metadata. */
 export interface Spine {
   book_id: string;
   chapters: Chapter[];
@@ -126,6 +139,7 @@ export interface Spine {
   exploration_summary?: string;
 }
 
+/** AI-generated proposal for a new book's scope and structure. */
 export interface BookProposal {
   title: string;
   description: string;
@@ -135,6 +149,7 @@ export interface BookProposal {
   rationale: string;
 }
 
+/** A book record with its metadata and status. */
 export interface Book {
   id: string;
   title: string;
@@ -152,6 +167,7 @@ export interface Book {
   };
 }
 
+/** A reader's progress through a book. */
 export interface Progress {
   book_id: string;
   current_page_id: string;
@@ -170,6 +186,7 @@ export interface Progress {
   updated_at: number;
 }
 
+/** Full book detail — book metadata, spine, pages, and reader progress. */
 export interface BookDetail {
   book: Book;
   spine: Spine | null;

@@ -7,6 +7,7 @@ import { apiFetch, apiUrl, setRuntimeAuthEnabled } from "@/lib/api";
 // `useAuthStatus` hook (web/hooks/useAuthStatus.ts); `apiFetch`'s redirect gate
 // is driven by `setRuntimeAuthEnabled`, which `fetchAuthStatus` calls below.
 
+/** Authentication status returned by the backend auth status endpoint. */
 export interface AuthStatus {
   enabled: boolean;
   authenticated: boolean;

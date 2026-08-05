@@ -55,18 +55,54 @@ def extract_json_from_text(text: str) -> Union[Dict[str, Any], List[Any], None]:
 
 
 def ensure_json_dict(data: Any, err: str = "Expected JSON object") -> Dict[str, Any]:
+    """Ensure *data* is a dict, raising ``ValueError`` otherwise.
+
+    Args:
+        data: The value to check.
+        err: Error message for the exception.
+
+    Returns:
+        The input value if it is a dict.
+
+    Raises:
+        ValueError: If *data* is not a dict.
+    """
     if not isinstance(data, dict):
         raise ValueError(err)
     return data
 
 
 def ensure_json_list(data: Any, err: str = "Expected JSON array") -> List[Any]:
+    """Ensure *data* is a list, raising ``ValueError`` otherwise.
+
+    Args:
+        data: The value to check.
+        err: Error message for the exception.
+
+    Returns:
+        The input value if it is a list.
+
+    Raises:
+        ValueError: If *data* is not a list.
+    """
     if not isinstance(data, list):
         raise ValueError(err)
     return data
 
 
 def ensure_keys(data: Dict[str, Any], keys: Iterable[str]) -> Dict[str, Any]:
+    """Ensure *data* contains all required keys.
+
+    Args:
+        data: The dict to check.
+        keys: Iterable of required key names.
+
+    Returns:
+        The input dict if all keys are present.
+
+    Raises:
+        KeyError: If any required key is missing.
+    """
     missing = [k for k in keys if k not in data]
     if missing:
         raise KeyError(f"Missing required keys: {', '.join(missing)}")
@@ -74,6 +110,15 @@ def ensure_keys(data: Dict[str, Any], keys: Iterable[str]) -> Dict[str, Any]:
 
 
 def safe_json_loads(text: str, default: Any = None) -> Any:
+    """Parse a JSON string, returning *default* on failure.
+
+    Args:
+        text: The JSON string to parse.
+        default: Value to return if parsing fails.
+
+    Returns:
+        The parsed value, or *default* if parsing fails.
+    """
     try:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
@@ -81,6 +126,15 @@ def safe_json_loads(text: str, default: Any = None) -> Any:
 
 
 def json_to_text(data: Any, indent: int = 2) -> str:
+    """Serialize *data* to a JSON string with Unicode preserved.
+
+    Args:
+        data: The value to serialize.
+        indent: Indentation level for pretty-printing.
+
+    Returns:
+        The JSON string representation of *data*.
+    """
     return json.dumps(data, ensure_ascii=False, indent=indent)
 
 

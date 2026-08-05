@@ -11,6 +11,8 @@ import os
 
 
 class RunMode(str, Enum):
+    """Whether DeepTutor is running as a CLI app or an API server."""
+
     CLI = "cli"
     SERVER = "server"
 
@@ -26,6 +28,7 @@ def _resolve_mode() -> RunMode:
 
 
 def get_mode() -> RunMode:
+    """Return the current run mode, resolving from the environment on first use."""
     global _current_mode
     if _current_mode is None:
         _current_mode = _resolve_mode()
@@ -40,8 +43,10 @@ def set_mode(mode: RunMode) -> None:
 
 
 def is_cli() -> bool:
+    """Return ``True`` when DeepTutor is running in CLI mode."""
     return get_mode() == RunMode.CLI
 
 
 def is_server() -> bool:
+    """Return ``True`` when DeepTutor is running in API-server mode."""
     return get_mode() == RunMode.SERVER

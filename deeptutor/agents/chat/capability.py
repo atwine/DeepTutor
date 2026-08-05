@@ -10,6 +10,8 @@ from deeptutor.runtime.request_contracts import get_capability_request_schema
 
 
 class ChatCapability(BaseCapability):
+    """Capability wrapper for the agentic chat pipeline."""
+
     manifest = CapabilityManifest(
         name="chat",
         description=(
@@ -23,5 +25,11 @@ class ChatCapability(BaseCapability):
     )
 
     async def run(self, context: UnifiedContext, stream: StreamBus) -> None:
+        """Execute the chat capability for one turn.
+
+        Args:
+            context: The unified context for the current turn.
+            stream: The stream bus for emitting events to the frontend.
+        """
         pipeline = AgenticChatPipeline(language=context.language)
         await pipeline.run(context, stream)

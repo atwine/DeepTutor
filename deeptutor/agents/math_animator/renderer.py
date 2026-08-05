@@ -33,11 +33,19 @@ class ManimRenderError(RuntimeError):
 
 
 class ManimRenderService:
+    """Renders Manim source code into video or image artifacts."""
+
     def __init__(
         self,
         turn_id: str,
         progress_callback: Callable[[str, bool], Awaitable[None]] | None = None,
     ) -> None:
+        """Initialize the render service and create the workspace directories.
+
+        Args:
+            turn_id: Unique identifier for the turn (used for file paths).
+            progress_callback: Optional async callback for progress updates.
+        """
         self.turn_id = turn_id
         self.path_service = get_path_service()
         self.progress_callback = progress_callback
@@ -50,6 +58,16 @@ class ManimRenderService:
             path.mkdir(parents=True, exist_ok=True)
 
     async def render(self, *, code: str, output_mode: str, quality: str) -> RenderResult:
+        """Render Manim source code into video or image artifacts.
+
+        Args:
+            code: The Manim Python source code to render.
+            output_mode: Either ``"video"`` or ``"image"``.
+            quality: Render quality (``"low"``, ``"medium"``, or ``"high"``).
+
+        Returns:
+            A :class:`RenderResult` containing the rendered artifacts.
+        """
         await self._emit_progress(f"Preparing {output_mode} render workspace (quality={quality}).")
         source_name = "scene.py" if output_mode == "video" else "scene_image.py"
         source_path = self.source_dir / source_name

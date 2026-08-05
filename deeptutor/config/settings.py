@@ -17,6 +17,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class LLMRetryConfig(BaseModel):
+    """Retry behavior for LLM API calls."""
+
     max_retries: int = Field(default=8, description="Maximum retry attempts for LLM calls")
     base_delay: float = Field(default=5.0, description="Base delay between retries in seconds")
     exponential_backoff: bool = Field(
@@ -25,12 +27,27 @@ class LLMRetryConfig(BaseModel):
 
 
 class Settings(BaseSettings):
+    """Application settings sourced from environment variables.
+
+    Recognizes variables prefixed with ``LLM_`` and nested via ``__``
+    (e.g. ``LLM_RETRY__MAX_RETRIES``).
+    """
+
     # LLM retry configuration
     retry: LLMRetryConfig = Field(default_factory=LLMRetryConfig)
 
     # Deprecated: use retry instead
     @property
     def llm_retry(self):
+        """Deprecated alias for :attr:`retry`.
+
+        Returns:
+            The active :class:`LLMRetryConfig` instance.
+
+        Raises:
+            DeprecationWarning: Emitted to signal callers to use
+                :attr:`retry` instead.
+        """
         import warnings
 
         warnings.warn(

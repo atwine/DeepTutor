@@ -213,6 +213,12 @@ export function markdownUrlTransform(
   return "";
 }
 
+/**
+ * Decode a URI component, returning the original string if decoding fails.
+ *
+ * @param value - The URI component to decode.
+ * @returns The decoded string, or the input if it is not valid percent-encoding.
+ */
 export function safeDecodeURIComponent(value: string): string {
   try {
     return decodeURIComponent(value);
@@ -251,6 +257,14 @@ function escapeUnknownHtmlTags(content: string): string {
   );
 }
 
+/**
+ * Escape unknown HTML-like tags in markdown content for safe display.
+ *
+ * Strips invisible characters and converts unknown tags to inline code.
+ *
+ * @param content - Raw markdown content.
+ * @returns Sanitized content with unknown HTML tags escaped.
+ */
 export function escapeUnknownHtmlTagsForDisplay(content: string): string {
   if (!content) return "";
   return escapeUnknownHtmlTags(
@@ -466,12 +480,24 @@ function linkifyCitations(content: string): string {
   return linked + tail;
 }
 
+/**
+ * Build the DOM anchor id for a citation reference id.
+ *
+ * @param id - Citation id (e.g. "CIT-1-2" or "PLAN-3").
+ * @returns The anchor id, or null if the id is not a recognized citation format.
+ */
 export function citationAnchorIdFor(id: string): string | null {
   const normalized = String(id || "").trim();
   if (!/^(?:CIT-\d+-\d+|PLAN-\d+)$/i.test(normalized)) return null;
   return `ref-${normalized.toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}`;
 }
 
+/**
+ * Build the href for a citation reference id, falling back to "#references".
+ *
+ * @param id - Citation id.
+ * @returns The href string for the citation anchor.
+ */
 export function citationHrefForId(id: string): string {
   const anchor = citationAnchorIdFor(id);
   return anchor ? `#${anchor}` : "#references";
@@ -572,6 +598,13 @@ function linkifyCitationsOutsideCode(content: string): string {
   );
 }
 
+/**
+ * Normalize markdown content for display — strips empty HTML elements,
+ * removes empty tables, escapes unknown tags, and linkifies citations.
+ *
+ * @param content - Raw markdown content.
+ * @returns Cleaned markdown ready for rendering.
+ */
 export function normalizeMarkdownForDisplay(content: string): string {
   if (!content) return "";
 
@@ -606,6 +639,12 @@ export function stripArtifactAnnotations(content: string): string {
     .trim();
 }
 
+/**
+ * Check whether markdown content has any visible text after normalization.
+ *
+ * @param content - Raw markdown content.
+ * @returns True if the content contains visible text after stripping empty blocks.
+ */
 export function hasVisibleMarkdownContent(content: string): boolean {
   const normalized = normalizeMarkdownForDisplay(content);
   if (!normalized.trim()) return false;

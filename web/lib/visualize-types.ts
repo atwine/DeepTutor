@@ -1,13 +1,18 @@
 import type { MathAnimatorResult } from "@/lib/math-animator-types";
 import { extractMathAnimatorResult } from "@/lib/math-animator-types";
 
+/** Text-based render types (SVG, Chart.js, Mermaid, HTML). */
 export type VisualizeTextRenderType = "svg" | "chartjs" | "mermaid" | "html";
+/** Manim-based render types (video or image/storyboard). */
 export type VisualizeManimRenderType = "manim_video" | "manim_image";
+/** All supported visualize render types. */
 export type VisualizeRenderType =
   | VisualizeTextRenderType
   | VisualizeManimRenderType;
+/** Render mode: "auto" (backend picks) or a specific render type. */
 export type VisualizeRenderMode = "auto" | VisualizeRenderType;
 
+/** Form configuration for the visualize capability. */
 export interface VisualizeFormConfig {
   render_mode: VisualizeRenderMode;
   // Only consumed by the backend when the resolved render_type ends up
@@ -17,12 +22,16 @@ export interface VisualizeFormConfig {
   style_hint: string;
 }
 
+/** Default visualize form configuration. */
 export const DEFAULT_VISUALIZE_CONFIG: VisualizeFormConfig = {
   render_mode: "auto",
   quality: "medium",
   style_hint: "",
 };
 
+/** Build the WebSocket config payload for a visualize request.
+ * @param cfg - The visualize form config.
+ * @returns Config object with render_mode, quality, and style_hint. */
 export function buildVisualizeWSConfig(
   cfg: VisualizeFormConfig,
 ): Record<string, unknown> {
@@ -43,12 +52,18 @@ const VISUALIZE_RENDER_LABELS: Record<VisualizeRenderMode, string> = {
   manim_image: "Storyboard",
 };
 
+/** Type guard: check whether a render type string is a Manim render type.
+ * @param renderType - The render type string to check.
+ * @returns True if the type is manim_video or manim_image. */
 export function isManimRenderType(
   renderType: string,
 ): renderType is VisualizeManimRenderType {
   return renderType === "manim_video" || renderType === "manim_image";
 }
 
+/** Type guard: check whether a visualize result is a Manim result.
+ * @param result - The visualize result to check.
+ * @returns True if the result's render_type is a Manim type. */
 export function isManimResult(
   result: VisualizeResult,
 ): result is VisualizeManimResult {
@@ -104,8 +119,12 @@ interface VisualizeManimResult {
   manim: MathAnimatorResult;
 }
 
+/** Union of text-based and Manim-based visualize results. */
 export type VisualizeResult = VisualizeTextResult | VisualizeManimResult;
 
+/** Extract a typed VisualizeResult from raw result metadata.
+ * @param resultMetadata - The raw metadata from the result event.
+ * @returns The typed result, or null if the metadata is invalid. */
 export function extractVisualizeResult(
   resultMetadata: Record<string, unknown> | undefined,
 ): VisualizeResult | null {

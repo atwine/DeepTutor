@@ -13,6 +13,12 @@ class ChatPromptAssembler:
     """Build system prompts from explicit, category-named blocks."""
 
     def __init__(self, *, prompts: dict[str, Any], language: str) -> None:
+        """Initialize the assembler with loaded prompts and a language code.
+
+        Args:
+            prompts: The prompt dictionary loaded from the prompt manager.
+            language: Language code (``"zh"`` or ``"en"``).
+        """
         self.prompts = prompts
         self.language = "zh" if language.lower().startswith("zh") else "en"
 
@@ -28,6 +34,21 @@ class ChatPromptAssembler:
         capability_blocks: list[PromptBlock] | None = None,
         include_tool_manifest: bool = True,
     ) -> str:
+        """Assemble and render the full system prompt for the chat loop.
+
+        Args:
+            context: The unified context for the current turn.
+            tool_manifest: Formatted tool list string for the system prompt.
+            kb_note: Optional knowledge-base note prepended to the tool block.
+            deferred_tools_manifest: Optional manifest for lazily-loaded tools.
+            notebook_manifest: Optional notebook listing for the system prompt.
+            workspace_note: Optional workspace description string.
+            capability_blocks: Optional extra prompt blocks from active capabilities.
+            include_tool_manifest: Whether to include the tool manifest block.
+
+        Returns:
+            The rendered system prompt string.
+        """
         return self.render(
             self.blocks(
                 context=context,
@@ -66,6 +87,21 @@ class ChatPromptAssembler:
         capability_blocks: list[PromptBlock] | None = None,
         include_tool_manifest: bool = True,
     ) -> list[PromptBlock]:
+        """Build the ordered list of prompt blocks for the system prompt.
+
+        Args:
+            context: The unified context for the current turn.
+            tool_manifest: Formatted tool list string for the system prompt.
+            kb_note: Optional knowledge-base note prepended to the tool block.
+            deferred_tools_manifest: Optional manifest for lazily-loaded tools.
+            notebook_manifest: Optional notebook listing for the system prompt.
+            workspace_note: Optional workspace description string.
+            capability_blocks: Optional extra prompt blocks from active capabilities.
+            include_tool_manifest: Whether to include the tool manifest block.
+
+        Returns:
+            Ordered list of :class:`PromptBlock` instances.
+        """
         blocks: list[PromptBlock] = [
             PromptBlock("general", self._general_block(context)),
             PromptBlock("runtime_policy", self._t("runtime_policy")),
@@ -144,6 +180,15 @@ class ChatPromptAssembler:
         context: UnifiedContext,
         kb_seed: str = "",
     ) -> str:
+        """Build the user-facing message string for the loop's first round.
+
+        Args:
+            context: The unified context for the current turn.
+            kb_seed: Optional knowledge-base seed text appended to the message.
+
+        Returns:
+            The formatted user message string.
+        """
         template = self._t("loop.user", default="{user_message}")
         try:
             content = template.format(user_message=context.user_message)
@@ -154,6 +199,7 @@ class ChatPromptAssembler:
         return content
 
     def finish_exhausted_instruction(self) -> str:
+        """Return the instruction telling the model to stop calling tools and answer."""
         return self._t(
             "loop.finish_exhausted",
             default=(

@@ -20,6 +20,8 @@ interface PickerOrigin {
 
 let current: PickerOrigin | null = null;
 
+/** Record the on-screen rect of the element that triggered a picker open.
+ * @param rect - The trigger element's DOMRect. */
 export function setPickerOrigin(rect: DOMRect): void {
   current = { rect, ts: Date.now() };
 }
