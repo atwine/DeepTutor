@@ -36,6 +36,31 @@ _users_cache: dict[str, dict[str, Any]] | None = None
 _users_cache_ts: float = 0.0
 _users_cache_lock = threading.Lock()
 
+# Issue #44/#53: get_user_by_id() and get_users_by_ids() used to linear-scan
+# every user on every call to find one by id (username is the dict key;
+# id is not). The TTL cache above stops the disk read, but not the O(N)
+# scan through the in-memory dict. This id-indexed lookup table is built
+# once per cache generation (identified by the users dict's object
+# identity, which changes exactly when load_users() actually refreshes),
+# turning repeated by-id lookups into O(1) dict access.
+_users_by_id_cache: dict[str, tuple[str, dict[str, Any]]] | None = None
+_users_by_id_cache_source: int | None = None
+
+
+def _users_by_id_index() -> dict[str, tuple[str, dict[str, Any]]]:
+    global _users_by_id_cache, _users_by_id_cache_source
+    users = load_users()
+    if _users_by_id_cache is not None and _users_by_id_cache_source == id(users):
+        return _users_by_id_cache
+    index = {
+        str(record.get("id") or ""): (username, record)
+        for username, record in users.items()
+        if record.get("id")
+    }
+    _users_by_id_cache = index
+    _users_by_id_cache_source = id(users)
+    return index
+
 AUTH_DIR = SYSTEM_ROOT / "auth"
 USERS_FILE = AUTH_DIR / "users.json"
 SECRET_FILE = AUTH_DIR / "auth_secret"
@@ -339,30 +364,22 @@ def get_user(username: str) -> dict[str, Any] | None:
 
 
 def get_user_by_id(user_id: str) -> tuple[str, dict[str, Any]] | None:
-    for username, record in load_users().items():
-        if str(record.get("id") or "") == user_id:
-            return username, record
-    return None
+    """Issue #44: O(1) via the id-indexed cache, instead of scanning every
+    user (username is the dict key; id is not, so this used to be O(N))."""
+    return _users_by_id_index().get(user_id)
 
 
 def get_users_by_ids(user_ids: list[str]) -> dict[str, tuple[str, dict[str, Any]]]:
-    """Issue #31: Batched version of :func:`get_user_by_id` — loads the JSON
-    identity store **once** and returns a dict keyed by ``user_id``, instead
-    of re-reading the file and scanning all users N times.
+    """Issue #31/#44: Batched version of :func:`get_user_by_id` — O(len(user_ids))
+    via the id-indexed cache, instead of scanning all users once per call.
 
     Returns ``{user_id: (username, record)}`` for each ID that was found.
     Missing IDs are simply absent from the result.
     """
     if not user_ids:
         return {}
-    users = load_users()
-    id_set = set(user_ids)
-    result: dict[str, tuple[str, dict[str, Any]]] = {}
-    for username, record in users.items():
-        uid = str(record.get("id") or "")
-        if uid in id_set:
-            result[uid] = (username, record)
-    return result
+    index = _users_by_id_index()
+    return {uid: index[uid] for uid in user_ids if uid in index}
 
 
 async def delete_user(username: str) -> bool:
