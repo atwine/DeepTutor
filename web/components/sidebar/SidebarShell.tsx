@@ -22,6 +22,7 @@ import {
   PanelLeftOpen,
   PenLine,
   Settings,
+  TrendingUp,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -136,6 +137,18 @@ const PRIMARY_NAV: NavEntry[] = [
     label: "Student Dashboard",
     icon: Users,
     tooltipKey: "Student Dashboard tooltip",
+    roles: ["admin"],
+  },
+  {
+    // Org-wide statistics: gender/degree-type breakdown, per-course
+    // completion rates, filterable by term. Placed right after the
+    // per-student dashboard since they're the same audience (admin) but
+    // answer a different question — "how are we doing overall" vs.
+    // "what's this one student's status."
+    href: "/admin/insights",
+    label: "Insights",
+    icon: TrendingUp,
+    tooltipKey: "Insights tooltip",
     roles: ["admin"],
   },
   {

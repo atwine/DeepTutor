@@ -117,48 +117,44 @@ def _make_user_record(hashed: str, role: str = "user", created_at: str = "") -> 
     }
 
 
-def _load_users() -> dict[str, dict]:
+async def _load_users() -> dict[str, dict]:
     """
-    Load the user store, migrating old flat format if needed.
+    Load the user store.
 
     Priority:
-      1. multi-user identity store
-      2. auth.json username + password_hash — single-user bootstrap user
-
-    Old format: {"alice": "$2b$12$..."}
-    New format: {"alice": {"hash": "...", "role": "admin", "created_at": "..."}}
+      1. Postgres `users` table (see Issue #53)
+      2. auth.json username + password_hash — single-user bootstrap user, used
+         only when the table is empty
     """
     from deeptutor.multi_user.identity import load_users
 
-    return load_users(AUTH_USERNAME, AUTH_PASSWORD_HASH)
+    return await load_users(AUTH_USERNAME, AUTH_PASSWORD_HASH)
 
 
-def is_first_user() -> bool:
+async def is_first_user() -> bool:
     """Return True when no users exist yet (first registration will become admin)."""
-    return len(_load_users()) == 0
+    return len(await _load_users()) == 0
 
 
-def add_user(username: str, plain_password: str, role: str = "user") -> None:
+async def add_user(username: str, plain_password: str, role: str = "user") -> None:
     """
-    Add or update a user in data/user/auth_users.json.
+    Add or update a user in the Postgres `users` table.
 
     The role defaults to 'user'. Pass role='admin' to elevate. When the store
     is empty the first user is automatically promoted to 'admin' regardless of
     the role argument.
-
-    Creates the file (and parent directories) if they don't exist.
     """
     from deeptutor.multi_user.identity import save_user
 
-    record = save_user(username, hash_password(plain_password), role=role)  # type: ignore[arg-type]
+    record = await save_user(username, hash_password(plain_password), role=role)  # type: ignore[arg-type]
     logger.info("User '%s' saved with role=%r", username, record.get("role", "user"))
 
 
-def list_users() -> list[dict]:
+async def list_users() -> list[dict]:
     """Return a list of user info dicts (username, role, created_at) — no hashes."""
     from deeptutor.multi_user.identity import list_user_info
 
-    return list_user_info(AUTH_USERNAME, AUTH_PASSWORD_HASH)
+    return await list_user_info(AUTH_USERNAME, AUTH_PASSWORD_HASH)
 
 
 async def delete_user(username: str) -> bool:
@@ -176,7 +172,7 @@ async def delete_user(username: str) -> bool:
     return True
 
 
-def set_role(username: str, role: str) -> bool:
+async def set_role(username: str, role: str) -> bool:
     """
     Change the role for an existing user. Returns True on success.
 
@@ -187,13 +183,13 @@ def set_role(username: str, role: str) -> bool:
 
     from deeptutor.multi_user.identity import set_role as _set_role
 
-    if not _set_role(username, role):  # type: ignore[arg-type]
+    if not await _set_role(username, role):  # type: ignore[arg-type]
         return False
     logger.info(f"User '{username}' role updated to {role!r}")
     return True
 
 
-def set_avatar(username: str, avatar: str) -> bool:
+async def set_avatar(username: str, avatar: str) -> bool:
     """
     Update the avatar marker for an existing user. Returns True on success.
 
@@ -202,21 +198,36 @@ def set_avatar(username: str, avatar: str) -> bool:
     """
     from deeptutor.multi_user.identity import set_avatar as _set_avatar
 
-    if not _set_avatar(username, avatar):
+    if not await _set_avatar(username, avatar):
         return False
     logger.info("User '%s' avatar updated", username)
     return True
 
 
-def get_user_info(username: str) -> dict | None:
+async def get_user_info(username: str) -> dict | None:
     """Return the public info dict for a single user, or None if unknown."""
-    for item in list_users():
-        if item.get("username") == username:
-            return item
-    return None
+    from deeptutor.multi_user.identity import get_user
+
+    record = await get_user(username)
+    if record is None:
+        return None
+    return {
+        "id": record.get("id", ""),
+        "username": username,
+        "role": record.get("role", "user"),
+        "created_at": record.get("created_at", ""),
+        "disabled": bool(record.get("disabled", False)),
+        "avatar": str(record.get("avatar") or ""),
+        "full_name": str(record.get("full_name") or ""),
+        "registration_number": str(record.get("registration_number") or ""),
+        "first_name": str(record.get("first_name") or ""),
+        "surname": str(record.get("surname") or ""),
+        "gender": str(record.get("gender") or ""),
+        "course": str(record.get("course") or ""),
+    }
 
 
-def set_disabled(username: str, disabled: bool) -> bool:
+async def set_disabled(username: str, disabled: bool) -> bool:
     """Enable or disable a user account. Returns True on success.
 
     A disabled user cannot log in (checked in ``authenticate``). Admin-only
@@ -224,7 +235,7 @@ def set_disabled(username: str, disabled: bool) -> bool:
     """
     from deeptutor.multi_user.identity import set_disabled as _set_disabled
 
-    if not _set_disabled(username, disabled):
+    if not await _set_disabled(username, disabled):
         return False
     logger.info("User '%s' disabled=%s", username, disabled)
     return True
@@ -235,12 +246,12 @@ def set_disabled(username: str, disabled: bool) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def create_token(username: str, role: str = "user", user_id: str | None = None) -> str:
+async def create_token(username: str, role: str = "user", user_id: str | None = None) -> str:
     """Create a signed JWT for the given username and role."""
     from jose import jwt
 
     if not user_id:
-        record = _load_users().get(username) or {}
+        record = (await _load_users()).get(username) or {}
         user_id = str(record.get("id") or "")
 
     payload = {
@@ -253,7 +264,7 @@ def create_token(username: str, role: str = "user", user_id: str | None = None) 
     return jwt.encode(payload, AUTH_SECRET, algorithm=_ALGORITHM)
 
 
-def decode_token(token: str) -> TokenPayload | None:
+async def decode_token(token: str) -> TokenPayload | None:
     """
     Validate a token and return a TokenPayload, or None if invalid.
 
@@ -291,7 +302,7 @@ def decode_token(token: str) -> TokenPayload | None:
             return None
         user_id = str(payload.get("uid") or "")
         if not user_id:
-            record = _load_users().get(str(username)) or {}
+            record = (await _load_users()).get(str(username)) or {}
             user_id = str(record.get("id") or "")
         return TokenPayload(username=username, role=payload.get("role", "user"), user_id=user_id)
     except JWTError:
@@ -431,7 +442,7 @@ def record_login_success(username: str, client_ip: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def authenticate(username: str, password: str) -> TokenPayload | None:
+async def authenticate(username: str, password: str) -> TokenPayload | None:
     """
     Validate credentials. Returns a TokenPayload on success, None on failure.
 
@@ -441,15 +452,17 @@ def authenticate(username: str, password: str) -> TokenPayload | None:
     if not AUTH_ENABLED:
         return TokenPayload(username=username or "local", role="admin", user_id="local-admin")
 
-    users = _load_users()
-    if not users:
-        logger.warning(
-            "No users configured — login will always fail. "
-            "Navigate to /register to create your first account."
-        )
-        return None
+    # Issue #53: a single indexed lookup instead of loading every user to
+    # find one — this was the actual login-time bottleneck the JSON store had.
+    from deeptutor.multi_user.identity import get_user
 
-    record = users.get(username)
+    record = await get_user(username)
+    if record is None and username == AUTH_USERNAME and AUTH_PASSWORD_HASH:
+        # env-fallback bootstrap admin — only reachable while the table is
+        # still empty (see load_users()'s env-fallback branch).
+        if await is_first_user():
+            record = {"id": "env-admin", "hash": AUTH_PASSWORD_HASH, "role": "admin", "disabled": False}
+
     if not record:
         # Unknown username: still pay bcrypt's cost so response timing matches
         # the known-username path below (see _DUMMY_HASH_FOR_TIMING_PARITY).

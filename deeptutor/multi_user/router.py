@@ -168,8 +168,8 @@ def _admin_partner_summary() -> list[dict[str, Any]]:
     ]
 
 
-def _require_assignable_user(user_id: str) -> tuple[str, dict[str, Any]]:
-    user_record = get_user_by_id(user_id)
+async def _require_assignable_user(user_id: str) -> tuple[str, dict[str, Any]]:
+    user_record = await get_user_by_id(user_id)
     if user_record is None:
         raise HTTPException(status_code=404, detail="User not found")
     username, record = user_record
@@ -200,7 +200,7 @@ async def admin_resources(_: object = Depends(require_admin)) -> dict[str, Any]:
 
 @router.get("/users/{user_id}/grants")
 async def get_user_grants(user_id: str, _: object = Depends(require_admin)) -> dict[str, Any]:
-    _require_assignable_user(user_id)
+    await _require_assignable_user(user_id)
     return {"grant": load_grant(user_id)}
 
 
@@ -210,9 +210,9 @@ async def put_user_grants(
     payload: GrantPayload,
     _: object = Depends(require_admin),
 ) -> dict[str, Any]:
-    _require_assignable_user(user_id)
+    await _require_assignable_user(user_id)
     try:
-        grant = save_grant(user_id, payload.grant)
+        grant = await save_grant(user_id, payload.grant)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     log_admin_action(
@@ -291,7 +291,7 @@ async def admin_install_skill(
 
 @router.get("/users")
 async def multi_user_list_users(_: object = Depends(require_admin)) -> dict[str, Any]:
-    return {"users": list_user_info()}
+    return {"users": await list_user_info()}
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +359,7 @@ async def _require_course_unit_access(payload: TokenPayload, course_unit_id: str
     raise HTTPException(status_code=403, detail="You do not manage this course unit")
 
 
-def _with_instructor_names(
+async def _with_instructor_names(
     unit: dict[str, Any],
     user_records: dict[str, tuple[str, dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
@@ -381,12 +381,12 @@ def _with_instructor_names(
         if user_records is not None:
             user_record = user_records.get(uid)
         else:
-            user_record = get_user_by_id(uid)
+            user_record = await get_user_by_id(uid)
         names.append(user_record[0] if user_record is not None else uid)
     return {**unit, "instructor_usernames": names}
 
 
-def _with_instructor_names_batch(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
+async def _with_instructor_names_batch(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Issue #37: Batched version of :func:`_with_instructor_names` for
     list endpoints. Collects all instructor_ids across all course units,
     does a **single** ``get_users_by_ids()`` call, then maps over the
@@ -395,8 +395,8 @@ def _with_instructor_names_batch(units: list[dict[str, Any]]) -> list[dict[str, 
     all_instructor_ids: list[str] = []
     for unit in units:
         all_instructor_ids.extend(unit.get("instructor_ids", []))
-    user_records = get_users_by_ids(all_instructor_ids)
-    return [_with_instructor_names(u, user_records) for u in units]
+    user_records = await get_users_by_ids(all_instructor_ids)
+    return [await _with_instructor_names(u, user_records) for u in units]
 
 
 @router.post("/course-units")
@@ -424,7 +424,7 @@ async def create_course_unit_endpoint(
         "course_unit_create",
         summary={"course_unit_id": record["id"], "name": record["name"]},
     )
-    return {"course_unit": _with_instructor_names(record)}
+    return {"course_unit": await _with_instructor_names(record)}
 
 
 @router.get("/course-units")
@@ -441,7 +441,7 @@ async def list_course_units_endpoint(
     else:
         units = await list_course_units_for_instructor(current.user_id, limit=limit, offset=offset)
         total = await count_course_units_for_instructor(current.user_id)
-    return {"course_units": _with_instructor_names_batch(units), "total": total, "limit": limit, "offset": offset}
+    return {"course_units": await _with_instructor_names_batch(units), "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/course-units/catalog")
@@ -478,7 +478,7 @@ async def course_unit_catalog_endpoint(
         filtered_units.append(unit)
     # Issue #37: batch instructor name lookup — one file read for all
     # course units instead of one per unit.
-    instructor_records = get_users_by_ids(
+    instructor_records = await get_users_by_ids(
         [uid for u in filtered_units for uid in u.get("instructor_ids", [])]
     )
     for unit in filtered_units:
@@ -501,7 +501,11 @@ async def course_unit_catalog_endpoint(
         if my_status == "approved" and user_id:
             completed_at = await check_and_mark_completion(unit["id"], user_id)
         catalog.append(
-            {**_with_instructor_names(unit, instructor_records), "my_status": my_status, "completed_at": completed_at}
+            {
+                **await _with_instructor_names(unit, instructor_records),
+                "my_status": my_status,
+                "completed_at": completed_at,
+            }
         )
     return {"course_units": catalog}
 
@@ -524,7 +528,7 @@ async def my_course_units_endpoint(
     else:
         units = await list_course_units_for_student(current.user_id, limit=limit, offset=offset)
         total = await count_course_units_for_student(current.user_id)
-    return {"course_units": _with_instructor_names_batch(units), "total": total, "limit": limit, "offset": offset}
+    return {"course_units": await _with_instructor_names_batch(units), "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/course-units/{course_unit_id}")
@@ -533,7 +537,7 @@ async def get_course_unit_endpoint(
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
     unit = await _require_course_unit_access(current, course_unit_id)
-    return {"course_unit": _with_instructor_names(unit)}
+    return {"course_unit": await _with_instructor_names(unit)}
 
 
 @router.put("/course-units/{course_unit_id}")
@@ -582,7 +586,7 @@ async def update_course_unit_endpoint(
         "course_unit_update",
         summary={"course_unit_id": course_unit_id, "by_role": current.role},
     )
-    return {"course_unit": _with_instructor_names(record)}
+    return {"course_unit": await _with_instructor_names(record)}
 
 
 @router.delete("/course-units/{course_unit_id}")
@@ -628,7 +632,7 @@ async def archive_course_unit_endpoint(
     if record is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
     log_admin_action("course_unit_archive", summary={"course_unit_id": course_unit_id})
-    return {"course_unit": _with_instructor_names(record)}
+    return {"course_unit": await _with_instructor_names(record)}
 
 
 @router.post("/course-units/{course_unit_id}/unarchive")
@@ -642,7 +646,7 @@ async def unarchive_course_unit_endpoint(
     if record is None:
         raise HTTPException(status_code=404, detail="Course unit not found")
     log_admin_action("course_unit_unarchive", summary={"course_unit_id": course_unit_id})
-    return {"course_unit": _with_instructor_names(record)}
+    return {"course_unit": await _with_instructor_names(record)}
 
 
 @router.post("/course-units/{course_unit_id}/enrollments")
@@ -652,7 +656,7 @@ async def enroll_student_endpoint(
     current: TokenPayload = Depends(require_instructor_or_admin),
 ) -> dict[str, Any]:
     await _require_course_unit_access(current, course_unit_id)
-    if get_user_by_id(payload.user_id) is None:
+    if await get_user_by_id(payload.user_id) is None:
         raise HTTPException(status_code=404, detail="User not found")
     record = await enroll_student(course_unit_id, payload.user_id)
     if record is None:
@@ -673,7 +677,7 @@ async def unenroll_student_endpoint(
     return {"ok": True}
 
 
-def _enrollment_with_student_info(
+async def _enrollment_with_student_info(
     enrollment: dict[str, Any],
     user_records: dict[str, tuple[str, dict[str, Any]]] | None = None,
 ) -> dict[str, Any] | None:
@@ -690,7 +694,7 @@ def _enrollment_with_student_info(
     if user_records is not None:
         user_record = user_records.get(user_id)
     else:
-        user_record = get_user_by_id(user_id)
+        user_record = await get_user_by_id(user_id)
     if user_record is None:
         return None
     username, record = user_record
@@ -721,11 +725,11 @@ async def course_unit_roster_endpoint(
     ]
     total = await count_enrollments_for_course(course_unit_id, status="approved")
     # Issue #37: batch user lookup — one file read instead of N.
-    user_records = get_users_by_ids([e["user_id"] for e in enrollments])
+    user_records = await get_users_by_ids([e["user_id"] for e in enrollments])
     roster = [
         info
         for enrollment in enrollments
-        if (info := _enrollment_with_student_info(enrollment, user_records)) is not None
+        if (info := await _enrollment_with_student_info(enrollment, user_records)) is not None
     ]
     return {"roster": roster, "total": total, "limit": limit, "offset": offset}
 
@@ -742,11 +746,11 @@ async def course_unit_requests_endpoint(
         if e.get("status", "approved") == "pending"
     ]
     # Issue #37: batch user lookup — one file read instead of N.
-    user_records = get_users_by_ids([e["user_id"] for e in enrollments])
+    user_records = await get_users_by_ids([e["user_id"] for e in enrollments])
     requests = [
         info
         for enrollment in enrollments
-        if (info := _enrollment_with_student_info(enrollment, user_records)) is not None
+        if (info := await _enrollment_with_student_info(enrollment, user_records)) is not None
     ]
     return {"requests": requests}
 
@@ -835,11 +839,11 @@ async def list_leave_requests_endpoint(
     await _require_course_unit_access(current, course_unit_id)
     enrollments = await list_leave_requests_for_course(course_unit_id)
     # Issue #37: batch user lookup — one file read instead of N.
-    user_records = get_users_by_ids([e["user_id"] for e in enrollments])
+    user_records = await get_users_by_ids([e["user_id"] for e in enrollments])
     requests = [
         info
         for enrollment in enrollments
-        if (info := _enrollment_with_student_info(enrollment, user_records)) is not None
+        if (info := await _enrollment_with_student_info(enrollment, user_records)) is not None
     ]
     return {"requests": requests}
 
@@ -923,7 +927,7 @@ async def search_students_endpoint(
     minimal field set (see :func:`search_enrollable_users`), since ``GET
     /users`` (the full roster) is admin-only and instructors need a way to
     look someone up without it."""
-    return {"students": search_enrollable_users(q)}
+    return {"students": await search_enrollable_users(q)}
 
 # ---------------------------------------------------------------------------
 # Issue #3: Course materials -- instructor uploads + course-specific RAG
@@ -1292,8 +1296,8 @@ async def admin_students_overview(
     Also returns aggregate stats for the dashboard header cards and a
     course list for the filter dropdown.
     """
-    # 1. All students from the identity store (JSON, not Postgres).
-    all_users = list_user_info()
+    # 1. All students from the identity store (Postgres `users` table).
+    all_users = await list_user_info()
     students = [u for u in all_users if u.get("role") == "user"]
     instructors = [u for u in all_users if u.get("role") == "instructor"]
     student_ids = {s["id"] for s in students}
@@ -1434,6 +1438,145 @@ async def admin_students_overview(
 
 
 # ---------------------------------------------------------------------------
+# Insights — org-wide statistics for admins (gender/course-type breakdown,
+# per-course completion rates, term-over-term history). Deliberately
+# surfaces numbers only — no automated "this course is underperforming"
+# judgment calls; that reading is left to the admin looking at the chart.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/admin/insights")
+async def admin_insights(
+    term: str = Query("", description="Filter to a single CourseUnit.term; empty = all terms"),
+    _: TokenPayload = Depends(require_admin),
+) -> dict[str, Any]:
+    """Aggregate statistics for the admin Insights page.
+
+    Everything here is computed from data that's already tracked per
+    account (gender, course/degree) and per enrollment (created_at,
+    completed_at) — no new fields, no backfill needed.
+
+    Known gap, deliberately not papered over: this cannot report a
+    "dropout" number. Unenrolling a student deletes their Enrollment row
+    outright (see unenroll_student), so once someone leaves a course there
+    is no trace left to count. Tracking dropouts would mean switching
+    unenroll to a soft status instead of a delete — a separate, larger
+    change than this endpoint.
+    """
+    all_users = await list_user_info()
+    students = [u for u in all_users if u.get("role") == "user"]
+    student_ids = {s["id"] for s in students}
+
+    async with session_scope() as session:
+        terms_raw = (
+            await session.execute(
+                select(CourseUnit.term).where(CourseUnit.term != "").distinct()
+            )
+        ).all()
+        terms = sorted({t for (t,) in terms_raw})
+
+        course_query = select(CourseUnit.id, CourseUnit.name, CourseUnit.term)
+        if term:
+            course_query = course_query.where(CourseUnit.term == term)
+        courses = (await session.execute(course_query)).all()
+        course_ids = [c.id for c in courses]
+
+        enrollment_rows: list[Any] = []
+        if course_ids and student_ids:
+            enrollment_rows = (
+                await session.execute(
+                    select(
+                        Enrollment.user_id,
+                        Enrollment.course_unit_id,
+                        Enrollment.completed_at,
+                    )
+                    .where(Enrollment.status == "approved")
+                    .where(Enrollment.course_unit_id.in_(course_ids))
+                    .where(Enrollment.user_id.in_(student_ids))
+                )
+            ).all()
+
+    # Students who have at least one approved enrollment in the filtered
+    # term — the population the gender/course-type breakdown below scopes
+    # to when a term filter is active (when it isn't, every student counts).
+    enrolled_student_ids = {row.user_id for row in enrollment_rows}
+    breakdown_population = (
+        [s for s in students if s["id"] in enrolled_student_ids] if term else students
+    )
+
+    def _percent_breakdown(values: list[str], labels: dict[str, str]) -> dict[str, Any]:
+        counts: dict[str, int] = {label: 0 for label in labels.values()}
+        counts["Unspecified"] = 0
+        for raw in values:
+            key = labels.get(str(raw or "").strip().lower(), "Unspecified")
+            counts[key] += 1
+        total = sum(counts.values())
+        return {
+            "counts": counts,
+            "percentages": {
+                k: round(v / total * 100, 1) if total else 0.0 for k, v in counts.items()
+            },
+            "total": total,
+        }
+
+    gender_breakdown = _percent_breakdown(
+        [s.get("gender", "") for s in breakdown_population],
+        {"male": "Male", "female": "Female"},
+    )
+    course_type_breakdown = _percent_breakdown(
+        [s.get("course", "") for s in breakdown_population],
+        {"masters": "Masters", "phd": "PhD"},
+    )
+
+    # Per-course enrolled/completed counts, from the same batched query.
+    per_course_counts: dict[str, dict[str, int]] = {
+        c.id: {"enrolled": 0, "completed": 0} for c in courses
+    }
+    for row in enrollment_rows:
+        bucket = per_course_counts[row.course_unit_id]
+        bucket["enrolled"] += 1
+        if row.completed_at:
+            bucket["completed"] += 1
+
+    per_course = []
+    for c in courses:
+        counts = per_course_counts[c.id]
+        rate = round(counts["completed"] / counts["enrolled"] * 100, 1) if counts["enrolled"] else 0.0
+        per_course.append(
+            {
+                "id": c.id,
+                "name": c.name,
+                "term": c.term,
+                "enrolled": counts["enrolled"],
+                "completed": counts["completed"],
+                "completion_rate": rate,
+            }
+        )
+    per_course.sort(key=lambda r: r["completion_rate"], reverse=True)
+
+    total_enrolled = sum(c["enrolled"] for c in per_course)
+    total_completed = sum(c["completed"] for c in per_course)
+    overall_completion_rate = (
+        round(total_completed / total_enrolled * 100, 1) if total_enrolled else 0.0
+    )
+
+    return {
+        "terms": terms,
+        "selected_term": term,
+        "stats": {
+            "total_students": len(breakdown_population),
+            "total_courses": len(courses),
+            "total_enrolled": total_enrolled,
+            "total_completed": total_completed,
+            "overall_completion_rate": overall_completion_rate,
+        },
+        "gender_breakdown": gender_breakdown,
+        "course_type_breakdown": course_type_breakdown,
+        "per_course": per_course,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Issue #34: Instructor student dashboard — scoped to instructor's own courses
 # ---------------------------------------------------------------------------
 
@@ -1538,7 +1681,7 @@ async def instructor_students_overview(
 
     # 3. Collect the student user_ids and fetch their identity records.
     student_ids = {row[0] for row in enrollment_rows}
-    all_users = list_user_info()
+    all_users = await list_user_info()
     users_by_id = {u["id"]: u for u in all_users if u["id"] in student_ids}
 
     # 4. Build per-student aggregates.

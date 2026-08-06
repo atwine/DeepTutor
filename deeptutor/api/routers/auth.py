@@ -367,7 +367,7 @@ async def require_auth(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    payload = decode_token(token)
+    payload = await decode_token(token)
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -411,7 +411,7 @@ async def ws_require_auth(ws: WebSocket) -> _CtxToken | _WsAuthFailed:
         return _install_current_user(None)
 
     token = ws.query_params.get("token") or ws.cookies.get(_COOKIE_NAME)
-    payload = decode_token(token) if token else None
+    payload = await decode_token(token) if token else None
     if not payload:
         await ws.close(code=4001)
         return ws_auth_failed
@@ -533,10 +533,10 @@ async def auth_status(
         )
 
     token = _extract_token(authorization, dt_token)
-    payload = decode_token(token) if token else None
+    payload = await decode_token(token) if token else None
     avatar = ""
     if payload is not None:
-        info = get_user_info(payload.username)
+        info = await get_user_info(payload.username)
         if info:
             avatar = str(info.get("avatar") or "")
     return AuthStatusResponse(
@@ -591,7 +591,7 @@ async def login(body: LoginRequest, request: Request, response: Response) -> dic
         }
 
     # Standard JWT + bcrypt mode
-    result = authenticate(body.username, body.password)
+    result = await authenticate(body.username, body.password)
     if not result:
         record_login_failure(body.username, client_ip)
         raise HTTPException(
@@ -600,7 +600,7 @@ async def login(body: LoginRequest, request: Request, response: Response) -> dic
         )
     record_login_success(body.username, client_ip)
 
-    token = create_token(result.username, result.role, result.user_id)
+    token = await create_token(result.username, result.role, result.user_id)
     response.set_cookie(value=token, max_age=_COOKIE_MAX_AGE, **_cookie_attrs())
 
     logger.info(f"User '{result.username}' logged in (role={result.role!r})")
@@ -644,7 +644,7 @@ async def register(body: RegisterRequest) -> dict:
     if POCKETBASE_ENABLED:
         # PocketBase deployments are documented as single-user. Keep registration
         # closed and require admins to provision users in the PocketBase admin UI.
-        if not is_first_user():
+        if not await is_first_user():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Self-registration is closed. Ask an administrator to create your account.",
@@ -666,23 +666,23 @@ async def register(body: RegisterRequest) -> dict:
         }
 
     # Standard mode — only allowed before the first admin exists.
-    if not is_first_user():
+    if not await is_first_user():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Self-registration is closed. Ask an administrator to create your account.",
         )
 
-    existing = {u["username"] for u in list_users()}
+    existing = {u["username"] for u in await list_users()}
     if body.username in existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Username already taken",
         )
 
-    add_user(body.username, body.password)
+    await add_user(body.username, body.password)
     user_id = ""
     role = "user"
-    for item in list_users():
+    for item in await list_users():
         if item.get("username") == body.username:
             user_id = str(item.get("id") or "")
             role = str(item.get("role") or "user")
@@ -701,7 +701,7 @@ async def register(body: RegisterRequest) -> dict:
 @router.get("/is_first_user")
 async def check_is_first_user() -> dict:
     """Return whether the user store is empty (used by the register UI)."""
-    return {"is_first_user": is_first_user() if AUTH_ENABLED else False}
+    return {"is_first_user": await is_first_user() if AUTH_ENABLED else False}
 
 
 # ---------------------------------------------------------------------------
@@ -745,7 +745,7 @@ async def get_profile(
 ) -> UserInfo:
     """Return the current user's own account info."""
     current = _require_profile_identity(payload)
-    info = get_user_info(current.username)
+    info = await get_user_info(current.username)
     if info is None:
         # PocketBase-backed identities have no local record; fall back to the
         # token claims so the profile page still renders.
@@ -769,7 +769,7 @@ async def update_profile(
     accepted here; ``img:`` markers are owned by the upload endpoint.
     """
     current = _require_profile_identity(payload)
-    if not set_avatar(current.username, body.avatar):
+    if not await set_avatar(current.username, body.avatar):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     # The marker no longer references an uploaded image, so drop the file.
     from deeptutor.multi_user.identity import delete_avatar_file
@@ -794,7 +794,7 @@ async def update_profile_details_endpoint(
     current = _require_profile_identity(payload)
     from deeptutor.multi_user.identity import update_profile_details
 
-    if not update_profile_details(
+    if not await update_profile_details(
         current.username,
         full_name=body.full_name,
         registration_number=body.registration_number,
@@ -829,7 +829,7 @@ async def upload_avatar(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot store an avatar for this account.",
         )
-    info = get_user_info(current.username)
+    info = await get_user_info(current.username)
     if info is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -859,7 +859,7 @@ async def upload_avatar(
     marker = f"img:{version}"
 
     save_avatar_file(current.user_id, data, ext)
-    if not set_avatar(current.username, marker):
+    if not await set_avatar(current.username, marker):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     logger.info(f"User '{current.username}' uploaded a new avatar ({ext}, {len(data)} bytes)")
     return {"ok": True, "avatar": marker}
@@ -875,7 +875,7 @@ async def remove_avatar(
 
     if current.user_id and _USER_ID_RE.match(current.user_id):
         delete_avatar_file(current.user_id)
-    set_avatar(current.username, "")
+    await set_avatar(current.username, "")
     return {"ok": True, "avatar": ""}
 
 
@@ -913,7 +913,7 @@ async def get_avatar_image(
 @router.get("/users", response_model=list[UserInfo])
 async def get_users(_: TokenPayload = Depends(require_admin)) -> list[UserInfo]:
     """List all registered users. Requires admin role."""
-    return [UserInfo(**u) for u in list_users()]
+    return [UserInfo(**u) for u in await list_users()]
 
 
 @router.post("/users", status_code=status.HTTP_201_CREATED)
@@ -952,17 +952,17 @@ async def admin_create_user(
             "is_admin": False,
         }
 
-    existing = {u["username"] for u in list_users()}
+    existing = {u["username"] for u in await list_users()}
     if body.username in existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Username already taken",
         )
 
-    add_user(body.username, body.password)
+    await add_user(body.username, body.password)
     user_id = ""
     role = "user"
-    for item in list_users():
+    for item in await list_users():
         if item.get("username") == body.username:
             user_id = str(item.get("id") or "")
             role = str(item.get("role") or "user")
@@ -993,7 +993,7 @@ async def remove_user(
         )
 
     # Capture the id before the record disappears so the avatar file can go too.
-    info = get_user_info(username)
+    info = await get_user_info(username)
 
     removed = await delete_user(username)
     if not removed:
@@ -1022,7 +1022,7 @@ async def update_user_role(
             detail="You cannot change your own role",
         )
 
-    updated = set_role(username, body.role)
+    updated = await set_role(username, body.role)
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -1052,7 +1052,7 @@ async def set_user_disabled(
             detail="You cannot disable your own account",
         )
 
-    if not set_disabled(username, body.disabled):
+    if not await set_disabled(username, body.disabled):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     logger.info(

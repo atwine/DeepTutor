@@ -50,7 +50,7 @@ function formatDate(iso: string, lang: Language): string {
 function roleLabel(role: UserRole, t: (key: string) => string): string {
   if (role === "admin") return t("Admin");
   if (role === "instructor") return t("Instructor");
-  return t("User");
+  return t("Student");
 }
 
 function roleBadgeClass(role: UserRole): string {
@@ -496,7 +496,7 @@ export default function AdminUsersPage() {
                                        text-[var(--foreground)] outline-none focus:border-[var(--ring)]
                                        disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                             >
-                              <option value="user">{t("User")}</option>
+                              <option value="user">{t("Student")}</option>
                               <option value="instructor">
                                 {t("Instructor")}
                               </option>

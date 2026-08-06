@@ -78,7 +78,7 @@ async def build_gradebook(course_unit_id: str) -> dict[str, Any]:
 
     # Issue #31: batched user identity lookup — load the JSON store once
     # instead of N_students times (each get_user_by_id re-reads the file).
-    user_records = get_users_by_ids(user_ids)
+    user_records = await get_users_by_ids(user_ids)
 
     rows: list[dict[str, Any]] = []
     for enrollment in enrollments:
