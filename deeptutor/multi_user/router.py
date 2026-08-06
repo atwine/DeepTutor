@@ -1438,6 +1438,145 @@ async def admin_students_overview(
 
 
 # ---------------------------------------------------------------------------
+# Insights — org-wide statistics for admins (gender/course-type breakdown,
+# per-course completion rates, term-over-term history). Deliberately
+# surfaces numbers only — no automated "this course is underperforming"
+# judgment calls; that reading is left to the admin looking at the chart.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/admin/insights")
+async def admin_insights(
+    term: str = Query("", description="Filter to a single CourseUnit.term; empty = all terms"),
+    _: TokenPayload = Depends(require_admin),
+) -> dict[str, Any]:
+    """Aggregate statistics for the admin Insights page.
+
+    Everything here is computed from data that's already tracked per
+    account (gender, course/degree) and per enrollment (created_at,
+    completed_at) — no new fields, no backfill needed.
+
+    Known gap, deliberately not papered over: this cannot report a
+    "dropout" number. Unenrolling a student deletes their Enrollment row
+    outright (see unenroll_student), so once someone leaves a course there
+    is no trace left to count. Tracking dropouts would mean switching
+    unenroll to a soft status instead of a delete — a separate, larger
+    change than this endpoint.
+    """
+    all_users = await list_user_info()
+    students = [u for u in all_users if u.get("role") == "user"]
+    student_ids = {s["id"] for s in students}
+
+    async with session_scope() as session:
+        terms_raw = (
+            await session.execute(
+                select(CourseUnit.term).where(CourseUnit.term != "").distinct()
+            )
+        ).all()
+        terms = sorted({t for (t,) in terms_raw})
+
+        course_query = select(CourseUnit.id, CourseUnit.name, CourseUnit.term)
+        if term:
+            course_query = course_query.where(CourseUnit.term == term)
+        courses = (await session.execute(course_query)).all()
+        course_ids = [c.id for c in courses]
+
+        enrollment_rows: list[Any] = []
+        if course_ids and student_ids:
+            enrollment_rows = (
+                await session.execute(
+                    select(
+                        Enrollment.user_id,
+                        Enrollment.course_unit_id,
+                        Enrollment.completed_at,
+                    )
+                    .where(Enrollment.status == "approved")
+                    .where(Enrollment.course_unit_id.in_(course_ids))
+                    .where(Enrollment.user_id.in_(student_ids))
+                )
+            ).all()
+
+    # Students who have at least one approved enrollment in the filtered
+    # term — the population the gender/course-type breakdown below scopes
+    # to when a term filter is active (when it isn't, every student counts).
+    enrolled_student_ids = {row.user_id for row in enrollment_rows}
+    breakdown_population = (
+        [s for s in students if s["id"] in enrolled_student_ids] if term else students
+    )
+
+    def _percent_breakdown(values: list[str], labels: dict[str, str]) -> dict[str, Any]:
+        counts: dict[str, int] = {label: 0 for label in labels.values()}
+        counts["Unspecified"] = 0
+        for raw in values:
+            key = labels.get(str(raw or "").strip().lower(), "Unspecified")
+            counts[key] += 1
+        total = sum(counts.values())
+        return {
+            "counts": counts,
+            "percentages": {
+                k: round(v / total * 100, 1) if total else 0.0 for k, v in counts.items()
+            },
+            "total": total,
+        }
+
+    gender_breakdown = _percent_breakdown(
+        [s.get("gender", "") for s in breakdown_population],
+        {"male": "Male", "female": "Female"},
+    )
+    course_type_breakdown = _percent_breakdown(
+        [s.get("course", "") for s in breakdown_population],
+        {"masters": "Masters", "phd": "PhD"},
+    )
+
+    # Per-course enrolled/completed counts, from the same batched query.
+    per_course_counts: dict[str, dict[str, int]] = {
+        c.id: {"enrolled": 0, "completed": 0} for c in courses
+    }
+    for row in enrollment_rows:
+        bucket = per_course_counts[row.course_unit_id]
+        bucket["enrolled"] += 1
+        if row.completed_at:
+            bucket["completed"] += 1
+
+    per_course = []
+    for c in courses:
+        counts = per_course_counts[c.id]
+        rate = round(counts["completed"] / counts["enrolled"] * 100, 1) if counts["enrolled"] else 0.0
+        per_course.append(
+            {
+                "id": c.id,
+                "name": c.name,
+                "term": c.term,
+                "enrolled": counts["enrolled"],
+                "completed": counts["completed"],
+                "completion_rate": rate,
+            }
+        )
+    per_course.sort(key=lambda r: r["completion_rate"], reverse=True)
+
+    total_enrolled = sum(c["enrolled"] for c in per_course)
+    total_completed = sum(c["completed"] for c in per_course)
+    overall_completion_rate = (
+        round(total_completed / total_enrolled * 100, 1) if total_enrolled else 0.0
+    )
+
+    return {
+        "terms": terms,
+        "selected_term": term,
+        "stats": {
+            "total_students": len(breakdown_population),
+            "total_courses": len(courses),
+            "total_enrolled": total_enrolled,
+            "total_completed": total_completed,
+            "overall_completion_rate": overall_completion_rate,
+        },
+        "gender_breakdown": gender_breakdown,
+        "course_type_breakdown": course_type_breakdown,
+        "per_course": per_course,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Issue #34: Instructor student dashboard — scoped to instructor's own courses
 # ---------------------------------------------------------------------------
 

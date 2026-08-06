@@ -330,7 +330,7 @@ export default function ProfilePage() {
                         ? t("Administrator")
                         : isInstructor
                           ? t("Instructor")
-                          : t("User")}
+                          : t("Student")}
                     </span>
                   </div>
                   {joined && (

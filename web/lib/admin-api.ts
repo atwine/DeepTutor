@@ -195,6 +195,52 @@ export async function getInstructorStudentsOverview(): Promise<StudentsOverviewR
   return res.json();
 }
 
+/** A single labeled breakdown (e.g. gender, or masters/PhD) with counts and percentages. */
+export interface InsightsBreakdown {
+  counts: Record<string, number>;
+  percentages: Record<string, number>;
+  total: number;
+}
+
+/** One course's enrollment/completion numbers for the Insights page. */
+export interface InsightsCourseRow {
+  id: string;
+  name: string;
+  term: string;
+  enrolled: number;
+  completed: number;
+  completion_rate: number;
+}
+
+/** Response payload for the admin Insights endpoint. */
+export interface InsightsResponse {
+  terms: string[];
+  selected_term: string;
+  stats: {
+    total_students: number;
+    total_courses: number;
+    total_enrolled: number;
+    total_completed: number;
+    overall_completion_rate: number;
+  };
+  gender_breakdown: InsightsBreakdown;
+  course_type_breakdown: InsightsBreakdown;
+  per_course: InsightsCourseRow[];
+}
+
+/**
+ * Fetch org-wide statistics for the admin Insights page — gender/course-type
+ * breakdown and per-course completion rates. Pass a `term` (matches
+ * CourseUnit.term, e.g. "2026 Semester 1") to scope to one term; omit for
+ * every term combined.
+ */
+export async function getInsights(term?: string): Promise<InsightsResponse> {
+  const query = term ? `?term=${encodeURIComponent(term)}` : "";
+  const res = await apiFetch(apiUrl(`/api/v1/multi-user/admin/insights${query}`));
+  if (!res.ok) throw new Error("Failed to fetch insights");
+  return res.json();
+}
+
 /** Issue #35: Admin reset submission attempts — deletes all of a student's
  * submissions for one assignment so they can try again from scratch. */
 export async function resetSubmissionAttempts(
