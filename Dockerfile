@@ -397,6 +397,29 @@ echo "   - data/user/settings/main.yaml"
 echo "   - data/user/settings/agents.yaml"
 echo "============================================"
 
+# Apply Postgres schema migrations, then backfill any accounts still only in
+# the legacy users.json (see scripts/migrate_users_to_postgres.py — issue
+# #53). Both steps are idempotent (alembic upgrade head no-ops when already
+# current; the backfill skips usernames already in Postgres), so running them
+# on every container start is safe and means a deploy can never again ship
+# code that expects a table/column that was never created. Retried a few
+# times in case the DB isn't accepting connections yet on a fresh deploy.
+echo "🗄️  Applying database migrations..."
+migration_ok=0
+for attempt in 1 2 3 4 5; do
+    if python scripts/init_db.py && python scripts/migrate_users_to_postgres.py; then
+        migration_ok=1
+        break
+    fi
+    echo "   Migration attempt ${attempt}/5 failed — retrying in 3s..."
+    sleep 3
+done
+if [ "$migration_ok" -ne 1 ]; then
+    echo "❌ Database migrations failed after 5 attempts. Refusing to start with a schema the app doesn't match."
+    exit 1
+fi
+echo "============================================"
+
 # Hand off to supervisord as PID 1. The daemon-level config deliberately omits
 # `user=` so supervisord inherits PID 1's UID and stays portable across rootful
 # and rootless-keep-id runtimes; children drop to the deeptutor user via
