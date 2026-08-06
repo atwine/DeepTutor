@@ -181,6 +181,12 @@ class Enrollment(Base):
     # enrollments default to "not completed" — completion is additive and
     # never revokes read access to course materials.
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When a previously-approved student leaves a course (admin/instructor
+    # unenroll, or a confirmed leave request), the row is no longer deleted —
+    # status moves to 'withdrawn' and this is set, so completion/dropout
+    # history survives instead of vanishing (see course_units.py's
+    # unenroll_student / approve_leave). NULL for every other status.
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     course_unit: Mapped[CourseUnit] = relationship(back_populates="enrollments")
 

@@ -1445,23 +1445,17 @@ async def admin_students_overview(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/admin/insights")
-async def admin_insights(
-    term: str = Query("", description="Filter to a single CourseUnit.term; empty = all terms"),
-    _: TokenPayload = Depends(require_admin),
-) -> dict[str, Any]:
-    """Aggregate statistics for the admin Insights page.
+async def _compute_insights(term: str) -> dict[str, Any]:
+    """Aggregate statistics for the admin Insights page/export.
 
     Everything here is computed from data that's already tracked per
     account (gender, course/degree) and per enrollment (created_at,
-    completed_at) — no new fields, no backfill needed.
+    completed_at, withdrawn_at) — no new fields, no backfill needed.
 
-    Known gap, deliberately not papered over: this cannot report a
-    "dropout" number. Unenrolling a student deletes their Enrollment row
-    outright (see unenroll_student), so once someone leaves a course there
-    is no trace left to count. Tracking dropouts would mean switching
-    unenroll to a soft status instead of a delete — a separate, larger
-    change than this endpoint.
+    Dropout counts (added alongside the enrollment soft-delete change):
+    unenrolling a student, or an instructor confirming a leave request, now
+    marks the Enrollment row ``withdrawn`` instead of deleting it, so a
+    withdrawal is countable here rather than vanishing without a trace.
     """
     all_users = await list_user_info()
     students = [u for u in all_users if u.get("role") == "user"]
@@ -1482,6 +1476,7 @@ async def admin_insights(
         course_ids = [c.id for c in courses]
 
         enrollment_rows: list[Any] = []
+        withdrawn_rows: list[Any] = []
         if course_ids and student_ids:
             enrollment_rows = (
                 await session.execute(
@@ -1491,6 +1486,14 @@ async def admin_insights(
                         Enrollment.completed_at,
                     )
                     .where(Enrollment.status == "approved")
+                    .where(Enrollment.course_unit_id.in_(course_ids))
+                    .where(Enrollment.user_id.in_(student_ids))
+                )
+            ).all()
+            withdrawn_rows = (
+                await session.execute(
+                    select(Enrollment.user_id, Enrollment.course_unit_id)
+                    .where(Enrollment.status == "withdrawn")
                     .where(Enrollment.course_unit_id.in_(course_ids))
                     .where(Enrollment.user_id.in_(student_ids))
                 )
@@ -1528,15 +1531,18 @@ async def admin_insights(
         {"masters": "Masters", "phd": "PhD"},
     )
 
-    # Per-course enrolled/completed counts, from the same batched query.
+    # Per-course enrolled/completed/withdrawn counts, from the same batched
+    # queries.
     per_course_counts: dict[str, dict[str, int]] = {
-        c.id: {"enrolled": 0, "completed": 0} for c in courses
+        c.id: {"enrolled": 0, "completed": 0, "withdrawn": 0} for c in courses
     }
     for row in enrollment_rows:
         bucket = per_course_counts[row.course_unit_id]
         bucket["enrolled"] += 1
         if row.completed_at:
             bucket["completed"] += 1
+    for row in withdrawn_rows:
+        per_course_counts[row.course_unit_id]["withdrawn"] += 1
 
     per_course = []
     for c in courses:
@@ -1549,6 +1555,7 @@ async def admin_insights(
                 "term": c.term,
                 "enrolled": counts["enrolled"],
                 "completed": counts["completed"],
+                "withdrawn": counts["withdrawn"],
                 "completion_rate": rate,
             }
         )
@@ -1556,6 +1563,7 @@ async def admin_insights(
 
     total_enrolled = sum(c["enrolled"] for c in per_course)
     total_completed = sum(c["completed"] for c in per_course)
+    total_withdrawn = sum(c["withdrawn"] for c in per_course)
     overall_completion_rate = (
         round(total_completed / total_enrolled * 100, 1) if total_enrolled else 0.0
     )
@@ -1568,12 +1576,69 @@ async def admin_insights(
             "total_courses": len(courses),
             "total_enrolled": total_enrolled,
             "total_completed": total_completed,
+            "total_withdrawn": total_withdrawn,
             "overall_completion_rate": overall_completion_rate,
         },
         "gender_breakdown": gender_breakdown,
         "course_type_breakdown": course_type_breakdown,
         "per_course": per_course,
     }
+
+
+@router.get("/admin/insights")
+async def admin_insights(
+    term: str = Query("", description="Filter to a single CourseUnit.term; empty = all terms"),
+    _: TokenPayload = Depends(require_admin),
+) -> dict[str, Any]:
+    return await _compute_insights(term)
+
+
+def _insights_to_csv(data: dict[str, Any]) -> str:
+    import csv
+    import io
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    scope = data["selected_term"] or "All terms"
+    writer.writerow(["Insights export", f"Term: {scope}"])
+    writer.writerow([])
+    writer.writerow(["Total students", data["stats"]["total_students"]])
+    writer.writerow(["Total courses", data["stats"]["total_courses"]])
+    writer.writerow(["Total enrolled", data["stats"]["total_enrolled"]])
+    writer.writerow(["Total completed", data["stats"]["total_completed"]])
+    writer.writerow(["Total withdrawn", data["stats"]["total_withdrawn"]])
+    writer.writerow(["Overall completion rate (%)", data["stats"]["overall_completion_rate"]])
+    writer.writerow([])
+
+    for label, breakdown in (
+        ("Gender", data["gender_breakdown"]),
+        ("Course type", data["course_type_breakdown"]),
+    ):
+        writer.writerow([label, "Count", "Percent"])
+        for key, count in breakdown["counts"].items():
+            writer.writerow([key, count, breakdown["percentages"].get(key, 0.0)])
+        writer.writerow([])
+
+    writer.writerow(["Course", "Term", "Enrolled", "Completed", "Withdrawn", "Completion rate (%)"])
+    for c in data["per_course"]:
+        writer.writerow([c["name"], c["term"], c["enrolled"], c["completed"], c["withdrawn"], c["completion_rate"]])
+
+    return buf.getvalue()
+
+
+@router.get("/admin/insights/export")
+async def export_insights_csv_endpoint(
+    term: str = Query("", description="Filter to a single CourseUnit.term; empty = all terms"),
+    _: TokenPayload = Depends(require_admin),
+) -> PlainTextResponse:
+    data = await _compute_insights(term)
+    csv_text = _insights_to_csv(data)
+    safe_term = "".join(c if c.isalnum() or c in "-_ " else "_" for c in term).strip() or "all-terms"
+    return PlainTextResponse(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="insights_{safe_term}.csv"'},
+    )
 
 
 # ---------------------------------------------------------------------------
