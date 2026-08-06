@@ -412,7 +412,7 @@ async def list_submissions_endpoint(
     # Issue #37: batch user lookup — one file read instead of N (one per
     # submission). get_users_by_ids loads users.json once and returns a
     # dict keyed by user_id for O(1) lookups.
-    user_records = get_users_by_ids([r["user_id"] for r in records])
+    user_records = await get_users_by_ids([r["user_id"] for r in records])
     submissions = []
     for record in records:
         user_record = user_records.get(record["user_id"])
@@ -509,7 +509,7 @@ async def create_access_grant_endpoint(
     extended deadline) for a specific student on this assignment."""
     assignment = await _get_assignment_or_404(assignment_id)
     await _require_manage_access(current, assignment)
-    if get_user_by_id(payload.user_id) is None:
+    if await get_user_by_id(payload.user_id) is None:
         raise HTTPException(status_code=404, detail="Student not found")
     grant = await upsert_access_grant(
         assignment_id,

@@ -46,6 +46,43 @@ def _utcnow() -> datetime:
 
 
 # ---------------------------------------------------------------------------
+# Identity — accounts (Issue #53)
+# ---------------------------------------------------------------------------
+
+
+class User(Base):
+    """Canonical user account. Replaces the JSON file identity store
+    (``deeptutor/multi_user/identity.py``'s old ``users.json``) — see Issue
+    #53. Field names mirror the JSON record shape 1:1 so the one-time
+    migration script is a straight copy, no field renaming."""
+
+    __tablename__ = "users"
+
+    # Keep the existing "u_<hex>" id format (and legacy sentinels like
+    # "env-admin") so callers that already store/compare these ids as opaque
+    # strings (JWTs, enrollments, submissions, instructor_ids lists) don't
+    # need to change.
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    username: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    # 'admin' | 'instructor' | 'user'
+    role: Mapped[str] = mapped_column(String, nullable=False, default="user", index=True)
+    full_name: Mapped[str] = mapped_column(String, nullable=False, default="")
+    registration_number: Mapped[str] = mapped_column(String, nullable=False, default="", index=True)
+    first_name: Mapped[str] = mapped_column(String, nullable=False, default="")
+    surname: Mapped[str] = mapped_column(String, nullable=False, default="")
+    gender: Mapped[str] = mapped_column(String, nullable=False, default="")
+    course: Mapped[str] = mapped_column(String, nullable=False, default="")
+    disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Avatar *marker* only ('' | 'icon:<name>:<color>' | 'img:<version>') —
+    # the actual image bytes stay on disk, keyed by id (see identity.py's
+    # get_avatar_file/save_avatar_file, which are out of scope for this
+    # migration).
+    avatar: Mapped[str] = mapped_column(String, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+# ---------------------------------------------------------------------------
 # Track 2 — course_units.py
 # ---------------------------------------------------------------------------
 

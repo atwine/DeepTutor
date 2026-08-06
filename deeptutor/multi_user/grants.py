@@ -97,8 +97,8 @@ def load_grant(user_id: str) -> dict[str, Any]:
         return empty_grant(user_id)
 
 
-def save_grant(user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    user_record = get_user_by_id(user_id)
+async def save_grant(user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    user_record = await get_user_by_id(user_id)
     if user_record is None:
         raise ValueError(f"Unknown user id: {user_id}")
     _username, record = user_record
