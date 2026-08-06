@@ -209,6 +209,7 @@ export interface InsightsCourseRow {
   term: string;
   enrolled: number;
   completed: number;
+  withdrawn: number;
   completion_rate: number;
 }
 
@@ -221,6 +222,7 @@ export interface InsightsResponse {
     total_courses: number;
     total_enrolled: number;
     total_completed: number;
+    total_withdrawn: number;
     overall_completion_rate: number;
   };
   gender_breakdown: InsightsBreakdown;
@@ -239,6 +241,14 @@ export async function getInsights(term?: string): Promise<InsightsResponse> {
   const res = await apiFetch(apiUrl(`/api/v1/multi-user/admin/insights${query}`));
   if (!res.ok) throw new Error("Failed to fetch insights");
   return res.json();
+}
+
+/** Server-rendered CSV, cookie-authenticated — a plain navigation triggers
+ * the download since auth here is a same-origin cookie, not a bearer token
+ * the browser wouldn't otherwise send. Mirrors gradebookExportUrl's pattern. */
+export function insightsExportUrl(term?: string): string {
+  const query = term ? `?term=${encodeURIComponent(term)}` : "";
+  return apiUrl(`/api/v1/multi-user/admin/insights/export${query}`);
 }
 
 /** Issue #35: Admin reset submission attempts — deletes all of a student's

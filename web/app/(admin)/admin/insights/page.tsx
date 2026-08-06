@@ -5,12 +5,19 @@ import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import Link from "next/link";
 import { fetchAuthStatus } from "@/lib/auth";
-import { getInsights, type InsightsResponse, type InsightsBreakdown } from "@/lib/admin-api";
+import {
+  getInsights,
+  insightsExportUrl,
+  type InsightsResponse,
+  type InsightsBreakdown,
+} from "@/lib/admin-api";
 import {
   ArrowLeft,
   Users,
   GraduationCap,
   TrendingUp,
+  UserMinus,
+  Download,
   RefreshCw,
 } from "lucide-react";
 
@@ -162,6 +169,8 @@ function CourseCompletionList({
                 completed: c.completed,
                 enrolled: c.enrolled,
               })}
+              {c.withdrawn > 0 &&
+                ` · ${t("{{count}} withdrawn", { count: c.withdrawn })}`}
               {" · "}
               <span className="font-medium text-[var(--foreground)]">{c.completion_rate}%</span>
             </span>
@@ -249,17 +258,28 @@ export default function AdminInsightsPage() {
                 {t("Org-wide numbers — who's enrolled, and how courses are completing.")}
               </p>
             </div>
-            <button
-              onClick={() => load(term)}
-              disabled={loading}
-              className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
-                         border border-[var(--border)] text-[var(--muted-foreground)]
-                         hover:text-[var(--foreground)] hover:bg-[var(--card)]
-                         disabled:opacity-50 transition-colors"
-            >
-              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-              {t("Refresh")}
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <a
+                href={insightsExportUrl(term)}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
+                           border border-[var(--border)] text-[var(--foreground)]
+                           hover:bg-[var(--card)] transition-colors"
+              >
+                <Download size={14} />
+                {t("Export CSV")}
+              </a>
+              <button
+                onClick={() => load(term)}
+                disabled={loading}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm
+                           border border-[var(--border)] text-[var(--muted-foreground)]
+                           hover:text-[var(--foreground)] hover:bg-[var(--card)]
+                           disabled:opacity-50 transition-colors"
+              >
+                <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+                {t("Refresh")}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -291,8 +311,8 @@ export default function AdminInsightsPage() {
         )}
 
         {loading && !data ? (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" aria-hidden>
-            {[0, 1, 2].map((i) => (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-hidden>
+            {[0, 1, 2, 3].map((i) => (
               <div
                 key={i}
                 className="h-24 animate-pulse rounded-xl border border-[var(--border)] bg-[var(--card)]"
@@ -301,7 +321,7 @@ export default function AdminInsightsPage() {
           </div>
         ) : data ? (
           <>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <StatCard
                 icon={<Users size={14} />}
                 label={t("Students")}
@@ -318,6 +338,12 @@ export default function AdminInsightsPage() {
                 label={t("Overall completion")}
                 value={`${data.stats.overall_completion_rate}%`}
                 sublabel={t("{{count}} completed", { count: data.stats.total_completed })}
+              />
+              <StatCard
+                icon={<UserMinus size={14} />}
+                label={t("Withdrawn")}
+                value={data.stats.total_withdrawn}
+                sublabel={t("across all courses")}
               />
             </div>
 
@@ -347,12 +373,6 @@ export default function AdminInsightsPage() {
               </div>
               <CourseCompletionList courses={data.per_course} t={t} />
             </div>
-
-            <p className="mt-6 text-center text-xs text-[var(--muted-foreground)]">
-              {t(
-                "Dropout tracking isn't available yet — unenrolling a student currently removes their enrollment record entirely, so there's no trace left to count.",
-              )}
-            </p>
           </>
         ) : null}
 

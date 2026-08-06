@@ -179,6 +179,9 @@ def _enrollment_to_dict(enrollment: Enrollment) -> dict[str, Any]:
         # Issue #4: when the student completed the unit (all published
         # assignments submitted+graded). "" means not yet completed.
         "completed_at": enrollment.completed_at.isoformat() if enrollment.completed_at else "",
+        # When the student left (unenroll, or a confirmed leave request).
+        # "" for every status other than "withdrawn".
+        "withdrawn_at": enrollment.withdrawn_at.isoformat() if enrollment.withdrawn_at else "",
     }
 
 
@@ -509,6 +512,7 @@ async def enroll_student(course_unit_id: str, user_id: str) -> dict[str, Any] | 
             if existing.status != "approved":
                 existing.status = "approved"
                 existing.approved_at = now
+                existing.withdrawn_at = None  # re-enrolling a withdrawn student clears the mark
             kb_name = unit.kb_name
         else:
             enrollment = Enrollment(
@@ -535,9 +539,12 @@ class CourseUnitArchivedError(Exception):
 
 async def request_enrollment(course_unit_id: str, user_id: str) -> dict[str, Any] | None:
     """Student-initiated: creates a ``pending`` enrollment for the instructor
-    to approve or reject. Idempotent — an existing enrollment of either
-    status (already pending, or already approved) is returned unchanged, so
-    re-requesting can't downgrade an approved student back to pending.
+    to approve or reject. Idempotent — an existing pending/approved/
+    leave_requested enrollment is returned unchanged, so re-requesting can't
+    downgrade an approved student back to pending. A ``withdrawn`` enrollment
+    (a student who previously left) is the one exception: it's revived back
+    to ``pending`` so they can rejoin, rather than staying stuck on their old
+    withdrawal record forever.
     Returns None if the course unit doesn't exist. Raises
     ``CourseUnitArchivedError`` (Round 3) if the unit is archived and the
     student has no existing enrollment to fall back on — an archived course
@@ -554,6 +561,19 @@ async def request_enrollment(course_unit_id: str, user_id: str) -> dict[str, Any
             )
         )
         existing = result.scalar_one_or_none()
+        if existing is not None and existing.status == "withdrawn":
+            # A withdrawn student is, for the archived-course rule, the same
+            # as someone who was never enrolled — rejoining an archived
+            # course still isn't allowed just because they happen to have a
+            # withdrawal record on file.
+            if unit.is_archived:
+                raise CourseUnitArchivedError(course_unit_id)
+            existing.status = "pending"
+            existing.created_at = now
+            existing.approved_at = None
+            existing.completed_at = None
+            existing.withdrawn_at = None
+            return _enrollment_to_dict(existing)
         if existing is not None:
             return _enrollment_to_dict(existing)
         if unit.is_archived:
@@ -626,11 +646,14 @@ async def request_leave(course_unit_id: str, user_id: str) -> dict[str, Any] | N
 
 
 async def approve_leave(course_unit_id: str, user_id: str) -> bool:
-    """B2: Instructor confirms a leave request — removes the Enrollment row
-    (the student stops appearing on the active roster and can't see/take new
-    assignments). Does NOT delete the student's existing Submission rows —
+    """B2: Instructor confirms a leave request — marks the Enrollment
+    ``withdrawn`` (the student stops appearing on the active roster and
+    can't see/take new assignments), rather than deleting the row, so this
+    withdrawal shows up in completion/dropout history instead of silently
+    disappearing. Does NOT delete the student's existing Submission rows —
     those stay for grading history/audit integrity (see B2 decision in
     DEVIN_LOG.md). Returns False if there is no leave_requested enrollment."""
+    now = datetime.now(timezone.utc)
     async with session_scope() as session:
         result = await session.execute(
             select(Enrollment).where(
@@ -642,7 +665,8 @@ async def approve_leave(course_unit_id: str, user_id: str) -> bool:
         enrollment = result.scalar_one_or_none()
         if enrollment is None:
             return False
-        await session.delete(enrollment)
+        enrollment.status = "withdrawn"
+        enrollment.withdrawn_at = now
         unit = await session.get(CourseUnit, course_unit_id)
         kb_name = unit.kb_name if unit is not None else None
     await _sync_course_kb_grant(str(user_id), kb_name, grant_access=False)
@@ -685,19 +709,37 @@ async def list_leave_requests_for_course(course_unit_id: str) -> list[dict[str, 
 
 
 async def unenroll_student(course_unit_id: str, user_id: str) -> bool:
+    """Remove a student from a course unit.
+
+    An enrollment that was ever ``approved`` or ``leave_requested`` is a real
+    withdrawal — the row is kept with status set to ``withdrawn`` and
+    ``withdrawn_at`` stamped, rather than deleted, so completion/dropout
+    history survives (Enrollment/Submission rows used to vanish together on
+    unenroll, silently erasing that student's record from every course-level
+    stat). A merely ``pending`` request that's being pulled (e.g. rejecting a
+    join request, or an instructor un-enrolling someone who never actually
+    started) has no history worth keeping, so it's still hard-deleted.
+    """
+    now = datetime.now(timezone.utc)
     async with session_scope() as session:
         result = await session.execute(
-            delete(Enrollment).where(
+            select(Enrollment).where(
                 Enrollment.course_unit_id == course_unit_id,
                 Enrollment.user_id == str(user_id),
             )
         )
-        removed = result.rowcount > 0
-        unit = await session.get(CourseUnit, course_unit_id) if removed else None
+        enrollment = result.scalar_one_or_none()
+        if enrollment is None:
+            return False
+        if enrollment.status in ("approved", "leave_requested"):
+            enrollment.status = "withdrawn"
+            enrollment.withdrawn_at = now
+        else:
+            await session.delete(enrollment)
+        unit = await session.get(CourseUnit, course_unit_id)
         kb_name = unit.kb_name if unit is not None else None
-    if removed:
-        await _sync_course_kb_grant(str(user_id), kb_name, grant_access=False)
-    return removed
+    await _sync_course_kb_grant(str(user_id), kb_name, grant_access=False)
+    return True
 
 
 async def list_enrollments_for_course(
